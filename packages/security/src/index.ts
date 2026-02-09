@@ -16,3 +16,7 @@ export { AuthenticationError } from "./auth/index.js";
 export { OidcAuthenticator } from "./auth/index.js";
 
 export { CIS2_ROLE_MAPPINGS, resolveRoles, resolveGroups } from "./auth/index.js";
+
+// Audit trail (Section 7.2)
+export type { AuditStore, AuditQueryFilter, AuditWriteInput } from "./audit/index.js";
+export { AuditWriter, AuditQuery, MemoryAuditStore } from "./audit/index.js";
