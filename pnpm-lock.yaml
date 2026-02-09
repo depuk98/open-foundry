@@ -103,6 +103,16 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@25.2.2)
 
+  packages/storage-memory:
+    dependencies:
+      '@openfoundry/spi':
+        specifier: workspace:*
+        version: link:../spi
+    devDependencies:
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@25.2.2)
+
   packages/sync:
     dependencies:
       '@openfoundry/observability':

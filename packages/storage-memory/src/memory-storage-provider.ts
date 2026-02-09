@@ -1,0 +1,767 @@
+/**
+ * In-memory StorageProvider implementation for testing.
+ *
+ * Data stored in Maps. Version history in arrays. Tenant isolation via
+ * _tenantId filtering. Soft-delete via _deletedAt field.
+ */
+
+import type {
+  StorageProvider,
+  Transaction,
+  RequestContext,
+  OntologySchema,
+  OntologyObject,
+  OntologyLink,
+  FilterExpression,
+  FieldPredicate,
+  LogicalPredicate,
+  QueryOptions,
+  TraversalPath,
+  TraversalOptions,
+  TraversalResult,
+  BulkMutationRequest,
+  BulkMutationResult,
+  ObjectPage,
+  LinkPage,
+  MigrationResult,
+  HealthStatus,
+  StorageCapabilities,
+  IndexType,
+  DateTime,
+  LinkTypeDefinition,
+} from '@openfoundry/spi';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+let _counter = 0;
+function genId(): string {
+  return `mem_${Date.now().toString(36)}_${(++_counter).toString(36)}`;
+}
+
+function now(): DateTime {
+  return new Date().toISOString() as DateTime;
+}
+
+function isFieldPredicate(f: FilterExpression): f is FieldPredicate {
+  return 'field' in f && 'operator' in f;
+}
+
+function isLogicalPredicate(f: FilterExpression): f is LogicalPredicate {
+  return 'and' in f || 'or' in f || 'not' in f;
+}
+
+/** Deep clone a plain object. */
+function clone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj)) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Filter evaluation
+// ---------------------------------------------------------------------------
+
+function evaluateFilter(obj: Record<string, unknown>, filter: FilterExpression): boolean {
+  if (isFieldPredicate(filter)) {
+    return evaluateFieldPredicate(obj, filter);
+  }
+  if (isLogicalPredicate(filter)) {
+    return evaluateLogicalPredicate(obj, filter);
+  }
+  return true;
+}
+
+function evaluateFieldPredicate(obj: Record<string, unknown>, pred: FieldPredicate): boolean {
+  const val = obj[pred.field];
+  switch (pred.operator) {
+    case 'eq':
+      return val === pred.value;
+    case 'neq':
+      return val !== pred.value;
+    case 'gt':
+      return typeof val === 'number' && typeof pred.value === 'number' && val > pred.value;
+    case 'gte':
+      return typeof val === 'number' && typeof pred.value === 'number' && val >= pred.value;
+    case 'lt':
+      return typeof val === 'number' && typeof pred.value === 'number' && val < pred.value;
+    case 'lte':
+      return typeof val === 'number' && typeof pred.value === 'number' && val <= pred.value;
+    case 'in':
+      return Array.isArray(pred.value) && (pred.value as unknown[]).includes(val);
+    case 'contains':
+      return typeof val === 'string' && typeof pred.value === 'string' && val.includes(pred.value);
+    case 'startsWith':
+      return typeof val === 'string' && typeof pred.value === 'string' && val.startsWith(pred.value);
+    case 'exists':
+      return pred.value ? val !== undefined && val !== null : val === undefined || val === null;
+    default:
+      return false;
+  }
+}
+
+function evaluateLogicalPredicate(obj: Record<string, unknown>, pred: LogicalPredicate): boolean {
+  if (pred.and) {
+    return pred.and.every((f) => evaluateFilter(obj, f));
+  }
+  if (pred.or) {
+    return pred.or.some((f) => evaluateFilter(obj, f));
+  }
+  if (pred.not) {
+    return !evaluateFilter(obj, pred.not);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// MemoryTransaction
+// ---------------------------------------------------------------------------
+
+class MemoryTransaction implements Transaction {
+  private _committed = false;
+  private _rolledBack = false;
+  private _journal: Array<
+    | { op: 'createObject'; key: string; value: OntologyObject }
+    | { op: 'updateObject'; key: string; prev: OntologyObject; value: OntologyObject }
+    | { op: 'deleteObjectSoft'; key: string; prev: OntologyObject; value: OntologyObject }
+    | { op: 'deleteObjectHard'; key: string; prev: OntologyObject }
+    | { op: 'createLink'; key: string; value: OntologyLink }
+    | { op: 'updateLink'; key: string; prev: OntologyLink; value: OntologyLink }
+    | { op: 'deleteLink'; key: string; prev: OntologyLink }
+    | { op: 'version'; objectKey: string; snapshot: OntologyObject }
+  > = [];
+
+  constructor(private _provider: MemoryStorageProvider, private _ctx: RequestContext) {}
+
+  private assertOpen(): void {
+    if (this._committed) throw new Error('Transaction already committed');
+    if (this._rolledBack) throw new Error('Transaction already rolled back');
+  }
+
+  async createObject(type: string, properties: Record<string, unknown>): Promise<OntologyObject> {
+    this.assertOpen();
+    const obj = this._provider._doCreateObject(this._ctx, type, properties);
+    this._journal.push({ op: 'createObject', key: `${type}:${obj._id}`, value: obj });
+    return clone(obj);
+  }
+
+  async updateObject(type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject> {
+    this.assertOpen();
+    const prev = this._provider._getObjectInternal(this._ctx, type, id);
+    if (!prev) throw new Error(`Object ${type}:${id} not found`);
+    const updated = this._provider._doUpdateObject(this._ctx, type, id, properties);
+    this._journal.push({ op: 'updateObject', key: `${type}:${id}`, prev: clone(prev), value: updated });
+    return clone(updated);
+  }
+
+  async deleteObject(type: string, id: string, mode: 'soft' | 'hard'): Promise<void> {
+    this.assertOpen();
+    const prev = this._provider._getObjectInternal(this._ctx, type, id);
+    if (!prev) throw new Error(`Object ${type}:${id} not found`);
+    if (mode === 'soft') {
+      const updated = this._provider._doSoftDeleteObject(this._ctx, type, id);
+      this._journal.push({ op: 'deleteObjectSoft', key: `${type}:${id}`, prev: clone(prev), value: updated });
+    } else {
+      this._provider._doHardDeleteObject(this._ctx, type, id);
+      this._journal.push({ op: 'deleteObjectHard', key: `${type}:${id}`, prev: clone(prev) });
+    }
+  }
+
+  async createLink(type: string, fromId: string, toId: string, properties?: Record<string, unknown>): Promise<OntologyLink> {
+    this.assertOpen();
+    const link = this._provider._doCreateLink(this._ctx, type, fromId, toId, properties);
+    this._journal.push({ op: 'createLink', key: `${type}:${link._id}`, value: link });
+    return clone(link);
+  }
+
+  async updateLink(type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink> {
+    this.assertOpen();
+    const prev = this._provider._getLinkInternal(this._ctx, type, linkId);
+    if (!prev) throw new Error(`Link ${type}:${linkId} not found`);
+    const updated = this._provider._doUpdateLink(this._ctx, type, linkId, properties);
+    this._journal.push({ op: 'updateLink', key: `${type}:${linkId}`, prev: clone(prev), value: updated });
+    return clone(updated);
+  }
+
+  async deleteLink(type: string, linkId: string): Promise<void> {
+    this.assertOpen();
+    const prev = this._provider._getLinkInternal(this._ctx, type, linkId);
+    if (!prev) throw new Error(`Link ${type}:${linkId} not found`);
+    this._provider._doDeleteLink(this._ctx, type, linkId);
+    this._journal.push({ op: 'deleteLink', key: `${type}:${linkId}`, prev: clone(prev) });
+  }
+
+  async commit(): Promise<void> {
+    this.assertOpen();
+    this._committed = true;
+    // Data already applied eagerly; commit is a no-op (journal kept for rollback).
+  }
+
+  async rollback(): Promise<void> {
+    this.assertOpen();
+    this._rolledBack = true;
+    // Undo in reverse order
+    for (let i = this._journal.length - 1; i >= 0; i--) {
+      const entry = this._journal[i]!;
+      switch (entry.op) {
+        case 'createObject':
+          this._provider._removeObject(entry.key);
+          break;
+        case 'updateObject':
+        case 'deleteObjectSoft':
+          this._provider._putObject(entry.key, entry.prev);
+          // Also revert version history
+          this._provider._popVersionHistory(entry.key);
+          break;
+        case 'deleteObjectHard':
+          this._provider._putObject(entry.key, entry.prev);
+          break;
+        case 'createLink':
+          this._provider._removeLink(entry.key);
+          break;
+        case 'updateLink':
+          this._provider._putLink(entry.key, entry.prev);
+          break;
+        case 'deleteLink':
+          this._provider._putLink(entry.key, entry.prev);
+          break;
+        case 'version':
+          // Handled by updateObject rollback above
+          break;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MemoryStorageProvider
+// ---------------------------------------------------------------------------
+
+export class MemoryStorageProvider implements StorageProvider {
+  /** type:id -> OntologyObject */
+  private _objects = new Map<string, OntologyObject>();
+  /** type:id -> OntologyLink */
+  private _links = new Map<string, OntologyLink>();
+  /** type:id -> OntologyObject[] (version history, chronological) */
+  private _versionHistory = new Map<string, OntologyObject[]>();
+  /** version -> OntologySchema */
+  private _schemas = new Map<number, OntologySchema>();
+  private _currentSchemaVersion = 0;
+  /** idempotencyKey -> BulkMutationResult */
+  private _idempotencyCache = new Map<string, BulkMutationResult>();
+
+  // ─── Internal helpers (exposed for Transaction rollback) ───
+
+  /** @internal */ _putObject(key: string, obj: OntologyObject): void {
+    this._objects.set(key, obj);
+  }
+  /** @internal */ _removeObject(key: string): void {
+    this._objects.delete(key);
+    this._versionHistory.delete(key);
+  }
+  /** @internal */ _putLink(key: string, link: OntologyLink): void {
+    this._links.set(key, link);
+  }
+  /** @internal */ _removeLink(key: string): void {
+    this._links.delete(key);
+  }
+  /** @internal */ _popVersionHistory(key: string): void {
+    const history = this._versionHistory.get(key);
+    if (history && history.length > 0) {
+      history.pop();
+    }
+  }
+
+  /** @internal */ _getObjectInternal(_ctx: RequestContext, type: string, id: string): OntologyObject | null {
+    const key = `${type}:${id}`;
+    const obj = this._objects.get(key);
+    if (!obj || obj._tenantId !== _ctx.tenantId) return null;
+    return obj;
+  }
+
+  /** @internal */ _getLinkInternal(_ctx: RequestContext, type: string, linkId: string): OntologyLink | null {
+    const key = `${type}:${linkId}`;
+    const link = this._links.get(key);
+    if (!link || link._tenantId !== _ctx.tenantId) return null;
+    return link;
+  }
+
+  private _pushVersionHistory(key: string, snapshot: OntologyObject): void {
+    let history = this._versionHistory.get(key);
+    if (!history) {
+      history = [];
+      this._versionHistory.set(key, history);
+    }
+    history.push(clone(snapshot));
+  }
+
+  private _getLinkTypeDef(linkType: string): LinkTypeDefinition | undefined {
+    const schema = this._schemas.get(this._currentSchemaVersion);
+    if (!schema) return undefined;
+    return schema.linkTypes.find((lt) => lt.name === linkType);
+  }
+
+  private _enforceCardinality(ctx: RequestContext, linkType: string, fromId: string, toId: string): void {
+    const def = this._getLinkTypeDef(linkType);
+    if (!def) return; // No schema constraint
+
+    // Count active (non-deleted) links of this type
+    const activeLinks = Array.from(this._links.values()).filter(
+      (l) => l._type === linkType && l._tenantId === ctx.tenantId && !l._deletedAt,
+    );
+
+    if (def.cardinality === 'ONE_TO_ONE') {
+      const existingFromOutbound = activeLinks.find((l) => l._fromId === fromId);
+      if (existingFromOutbound) {
+        throw new Error(`Cardinality violation: ONE_TO_ONE link ${linkType} already exists from ${fromId}`);
+      }
+      const existingToInbound = activeLinks.find((l) => l._toId === toId);
+      if (existingToInbound) {
+        throw new Error(`Cardinality violation: ONE_TO_ONE link ${linkType} already exists to ${toId}`);
+      }
+    } else if (def.cardinality === 'ONE_TO_MANY') {
+      // Each "to" can only have one inbound link of this type
+      const existingToInbound = activeLinks.find((l) => l._toId === toId);
+      if (existingToInbound) {
+        throw new Error(`Cardinality violation: ONE_TO_MANY link ${linkType} already exists to ${toId}`);
+      }
+    }
+    // MANY_TO_MANY: no constraint
+  }
+
+  // ─── Internal mutation methods (used by provider + transaction) ───
+
+  /** @internal */ _doCreateObject(ctx: RequestContext, type: string, properties: Record<string, unknown>): OntologyObject {
+    const id = genId();
+    const timestamp = now();
+    const obj: OntologyObject = {
+      _tenantId: ctx.tenantId,
+      _type: type,
+      _id: id,
+      _version: 1,
+      _createdAt: timestamp,
+      _updatedAt: timestamp,
+      ...properties,
+    };
+    const key = `${type}:${id}`;
+    this._objects.set(key, obj);
+    this._pushVersionHistory(key, obj);
+    return obj;
+  }
+
+  /** @internal */ _doUpdateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>): OntologyObject {
+    const key = `${type}:${id}`;
+    const existing = this._objects.get(key);
+    if (!existing || existing._tenantId !== ctx.tenantId) {
+      throw new Error(`Object ${type}:${id} not found`);
+    }
+    if (existing._deletedAt) {
+      throw new Error(`Object ${type}:${id} is deleted`);
+    }
+    const updated: OntologyObject = {
+      ...existing,
+      ...properties,
+      _tenantId: existing._tenantId,
+      _type: existing._type,
+      _id: existing._id,
+      _version: existing._version + 1,
+      _createdAt: existing._createdAt,
+      _updatedAt: now(),
+    };
+    this._objects.set(key, updated);
+    this._pushVersionHistory(key, updated);
+    return updated;
+  }
+
+  /** @internal */ _doSoftDeleteObject(ctx: RequestContext, type: string, id: string): OntologyObject {
+    const key = `${type}:${id}`;
+    const existing = this._objects.get(key);
+    if (!existing || existing._tenantId !== ctx.tenantId) {
+      throw new Error(`Object ${type}:${id} not found`);
+    }
+    const updated: OntologyObject = {
+      ...existing,
+      _deletedAt: now(),
+      _version: existing._version + 1,
+      _updatedAt: now(),
+    };
+    this._objects.set(key, updated);
+    this._pushVersionHistory(key, updated);
+    return updated;
+  }
+
+  /** @internal */ _doHardDeleteObject(_ctx: RequestContext, type: string, id: string): void {
+    const key = `${type}:${id}`;
+    this._objects.delete(key);
+    this._versionHistory.delete(key);
+  }
+
+  /** @internal */ _doCreateLink(
+    ctx: RequestContext,
+    type: string,
+    fromId: string,
+    toId: string,
+    properties?: Record<string, unknown>,
+  ): OntologyLink {
+    this._enforceCardinality(ctx, type, fromId, toId);
+    const id = genId();
+    const timestamp = now();
+    // Resolve fromType/toType from link type definition or default to 'unknown'
+    const def = this._getLinkTypeDef(type);
+    const link: OntologyLink = {
+      _tenantId: ctx.tenantId,
+      _type: type,
+      _id: id,
+      _fromType: def?.fromType ?? 'unknown',
+      _fromId: fromId,
+      _toType: def?.toType ?? 'unknown',
+      _toId: toId,
+      _version: 1,
+      _createdAt: timestamp,
+      ...(properties ?? {}),
+    };
+    this._links.set(`${type}:${id}`, link);
+    return link;
+  }
+
+  /** @internal */ _doUpdateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>): OntologyLink {
+    const key = `${type}:${linkId}`;
+    const existing = this._links.get(key);
+    if (!existing || existing._tenantId !== ctx.tenantId) {
+      throw new Error(`Link ${type}:${linkId} not found`);
+    }
+    const updated: OntologyLink = {
+      ...existing,
+      ...properties,
+      _tenantId: existing._tenantId,
+      _type: existing._type,
+      _id: existing._id,
+      _fromType: existing._fromType,
+      _fromId: existing._fromId,
+      _toType: existing._toType,
+      _toId: existing._toId,
+      _version: existing._version + 1,
+      _createdAt: existing._createdAt,
+    };
+    this._links.set(key, updated);
+    return updated;
+  }
+
+  /** @internal */ _doDeleteLink(ctx: RequestContext, type: string, linkId: string): void {
+    const key = `${type}:${linkId}`;
+    const existing = this._links.get(key);
+    if (!existing || existing._tenantId !== ctx.tenantId) {
+      throw new Error(`Link ${type}:${linkId} not found`);
+    }
+    this._links.delete(key);
+  }
+
+  // ─── Schema ───
+
+  async applySchema(_ctx: RequestContext, schema: OntologySchema): Promise<MigrationResult> {
+    const fromVersion = this._currentSchemaVersion;
+    this._currentSchemaVersion = schema.version;
+    this._schemas.set(schema.version, clone(schema));
+    return {
+      success: true,
+      fromVersion,
+      toVersion: schema.version,
+      appliedAt: now(),
+    };
+  }
+
+  async getSchema(_ctx: RequestContext, version?: number): Promise<OntologySchema> {
+    const v = version ?? this._currentSchemaVersion;
+    const schema = this._schemas.get(v);
+    if (!schema) {
+      throw new Error(`Schema version ${v} not found`);
+    }
+    return clone(schema);
+  }
+
+  // ─── Objects ───
+
+  async createObject(ctx: RequestContext, type: string, properties: Record<string, unknown>): Promise<OntologyObject> {
+    return clone(this._doCreateObject(ctx, type, properties));
+  }
+
+  async getObject(ctx: RequestContext, type: string, id: string): Promise<OntologyObject | null> {
+    const obj = this._getObjectInternal(ctx, type, id);
+    if (!obj) return null;
+    if (obj._deletedAt) return null;
+    return clone(obj);
+  }
+
+  async updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject> {
+    return clone(this._doUpdateObject(ctx, type, id, properties));
+  }
+
+  async deleteObject(ctx: RequestContext, type: string, id: string, mode: 'soft' | 'hard'): Promise<void> {
+    if (mode === 'soft') {
+      this._doSoftDeleteObject(ctx, type, id);
+    } else {
+      this._doHardDeleteObject(ctx, type, id);
+    }
+  }
+
+  async queryObjects(ctx: RequestContext, type: string, filter: FilterExpression, options?: QueryOptions): Promise<ObjectPage> {
+    let items = Array.from(this._objects.values()).filter((obj) => {
+      if (obj._tenantId !== ctx.tenantId) return false;
+      if (obj._type !== type) return false;
+      if (!options?.includeDeleted && obj._deletedAt) return false;
+      return evaluateFilter(obj as Record<string, unknown>, filter);
+    });
+
+    const totalCount = items.length;
+
+    // Sorting
+    if (options?.orderBy) {
+      for (const sort of [...options.orderBy].reverse()) {
+        items.sort((a, b) => {
+          const aVal = (a as Record<string, unknown>)[sort.field];
+          const bVal = (b as Record<string, unknown>)[sort.field];
+          if (aVal === bVal) return 0;
+          if (aVal === undefined || aVal === null) return 1;
+          if (bVal === undefined || bVal === null) return -1;
+          const cmp = aVal < bVal ? -1 : 1;
+          return sort.direction === 'desc' ? -cmp : cmp;
+        });
+      }
+    }
+
+    // Pagination
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? items.length;
+    items = items.slice(offset, offset + limit);
+
+    return {
+      items: items.map((i) => clone(i)),
+      totalCount,
+      hasNextPage: offset + limit < totalCount,
+    };
+  }
+
+  async bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult> {
+    // Idempotency check
+    const cached = this._idempotencyCache.get(request.idempotencyKey);
+    if (cached) return clone(cached);
+
+    let accepted = 0;
+    let failed = 0;
+    const errors: BulkMutationResult['errors'] = [];
+
+    for (let i = 0; i < request.operations.length; i++) {
+      const op = request.operations[i]!;
+      try {
+        switch (op.type) {
+          case 'createObject':
+            this._doCreateObject(ctx, op.objectType, op.properties);
+            break;
+          case 'updateObject':
+            this._doUpdateObject(ctx, op.objectType, op.id, op.properties);
+            break;
+          case 'deleteObject':
+            if (op.mode === 'soft') {
+              this._doSoftDeleteObject(ctx, op.objectType, op.id);
+            } else {
+              this._doHardDeleteObject(ctx, op.objectType, op.id);
+            }
+            break;
+        }
+        accepted++;
+      } catch (err) {
+        failed++;
+        errors.push({
+          operationIndex: i,
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const result: BulkMutationResult = { accepted, failed, errors };
+    this._idempotencyCache.set(request.idempotencyKey, result);
+    return clone(result);
+  }
+
+  // ─── Links ───
+
+  async createLink(
+    ctx: RequestContext,
+    type: string,
+    fromId: string,
+    toId: string,
+    properties?: Record<string, unknown>,
+  ): Promise<OntologyLink> {
+    return clone(this._doCreateLink(ctx, type, fromId, toId, properties));
+  }
+
+  async getLink(ctx: RequestContext, type: string, linkId: string): Promise<OntologyLink | null> {
+    const link = this._getLinkInternal(ctx, type, linkId);
+    if (!link) return null;
+    if (link._deletedAt) return null;
+    return clone(link);
+  }
+
+  async updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink> {
+    return clone(this._doUpdateLink(ctx, type, linkId, properties));
+  }
+
+  async deleteLink(ctx: RequestContext, type: string, linkId: string): Promise<void> {
+    this._doDeleteLink(ctx, type, linkId);
+  }
+
+  async getLinks(
+    ctx: RequestContext,
+    objectId: string,
+    linkType: string,
+    direction: 'inbound' | 'outbound',
+    options?: QueryOptions,
+  ): Promise<LinkPage> {
+    let items = Array.from(this._links.values()).filter((link) => {
+      if (link._tenantId !== ctx.tenantId) return false;
+      if (link._type !== linkType) return false;
+      if (!options?.includeDeleted && link._deletedAt) return false;
+      if (direction === 'outbound') return link._fromId === objectId;
+      return link._toId === objectId;
+    });
+
+    const totalCount = items.length;
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? items.length;
+    items = items.slice(offset, offset + limit);
+
+    return {
+      items: items.map((i) => clone(i)),
+      totalCount,
+      hasNextPage: offset + limit < totalCount,
+    };
+  }
+
+  async traverse(
+    ctx: RequestContext,
+    startId: string,
+    path: TraversalPath,
+    options?: TraversalOptions,
+  ): Promise<TraversalResult> {
+    const includeDeleted = options?.includeDeleted ?? false;
+    const collectedEdges = new Map<string, OntologyLink>();
+
+    // Start with the set of current object IDs
+    let currentIds = new Set<string>([startId]);
+    let stepNodes = new Map<string, OntologyObject>();
+
+    for (const step of path.steps) {
+      const nextIds = new Set<string>();
+      stepNodes = new Map<string, OntologyObject>();
+
+      for (const objectId of currentIds) {
+        const links = Array.from(this._links.values()).filter((link) => {
+          if (link._tenantId !== ctx.tenantId) return false;
+          if (link._type !== step.linkType) return false;
+          if (!includeDeleted && link._deletedAt) return false;
+          if (step.direction === 'outbound') return link._fromId === objectId;
+          return link._toId === objectId;
+        });
+
+        for (const link of links) {
+          const targetId = step.direction === 'outbound' ? link._toId : link._fromId;
+          const targetType = step.direction === 'outbound' ? link._toType : link._fromType;
+
+          // Find the target object
+          const targetObj = this._objects.get(`${targetType}:${targetId}`);
+          if (!targetObj || targetObj._tenantId !== ctx.tenantId) continue;
+          if (!includeDeleted && targetObj._deletedAt) continue;
+
+          // Apply step filter if present
+          if (step.filter && !evaluateFilter(targetObj as Record<string, unknown>, step.filter)) {
+            continue;
+          }
+
+          collectedEdges.set(`${link._type}:${link._id}`, link);
+          stepNodes.set(`${targetType}:${targetId}`, targetObj);
+          nextIds.add(targetId);
+        }
+      }
+
+      currentIds = nextIds;
+    }
+
+    // nodes = only the final step's results; edges = all traversed edges
+    const nodes = Array.from(stepNodes.values()).map((n) => clone(n));
+    const edges = Array.from(collectedEdges.values()).map((e) => clone(e));
+
+    // Apply pagination
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? nodes.length;
+    const paginatedNodes = nodes.slice(offset, offset + limit);
+
+    return {
+      nodes: paginatedNodes,
+      edges,
+      totalCount: nodes.length,
+    };
+  }
+
+  // ─── Transactions ───
+
+  async beginTransaction(ctx: RequestContext): Promise<Transaction> {
+    return new MemoryTransaction(this, ctx);
+  }
+
+  // ─── Versioning ───
+
+  async getObjectAtVersion(ctx: RequestContext, type: string, id: string, version: number): Promise<OntologyObject | null> {
+    const key = `${type}:${id}`;
+    const history = this._versionHistory.get(key);
+    if (!history) return null;
+    const snapshot = history.find((h) => h._version === version && h._tenantId === ctx.tenantId);
+    return snapshot ? clone(snapshot) : null;
+  }
+
+  async getObjectAtTime(ctx: RequestContext, type: string, id: string, timestamp: DateTime): Promise<OntologyObject | null> {
+    const key = `${type}:${id}`;
+    const history = this._versionHistory.get(key);
+    if (!history) return null;
+
+    const ts = new Date(timestamp).getTime();
+    // Find the latest version whose _updatedAt <= timestamp
+    let best: OntologyObject | null = null;
+    for (const snapshot of history) {
+      if (snapshot._tenantId !== ctx.tenantId) continue;
+      const snapshotTime = new Date(snapshot._updatedAt).getTime();
+      if (snapshotTime <= ts) {
+        best = snapshot;
+      }
+    }
+    return best ? clone(best) : null;
+  }
+
+  // ─── Indices ───
+
+  async ensureIndex(_ctx: RequestContext, _type: string, _field: string, _indexType: IndexType): Promise<void> {
+    // No-op for in-memory provider; indices don't affect correctness
+  }
+
+  // ─── Health ───
+
+  async healthCheck(): Promise<HealthStatus> {
+    return {
+      healthy: true,
+      provider: 'memory',
+      latencyMs: 0,
+    };
+  }
+
+  capabilities(): StorageCapabilities {
+    return {
+      supportsTransactions: true,
+      supportsTemporalQueries: true,
+      supportsFullTextSearch: false,
+      supportsGeoQueries: false,
+      supportsGraphTraversal: true,
+      supportsBulkMutations: true,
+      maxTraversalDepth: 100,
+      replicationSupport: 'NONE',
+    };
+  }
+}
