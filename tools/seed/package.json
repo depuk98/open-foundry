@@ -1,0 +1,17 @@
+{
+  "name": "@openfoundry/seed-nhs-acute",
+  "version": "0.1.0",
+  "description": "Synthetic NHS acute data seed generator",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "generate": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
