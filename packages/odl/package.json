@@ -17,13 +17,20 @@
     "test": "vitest run",
     "clean": "rm -rf dist coverage"
   },
-  "files": ["dist"],
+  "bin": {
+    "odl": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "license": "UNLICENSED",
   "dependencies": {
+    "commander": "^14.0.3",
     "graphql": "^16.10.0"
   },
   "devDependencies": {
     "@openfoundry/spi": "workspace:*",
+    "@types/node": "^22.0.0",
     "vitest": "^3.0.0"
   }
 }
