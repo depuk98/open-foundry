@@ -11,8 +11,9 @@ Local development environment with all 12 services via Docker Compose.
 ## Quick Start
 
 ```bash
-# 1. Copy environment config
+# 1. Copy environment config and set passwords
 cp .env.example .env
+# Edit .env — at minimum, change POSTGRES_PASSWORD and KEYCLOAK_ADMIN_PASSWORD
 
 # 2. Start all services
 docker compose up -d

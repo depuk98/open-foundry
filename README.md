@@ -12,21 +12,21 @@ Open Foundry provides the semantic, kinetic, and security layers needed to turn 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Query & API Layer                      │
-│              (GraphQL, REST, FHIR R4, SDKs)              │
+│                    Query & API Layer                    │
+│              (GraphQL, REST, FHIR R4, SDKs)             │
 ├─────────────────────────────────────────────────────────┤
-│                    Action Framework                       │
-│        (action types, CEL execution, side-effects)       │
+│                    Action Framework                     │
+│        (action types, CEL execution, side-effects)      │
 ├──────────────────────┬──────────────────────────────────┤
-│   Security Layer     │        Sync Engine                │
+│   Security Layer     │        Sync Engine               │
 │  (OpenFGA ReBAC,     │  (JDBC connectors, Debezium      │
-│   consent, audit)    │   CDC, conflict resolution)       │
+│   consent, audit)    │   CDC, conflict resolution)      │
 ├──────────────────────┴──────────────────────────────────┤
-│                    Ontology Engine                        │
-│    (schema registry, object store, relationship index)   │
+│                    Ontology Engine                      │
+│    (schema registry, object store, relationship index)  │
 ├─────────────────────────────────────────────────────────┤
-│               Storage Provider Interface                 │
-│                   (PostgreSQL+AGE | Memory)               │
+│               Storage Provider Interface                │
+│               (PostgreSQL+AGE | Memory)                 │
 └─────────────────────────────────────────────────────────┘
 ```
 

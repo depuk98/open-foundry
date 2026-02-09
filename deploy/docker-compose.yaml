@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-openfoundry}
       POSTGRES_USER: ${POSTGRES_USER:-openfoundry}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openfoundry_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -53,7 +53,7 @@ services:
       - "8081:8081"
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
-      OPENFGA_DATASTORE_URI: "postgres://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD:-openfoundry_dev}@postgresql:5432/${POSTGRES_DB:-openfoundry}?sslmode=disable"
+      OPENFGA_DATASTORE_URI: "postgres://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}?sslmode=disable"
       OPENFGA_PLAYGROUND_ENABLED: "true"
     depends_on:
       postgresql:
@@ -75,11 +75,11 @@ services:
       KC_DB: postgres
       KC_DB_URL: "jdbc:postgresql://postgresql:5432/${POSTGRES_DB:-openfoundry}"
       KC_DB_USERNAME: ${POSTGRES_USER:-openfoundry}
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-openfoundry_dev}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_RELATIVE_PATH: /auth
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
     depends_on:
       postgresql:
         condition: service_healthy
@@ -160,7 +160,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: "4000"
-      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD:-openfoundry_dev}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
+      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
       OPENFGA_URL: "http://openfga:8080"
       OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:-}
       CEL_EVALUATOR_URL: "cel-evaluator:50051"
@@ -194,7 +194,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: "4001"
-      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD:-openfoundry_dev}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
+      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_SERVICE_NAME: ontology-engine
     depends_on:
@@ -217,7 +217,7 @@ services:
       NODE_ENV: development
       PORT: "4002"
       CEL_EVALUATOR_URL: "cel-evaluator:50051"
-      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD:-openfoundry_dev}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
+      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
       REDPANDA_BROKERS: "redpanda:9092"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_SERVICE_NAME: action-executor
@@ -244,7 +244,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: "4003"
-      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD:-openfoundry_dev}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
+      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
       REDPANDA_BROKERS: "redpanda:9092"
       DEBEZIUM_URL: "http://debezium:8083"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
@@ -272,7 +272,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: "4004"
-      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD:-openfoundry_dev}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
+      POSTGRES_URL: "postgresql://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}"
       OPENFGA_URL: "http://openfga:8080"
       OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:-}
       KEYCLOAK_URL: "http://keycloak:8080/auth"
