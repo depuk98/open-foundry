@@ -22,6 +22,20 @@ export type {
 // Connector implementations
 export { JdbcConnector } from "./connectors/index.js";
 
+// Identity resolution (MVP 4.4.2)
+export type {
+  QualityViolation,
+  IdentityConflictEvent,
+  IdentityStore,
+  QuarantineInput,
+  QuarantineRecord,
+  QuarantineQueryFilter,
+  IdentityResolutionResult,
+  IdentityResolverConfig,
+} from "./connectors/index.js";
+
+export { IdentityResolver, QuarantineQueue } from "./connectors/index.js";
+
 // Mapping types and parser (Section 6.3)
 export type {
   TransformFn,
