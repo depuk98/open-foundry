@@ -150,7 +150,7 @@ export function registerMultiTenancyTests(name: string, factory: ProviderFactory
       });
 
       it('cross-tenant operations do not leak data', async () => {
-        const objA = await provider.createObject(tenantA, 'Patient', { name: 'LeakTest' });
+        await provider.createObject(tenantA, 'Patient', { name: 'LeakTest' });
         // Tenant B tries to query - should not see tenant A data
         const page = await provider.queryObjects(tenantB, 'Patient', { field: 'name', operator: 'eq', value: 'LeakTest' });
         expect(page.items).toHaveLength(0);

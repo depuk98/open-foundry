@@ -16,27 +16,28 @@ function parseArgs(args: string[]): { outputDir: string; config: GeneratorConfig
   let outputDir = resolve(process.cwd(), 'output');
 
   for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
+    const arg = args[i];
+    switch (arg) {
       case '--output-dir':
-        outputDir = resolve(args[++i]);
+        outputDir = resolve(args[++i] ?? '.');
         break;
       case '--patients':
-        config.patientCount = Number(args[++i]);
+        config.patientCount = Number(args[++i] ?? '0');
         break;
       case '--wards':
-        config.wardCount = Number(args[++i]);
+        config.wardCount = Number(args[++i] ?? '0');
         break;
       case '--beds':
-        config.bedCount = Number(args[++i]);
+        config.bedCount = Number(args[++i] ?? '0');
         break;
       case '--consultants':
-        config.consultantCount = Number(args[++i]);
+        config.consultantCount = Number(args[++i] ?? '0');
         break;
       case '--seed':
-        config.seed = Number(args[++i]);
+        config.seed = Number(args[++i] ?? '0');
         break;
       default:
-        console.error(`Unknown option: ${args[i]}`);
+        console.error(`Unknown option: ${arg}`);
         process.exit(1);
     }
   }

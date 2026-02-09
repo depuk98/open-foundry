@@ -14,10 +14,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "test": "echo \"no tests yet\"",
     "clean": "rm -rf dist"
   },
   "files": [
     "dist"
   ],
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

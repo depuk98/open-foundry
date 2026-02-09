@@ -44,6 +44,18 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Generated SDK output
+packages/sdk-typescript/generated/
+
+# Docker volumes (local dev)
+deploy/docker-volumes/
+
+# Lock files from non-pnpm managers
+package-lock.json
+yarn.lock
+
 # Misc
 *.tgz
 *.tar.gz
+.cardinal/
+.avril/

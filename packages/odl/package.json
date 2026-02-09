@@ -23,7 +23,7 @@
   "files": [
     "dist"
   ],
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "dependencies": {
     "commander": "^14.0.3",
     "graphql": "^16.10.0"

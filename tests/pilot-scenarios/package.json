@@ -11,7 +11,7 @@
     "test:verbose": "vitest run --reporter=verbose",
     "clean": "rm -rf dist coverage"
   },
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "dependencies": {
     "@openfoundry/spi": "workspace:*",
     "@openfoundry/odl": "workspace:*",

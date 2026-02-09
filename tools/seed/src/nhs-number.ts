@@ -17,7 +17,7 @@ const WEIGHTS = [10, 9, 8, 7, 6, 5, 4, 3, 2] as const;
 export function calculateCheckDigit(nineDigits: string): number | null {
   let sum = 0;
   for (let i = 0; i < 9; i++) {
-    sum += Number(nineDigits[i]) * WEIGHTS[i];
+    sum += Number(nineDigits[i]) * WEIGHTS[i]!;
   }
   const remainder = 11 - (sum % 11);
 

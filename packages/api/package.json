@@ -20,7 +20,7 @@
   "files": [
     "dist"
   ],
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "dependencies": {
     "@apollo/server": "^4.11.0",
     "graphql": "^16.10.0",

@@ -16,7 +16,7 @@ export function createRng(seed: number): () => number {
 
 /** Pick a random element from an array. */
 export function pick<T>(arr: readonly T[], rng: () => number): T {
-  return arr[Math.floor(rng() * arr.length)];
+  return arr[Math.floor(rng() * arr.length)] as T;
 }
 
 /** Pick a random element using weighted distribution. */
@@ -24,17 +24,17 @@ export function weightedPick<T>(items: readonly T[], weights: readonly number[],
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
   for (let i = 0; i < items.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return items[i];
+    r -= weights[i]!;
+    if (r <= 0) return items[i] as T;
   }
-  return items[items.length - 1];
+  return items[items.length - 1] as T;
 }
 
 /** Shuffle an array in place (Fisher-Yates). */
 export function shuffle<T>(arr: T[], rng: () => number): T[] {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
   }
   return arr;
 }
@@ -49,7 +49,7 @@ export function randDate(startYear: number, endYear: number, rng: () => number):
   const start = new Date(startYear, 0, 1).getTime();
   const end = new Date(endYear, 11, 31).getTime();
   const ts = start + rng() * (end - start);
-  return new Date(ts).toISOString().split('T')[0];
+  return new Date(ts).toISOString().split('T')[0]!;
 }
 
 /** Generate a random ISO datetime string between two dates. */

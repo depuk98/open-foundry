@@ -60,8 +60,6 @@ export function generate(config: GeneratorConfig = DEFAULT_CONFIG): SeedData {
   // Categorise patients by status
   const activePatients = patients.filter(p => p.status === 'ACTIVE');
   const dischargedPatients = patients.filter(p => p.status === 'DISCHARGED');
-  const transferredPatients = patients.filter(p => p.status === 'TRANSFERRED');
-
   // ─── Links: AdmittedTo (active patients -> wards) ───
   const admittedTo = generateAdmittedToLinks(activePatients, wards, rng);
 
@@ -97,8 +95,8 @@ function generateWards(count: number, rng: () => number): Ward[] {
   const names = shuffle([...WARD_NAME_PREFIXES], rng);
   return Array.from({ length: count }, (_, i) => ({
     id: nextId('ward'),
-    name: `${names[i % names.length]} Ward`,
-    specialty: WARD_SPECIALTIES[i % WARD_SPECIALTIES.length],
+    name: `${names[i % names.length]!} Ward`,
+    specialty: WARD_SPECIALTIES[i % WARD_SPECIALTIES.length]!,
     capacity: randInt(10, 40, rng),
   }));
 }
@@ -118,7 +116,7 @@ function generateBeds(
   let bedsRemaining = totalBeds;
 
   for (let wi = 0; wi < wards.length; wi++) {
-    const ward = wards[wi];
+    const ward = wards[wi]!;
     const isLast = wi === wards.length - 1;
     const share = isLast
       ? bedsRemaining
@@ -173,7 +171,7 @@ function generateConsultants(count: number, wards: Ward[], rng: () => number): C
     id: nextId('cons'),
     gmcNumber: String(7000000 + i).padStart(7, '0'),
     name: `Dr ${pick(FIRST_NAMES, rng)} ${pick(LAST_NAMES, rng)}`,
-    specialty: wards[i % wards.length].specialty,
+    specialty: wards[i % wards.length]!.specialty,
   }));
 }
 
@@ -197,7 +195,7 @@ function generatePatients(
 
     return {
       id: nextId('pat'),
-      nhsNumber: nhsNumbers[i],
+      nhsNumber: nhsNumbers[i]!,
       name: `${pick(FIRST_NAMES, rng)} ${pick(LAST_NAMES, rng)}`,
       dateOfBirth: randDate(1930, 2023, rng),
       status,
@@ -259,8 +257,8 @@ function generateOccupiesBedLinks(
 
   return Array.from({ length: count }, (_, i) => ({
     id: nextId('occ'),
-    fromId: shuffledPatients[i].id,
-    toId: occupiedBeds[i].id,
+    fromId: shuffledPatients[i]!.id,
+    toId: occupiedBeds[i]!.id,
     assignedAt: randDateTime(2024, 2025, rng),
   }));
 }
