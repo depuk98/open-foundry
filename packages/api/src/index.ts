@@ -24,3 +24,66 @@ export type {
   Edge,
   PageInfo,
 } from './graphql/index.js';
+
+export {
+  SubscriptionManager,
+  InMemorySubscribableEventBus,
+  createIdFilteredSubscription,
+  createFilteredSubscription,
+  mapObjectEvent,
+  mapLinkEvent,
+} from './subscriptions/index.js';
+export type {
+  ChangeEvent,
+  SubscriptionFilter,
+  ConnectionAuthResult,
+  ConnectionAuthenticator,
+  SubscribableEventBus,
+  SubscriptionManagerConfig,
+} from './subscriptions/index.js';
+
+export {
+  SlidingWindowRateLimiter,
+  QueryComplexityAnalyzer,
+  withTimeout,
+  checkResponseSize,
+  createTimeoutError,
+  createResponseTooLargeError,
+  DEFAULT_EXECUTION_GUARD_CONFIG,
+} from './governance/index.js';
+
+export type {
+  RateLimitConfig,
+  RateLimitWindow,
+  RateLimitIdentity,
+  RateLimitResult,
+  ComplexityConfig,
+  ComplexityAnalysis,
+  ExecutionGuardConfig,
+} from './governance/index.js';
+
+export {
+  createFhirRouter,
+  buildPatientFilter,
+  mapPatientToFhir,
+  mapEncounterToFhir,
+  NHS_NUMBER_SYSTEM,
+  NHS_PATIENT_PROFILE,
+  NHS_ENCOUNTER_PROFILE,
+} from './fhir/index.js';
+
+export type {
+  FhirRequest,
+  FhirResponse,
+  FhirRouterConfig,
+  FhirResource,
+  FhirPatient,
+  FhirEncounter,
+  FhirBundle,
+  FhirBundleEntry,
+  FhirOperationOutcome,
+  FhirIdentifier,
+  FhirHumanName,
+  FhirReference,
+  FhirMeta,
+} from './fhir/index.js';
