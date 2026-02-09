@@ -22,6 +22,9 @@ import {
   type ValidationResult,
 } from './validation.js';
 import { EngineEventEmitter, type ChangeSet, type EventCause } from '../events/event-emitter.js';
+import type { ComputedFieldEvaluator } from '../computed/computed-field-evaluator.js';
+import type { LineageRecorder } from '../lineage/lineage-recorder.js';
+import type { ProvenanceSource } from '@openfoundry/spi';
 
 const tracer = getTracer('engine', 'objectManager');
 
@@ -30,6 +33,10 @@ export interface ObjectManagerConfig {
   storage: StorageProvider;
   schema: ParsedSchema;
   eventEmitter: EngineEventEmitter;
+  /** Optional computed field evaluator for LAZY field resolution on reads. */
+  computedFieldEvaluator?: ComputedFieldEvaluator;
+  /** Optional lineage recorder for field-level provenance tracking. */
+  lineageRecorder?: LineageRecorder;
 }
 
 /**
@@ -44,11 +51,15 @@ export class ObjectManager {
   private readonly storage: StorageProvider;
   private readonly schema: ParsedSchema;
   private readonly eventEmitter: EngineEventEmitter;
+  private readonly computedFieldEvaluator?: ComputedFieldEvaluator;
+  private readonly lineageRecorder?: LineageRecorder;
 
   constructor(config: ObjectManagerConfig) {
     this.storage = config.storage;
     this.schema = config.schema;
     this.eventEmitter = config.eventEmitter;
+    this.computedFieldEvaluator = config.computedFieldEvaluator;
+    this.lineageRecorder = config.lineageRecorder;
   }
 
   /**
@@ -75,6 +86,19 @@ export class ObjectManager {
       // Create via SPI
       const obj = await this.storage.createObject(ctx, type, properties);
 
+      // Record lineage for every non-system field
+      if (this.lineageRecorder) {
+        const source = this.buildProvenanceSource(cause, ctx);
+        await this.lineageRecorder.recordFields(
+          ctx.tenantId,
+          type,
+          obj._id,
+          properties,
+          source,
+          obj._createdAt,
+        );
+      }
+
       // Emit event
       await this.eventEmitter.emitObjectCreated(
         ctx,
@@ -90,7 +114,8 @@ export class ObjectManager {
 
   /**
    * Get an object by type and ID.
-   * Pass-through to SPI — no validation needed for reads.
+   * Reads from SPI, then evaluates any LAZY computed fields and merges
+   * the results into the returned object.
    */
   async get(
     type: string,
@@ -103,7 +128,16 @@ export class ObjectManager {
       [SpanAttributes.TENANT_ID]: ctx.tenantId,
       [SpanAttributes.OPERATION]: 'get',
     }, async () => {
-      return this.storage.getObject(ctx, type, id);
+      const obj = await this.storage.getObject(ctx, type, id);
+      if (!obj) return null;
+
+      // Evaluate LAZY computed fields and merge into the result
+      if (this.computedFieldEvaluator) {
+        const computed = await this.computedFieldEvaluator.evaluateAll(type, id, ctx);
+        return { ...obj, ...computed };
+      }
+
+      return obj;
     });
   }
 
@@ -151,6 +185,23 @@ export class ObjectManager {
 
       // Compute change set
       const changes = this.computeChanges(existing, properties);
+
+      // Record lineage for changed fields
+      if (this.lineageRecorder && Object.keys(changes).length > 0) {
+        const changedProperties: Record<string, unknown> = {};
+        for (const key of Object.keys(changes)) {
+          changedProperties[key] = properties[key];
+        }
+        const source = this.buildProvenanceSource(cause, ctx);
+        await this.lineageRecorder.recordFields(
+          ctx.tenantId,
+          type,
+          id,
+          changedProperties,
+          source,
+          updated._updatedAt,
+        );
+      }
 
       // Emit event
       await this.eventEmitter.emitObjectUpdated(
@@ -282,5 +333,21 @@ export class ObjectManager {
       }
     }
     return changes;
+  }
+
+  /**
+   * Build a ProvenanceSource from the cause and context.
+   * Defaults to ACTION source kind with the actor from the request context.
+   */
+  private buildProvenanceSource(
+    cause: EventCause | undefined,
+    ctx: RequestContext,
+  ): ProvenanceSource {
+    return {
+      kind: 'ACTION',
+      actionType: cause?.actionType ?? 'direct',
+      actionId: cause?.actionId ?? 'unknown',
+      actor: cause?.actor ?? (ctx.actorId ? `user:${ctx.actorId}` : 'system'),
+    };
   }
 }

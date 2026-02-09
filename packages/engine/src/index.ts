@@ -25,3 +25,20 @@ export {
   type ObjectEventData,
   type LinkEventData,
 } from './events/index.js';
+
+// Computed fields
+export {
+  ComputedFieldEvaluator,
+  type ComputedFieldEvaluatorConfig,
+  type ComputeContext,
+  type ComputeFunction,
+} from './computed/index.js';
+
+// Lineage
+export {
+  LineageRecorder,
+  type LineageRecorderConfig,
+  type LineageStore,
+  type LineageQueryOptions,
+  InMemoryLineageStore,
+} from './lineage/index.js';
