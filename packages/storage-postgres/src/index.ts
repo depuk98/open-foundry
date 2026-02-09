@@ -5,6 +5,10 @@
  * Provides schema management, DDL generation, object CRUD, and transactions.
  */
 
+// ─── StorageProvider implementation ───
+export { PostgresStorageProvider } from './postgres-storage-provider.js';
+export type { PostgresStorageConfig } from './postgres-storage-provider.js';
+
 // ─── Schema / DDL ───
 export {
   generateDDL,
