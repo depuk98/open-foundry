@@ -62,3 +62,32 @@ export type {
   AuditWriter,
   ActionEventPublisher,
 } from './executor/index.js';
+
+export { SideEffectExecutor } from './sideeffects/index.js';
+
+export type {
+  WebhookConfig,
+  CloudEventConfig,
+  CloudEvent,
+  EventBus,
+  HttpClient,
+  HttpResponse,
+  HttpRequestOptions,
+  SideEffectExecutionResult,
+  SideEffectExecutorConfig,
+} from './sideeffects/index.js';
+
+export { ToolRegistry } from './tools/index.js';
+export type { ToolRegistryConfig } from './tools/index.js';
+
+export type {
+  ToolDescriptor,
+  ToolKind,
+  ToolFilter,
+  JsonSchema,
+  AgentContext,
+  AgentExecutionResult,
+  PolicyGuard,
+  PolicyGuardResult,
+  RiskLevel,
+} from './tools/index.js';
