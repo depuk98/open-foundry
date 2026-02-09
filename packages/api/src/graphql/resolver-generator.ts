@@ -24,6 +24,10 @@ import type { ApiDependencies, ResolverContext, PaginationArgs } from './types.j
 import { DEFAULT_CONSENT_PURPOSE } from './types.js';
 import { resolvePagination, buildConnection } from './pagination.js';
 import { createOpenFoundryError, wrapError } from './errors.js';
+import {
+  createIdFilteredSubscription,
+  createFilteredSubscription,
+} from '../subscriptions/subscription-manager.js';
 
 // ─── Helpers ───
 
@@ -454,11 +458,11 @@ function generateSubscriptionResolvers(
   const lower = lowerFirst(obj.name);
   const topic = `${lower}Changed`;
 
-  resolvers['Subscription']![topic] = {
-    subscribe: (_parent: unknown, _args: { id: string }) => {
-      return pubsub.asyncIterator(topic);
-    },
-  };
+  // fooChanged(id: ID!) — subscribe to changes on a specific object
+  resolvers['Subscription']![topic] = createIdFilteredSubscription(pubsub, topic);
+
+  // foosChanged(filter: FooFilter) — subscribe to all changes on a type
+  resolvers['Subscription']![`${lower}sChanged`] = createFilteredSubscription(pubsub, topic);
 }
 
 // ─── availableTools resolver (Section 5.7) ───
