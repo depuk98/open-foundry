@@ -17,6 +17,9 @@ export {
   renderOpenFGADSL,
   mergeOpenFGAOverrides,
 } from './codegen/openfga.js';
+export { generateSdk } from './codegen/sdk.js';
+
+export type { SdkOutput } from './codegen/sdk.js';
 
 export type {
   ValidationResult,
