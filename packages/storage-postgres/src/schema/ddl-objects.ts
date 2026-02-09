@@ -92,18 +92,22 @@ function propertyColumn(prop: PropertyDefinition): string {
 
 /**
  * Generate an index DDL statement.
+ * Emits CREATE UNIQUE INDEX when idx.unique is set.
  */
 function generateIndex(tableName: string, idx: IndexDefinition, schema: string): string {
   const colName = snakeCase(idx.field);
-  const idxName = `idx_${tableName}_${colName}`;
+  const idxName = idx.unique ? `uq_${tableName}_${colName}` : `idx_${tableName}_${colName}`;
   const method = idx.indexType === 'FULLTEXT' ? 'gin' : idx.indexType.toLowerCase();
   const qualifiedTable = `${pgIdent(schema)}.${pgIdent(tableName)}`;
+  const uniqueKw = idx.unique ? 'UNIQUE ' : '';
 
   if (idx.indexType === 'FULLTEXT') {
     return `CREATE INDEX IF NOT EXISTS ${pgIdent(idxName)} ON ${qualifiedTable} USING gin (to_tsvector('english', ${pgIdent(colName)}));`;
   }
 
-  return `CREATE INDEX IF NOT EXISTS ${pgIdent(idxName)} ON ${qualifiedTable} USING ${method} (${pgIdent(colName)});`;
+  // Unique indexes are tenant-scoped to allow the same value across tenants
+  const cols = idx.unique ? `"_tenant_id", ${pgIdent(colName)}` : pgIdent(colName);
+  return `CREATE ${uniqueKw}INDEX IF NOT EXISTS ${pgIdent(idxName)} ON ${qualifiedTable} USING ${method} (${cols});`;
 }
 
 /**

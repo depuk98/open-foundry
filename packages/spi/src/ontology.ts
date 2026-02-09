@@ -194,6 +194,8 @@ export interface PropertyDefinition {
 export interface IndexDefinition {
   field: string;
   indexType: IndexType;
+  /** If true, a UNIQUE constraint is generated instead of a regular index. */
+  unique?: boolean;
 }
 
 // ---------------------------------------------------------------------------

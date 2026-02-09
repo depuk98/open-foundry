@@ -28,6 +28,8 @@ export interface ValidationFailure {
   field?: string;
   /** Human-readable message. */
   message: string;
+  /** Severity: 'error' (default, blocks write) or 'warning' (informational, does not block). */
+  severity?: 'error' | 'warning';
 }
 
 /** Result of running the validation pipeline. */
@@ -100,8 +102,9 @@ export async function validateObjectProperties(
   const constraintFailures = evaluateConstraints(objectType, properties);
   failures.push(...constraintFailures);
 
-  // Step 3: Uniqueness check (only if schema validation passed)
-  if (failures.length === 0) {
+  // Step 3: Uniqueness check (only if no blocking errors so far)
+  const errorsSoFar = failures.filter((f) => f.severity !== 'warning');
+  if (errorsSoFar.length === 0) {
     const uniquenessFailures = await checkUniqueness(
       objectType,
       properties,
@@ -113,8 +116,10 @@ export async function validateObjectProperties(
     failures.push(...uniquenessFailures);
   }
 
+  // Only errors (non-warning) failures block the write
+  const errors = failures.filter((f) => f.severity !== 'warning');
   return {
-    valid: failures.length === 0,
+    valid: errors.length === 0,
     failures,
   };
 }
@@ -254,8 +259,16 @@ function evaluateConstraints(
           field: field.name,
           message: `Constraint violated on field '${field.name}': ${constraint.expr}`,
         });
+      } else if (result === null) {
+        // Expression requires CEL sidecar — record as a warning so callers
+        // know the constraint was NOT evaluated, rather than silently passing.
+        failures.push({
+          step: 'constraint',
+          field: field.name,
+          message: `Constraint on field '${field.name}' could not be evaluated inline (requires CEL sidecar): ${constraint.expr}`,
+          severity: 'warning',
+        });
       }
-      // result === null means we couldn't evaluate — skip (delegate to CEL sidecar)
     }
   }
 

@@ -140,6 +140,8 @@ export interface ActionResult {
   actionId: string;
   errors: ActionError[];
   affectedObjects: AffectedObject[];
+  /** Non-blocking warnings (e.g. dry-run partial validation). */
+  warnings?: string[];
 }
 
 export interface ActionError {

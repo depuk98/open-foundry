@@ -362,14 +362,17 @@ export class ToolRegistry {
       }
     }
 
-    // Check authorization
-    // This would call security.checkPermission in production;
-    // for dry-run we indicate validation passed
+    // Parameter validation passed. Authorization and precondition evaluation
+    // are not performed in dry-run mode — callers should not treat this as a
+    // guarantee that the action will succeed when executed for real.
     return {
       success: true,
       actionId: `dryrun_${Date.now().toString(36)}`,
       errors: [],
       affectedObjects: [],
+      warnings: [
+        'Dry-run validated parameters only. Authorization checks and precondition evaluation were not performed.',
+      ],
     };
   }
 

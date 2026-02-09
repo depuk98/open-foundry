@@ -48,6 +48,23 @@ export function generateLinkTableDDL(linkType: LinkTypeDefinition, schema = 'pub
     `CREATE INDEX IF NOT EXISTS ${pgIdent('idx_' + tableName + '_to')} ON ${qualifiedTable} ("_tenant_id", "_to_type", "_to_id");`
   );
 
+  // Cardinality enforcement via partial unique indexes (only active links count).
+  // ONE_TO_ONE:  each source and each target can have at most one active link of this type.
+  // ONE_TO_MANY: each target can have at most one active inbound link of this type.
+  const card = linkType.cardinality;
+  if (card === 'ONE_TO_ONE') {
+    statements.push(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${pgIdent('uq_' + tableName + '_from')} ON ${qualifiedTable} ("_tenant_id", "_from_id") WHERE "_deleted_at" IS NULL;`
+    );
+    statements.push(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${pgIdent('uq_' + tableName + '_to')} ON ${qualifiedTable} ("_tenant_id", "_to_id") WHERE "_deleted_at" IS NULL;`
+    );
+  } else if (card === 'ONE_TO_MANY') {
+    statements.push(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${pgIdent('uq_' + tableName + '_to')} ON ${qualifiedTable} ("_tenant_id", "_to_id") WHERE "_deleted_at" IS NULL;`
+    );
+  }
+
   return statements;
 }
 
