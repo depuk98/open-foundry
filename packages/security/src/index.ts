@@ -31,3 +31,12 @@ export { AuthorizationError, AuthorizationService } from "./authz/index.js";
 // Audit trail (Section 7.2)
 export type { AuditStore, AuditQueryFilter, AuditWriteInput } from "./audit/index.js";
 export { AuditWriter, AuditQuery, MemoryAuditStore } from "./audit/index.js";
+
+// Consent management (Section 7.3)
+export type {
+  ConsentManagerConfig,
+  ConsentFilterResult,
+  SingleObjectConsentResult,
+  ConsentStore,
+} from "./consent/index.js";
+export { ConsentError, ConsentService, MemoryConsentStore } from "./consent/index.js";
