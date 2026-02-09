@@ -15,6 +15,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  domain-packs/core:
+    devDependencies:
+      '@openfoundry/odl':
+        specifier: workspace:*
+        version: link:../../packages/odl
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@25.2.2)(yaml@2.8.2)
+
   packages/actions:
     dependencies:
       '@grpc/grpc-js':
@@ -27,6 +36,31 @@ importers:
         specifier: workspace:*
         version: link:../spi
     devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.10
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.10)(yaml@2.8.2)
+
+  packages/engine:
+    dependencies:
+      '@openfoundry/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@openfoundry/odl':
+        specifier: workspace:*
+        version: link:../odl
+      '@openfoundry/spi':
+        specifier: workspace:*
+        version: link:../spi
+    devDependencies:
+      '@openfoundry/storage-memory':
+        specifier: workspace:*
+        version: link:../storage-memory
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.10
@@ -1615,7 +1649,7 @@ snapshots:
 
   '@types/pg@8.16.0':
     dependencies:
-      '@types/node': 22.19.10
+      '@types/node': 25.2.2
       pg-protocol: 1.11.0
       pg-types: 2.2.0
 
@@ -1889,7 +1923,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.0
-      '@types/node': 22.19.10
+      '@types/node': 25.2.2
       long: 5.3.2
 
   require-directory@2.1.1: {}
