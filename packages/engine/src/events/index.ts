@@ -4,4 +4,5 @@ export {
   type EventCause,
   type ChangeSet,
   type ObjectEventData,
+  type LinkEventData,
 } from './event-emitter.js';

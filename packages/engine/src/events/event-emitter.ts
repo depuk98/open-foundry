@@ -2,7 +2,7 @@
  * CloudEvent emitter for the Ontology Engine (Section 4.2).
  *
  * Produces CloudEvents 1.0 compliant events for all state changes
- * and publishes them to the configured EventBus.
+ * (objects and links) and publishes them to the configured EventBus.
  */
 
 import type { CloudEvent, CloudEventType, RequestContext, DateTime } from '@openfoundry/spi';
@@ -27,6 +27,17 @@ export interface ObjectEventData {
   causedBy?: EventCause;
 }
 
+/** Data payload for link lifecycle events. */
+export interface LinkEventData {
+  linkType: string;
+  linkId: string;
+  fromId: string;
+  toId: string;
+  version: number;
+  changes?: ChangeSet;
+  causedBy?: EventCause;
+}
+
 let _eventCounter = 0;
 
 function generateEventId(): string {
@@ -35,7 +46,7 @@ function generateEventId(): string {
 }
 
 /**
- * Emits CloudEvents for object lifecycle operations.
+ * Emits CloudEvents for object and link lifecycle operations.
  */
 export class EngineEventEmitter {
   private readonly source: string;
@@ -46,6 +57,8 @@ export class EngineEventEmitter {
     this.bus = bus;
   }
 
+  // ── Object events ──────────────────────────────────────────────────────
+
   /** Emit an object.created event. */
   async emitObjectCreated(
     ctx: RequestContext,
@@ -54,7 +67,7 @@ export class EngineEventEmitter {
     version: number,
     cause?: EventCause,
   ): Promise<void> {
-    await this.emitObjectEvent('openfoundry.object.created', ctx, {
+    await this.emitEvent('openfoundry.object.created', `${objectType}/${objectId}`, ctx, {
       objectType,
       objectId,
       version,
@@ -71,7 +84,7 @@ export class EngineEventEmitter {
     changes: ChangeSet,
     cause?: EventCause,
   ): Promise<void> {
-    await this.emitObjectEvent('openfoundry.object.updated', ctx, {
+    await this.emitEvent('openfoundry.object.updated', `${objectType}/${objectId}`, ctx, {
       objectType,
       objectId,
       version,
@@ -88,7 +101,7 @@ export class EngineEventEmitter {
     version: number,
     cause?: EventCause,
   ): Promise<void> {
-    await this.emitObjectEvent('openfoundry.object.deleted', ctx, {
+    await this.emitEvent('openfoundry.object.deleted', `${objectType}/${objectId}`, ctx, {
       objectType,
       objectId,
       version,
@@ -96,17 +109,84 @@ export class EngineEventEmitter {
     });
   }
 
-  private async emitObjectEvent(
-    type: CloudEventType,
-    _ctx: RequestContext,
-    data: ObjectEventData,
+  // ── Link events ────────────────────────────────────────────────────────
+
+  /** Emit a link.created event. */
+  async emitLinkCreated(
+    ctx: RequestContext,
+    linkType: string,
+    linkId: string,
+    fromId: string,
+    toId: string,
+    version: number,
+    cause?: EventCause,
   ): Promise<void> {
-    const event: CloudEvent<ObjectEventData> = {
+    await this.emitEvent('openfoundry.link.created', `${linkType}/${linkId}`, ctx, {
+      linkType,
+      linkId,
+      fromId,
+      toId,
+      version,
+      causedBy: this.buildCause(ctx, cause),
+    });
+  }
+
+  /** Emit a link.updated event. */
+  async emitLinkUpdated(
+    ctx: RequestContext,
+    linkType: string,
+    linkId: string,
+    fromId: string,
+    toId: string,
+    version: number,
+    changes: ChangeSet,
+    cause?: EventCause,
+  ): Promise<void> {
+    await this.emitEvent('openfoundry.link.updated', `${linkType}/${linkId}`, ctx, {
+      linkType,
+      linkId,
+      fromId,
+      toId,
+      version,
+      changes,
+      causedBy: this.buildCause(ctx, cause),
+    });
+  }
+
+  /** Emit a link.deleted event. */
+  async emitLinkDeleted(
+    ctx: RequestContext,
+    linkType: string,
+    linkId: string,
+    fromId: string,
+    toId: string,
+    version: number,
+    cause?: EventCause,
+  ): Promise<void> {
+    await this.emitEvent('openfoundry.link.deleted', `${linkType}/${linkId}`, ctx, {
+      linkType,
+      linkId,
+      fromId,
+      toId,
+      version,
+      causedBy: this.buildCause(ctx, cause),
+    });
+  }
+
+  // ── Internals ──────────────────────────────────────────────────────────
+
+  private async emitEvent(
+    type: CloudEventType,
+    subject: string,
+    _ctx: RequestContext,
+    data: ObjectEventData | LinkEventData,
+  ): Promise<void> {
+    const event: CloudEvent<ObjectEventData | LinkEventData> = {
       specversion: '1.0',
       id: generateEventId(),
       source: this.source,
       type,
-      subject: `${data.objectType}/${data.objectId}`,
+      subject,
       time: new Date().toISOString() as DateTime,
       datacontenttype: 'application/json',
       data,
