@@ -53,6 +53,16 @@ postgresql://$(POSTGRES_USERNAME):$(POSTGRES_PASSWORD)@{{ .Values.storage.postgr
 {{- end }}
 
 {{/*
+Service account name.
+HELM-14: Explicit service account for all deployments.
+*/}}
+{{- define "openfoundry.serviceAccountName" -}}
+{{- if .Values.serviceAccount }}
+{{- .Values.serviceAccount.name | default "" }}
+{{- end }}
+{{- end }}
+
+{{/*
 Image reference for a service.
 */}}
 {{- define "openfoundry.image" -}}

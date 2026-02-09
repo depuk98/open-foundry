@@ -215,8 +215,11 @@ export class SubscriptionManager {
     if (OBJECT_EVENT_CHANGE_MAP[event.type]) {
       const mapped = mapObjectEvent(event as CloudEvent<ObjectEventData>);
       if (mapped) {
-        void this.pubsub.publish(mapped.topic, {
+        // CQ-19: Log errors from pubsub publish instead of silently swallowing
+        this.pubsub.publish(mapped.topic, {
           [mapped.topic]: mapped.changeEvent,
+        }).catch((err: unknown) => {
+          console.warn(`[PubSub] Failed to publish to ${mapped.topic}:`, err instanceof Error ? err.message : String(err));
         });
       }
       return;
@@ -237,7 +240,9 @@ export class SubscriptionManager {
             timestamp: event.time,
           };
           // Use a generic topic based on the objectId
-          void this.pubsub.publish(link.topic, changeEvent);
+          this.pubsub.publish(link.topic, changeEvent).catch((err: unknown) => {
+            console.warn(`[PubSub] Failed to publish link event to ${link.topic}:`, err instanceof Error ? err.message : String(err));
+          });
         }
       }
     }

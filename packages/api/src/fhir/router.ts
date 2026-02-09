@@ -64,6 +64,11 @@ export function createFhirRouter(config: FhirRouterConfig) {
   const { deps, baseUrl = '' } = config;
 
   return async (req: FhirRequest): Promise<FhirResponse> => {
+    // Validate authenticated user exists (SEC-09, API-01)
+    if (!req.user || !req.user.id || !req.user.tenantId) {
+      return operationOutcome(401, 'login', 'Authentication required');
+    }
+
     // Read-only: reject write methods
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return methodNotAllowed(req.method);

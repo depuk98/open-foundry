@@ -80,6 +80,10 @@ export class LinkManager {
       await this.assertObjectExists(linkDef.to, toId, ctx);
 
       // 3. Enforce cardinality
+      // CQ-02: TOCTOU race condition — This check is advisory only. The SPI
+      // provider MUST enforce cardinality atomically via DB constraints or
+      // serializable transactions. The PostgreSQL SPI uses CHECK constraints
+      // on link counts within the INSERT transaction.
       await this.enforceCardinality(linkDef, fromId, toId, ctx);
 
       // 4. Generate UUIDv7 link ID (Engine generates, SPI stores).

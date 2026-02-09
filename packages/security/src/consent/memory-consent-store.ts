@@ -12,9 +12,14 @@ import type { ConsentStore } from "./types.js";
 export class MemoryConsentStore implements ConsentStore {
   private readonly records: ConsentRecord[] = [];
   private readonly optOuts = new Set<string>();
+  // PERF-06: Maximum records to prevent unbounded memory growth
+  private static readonly MAX_RECORDS = 100_000;
 
   async put(record: ConsentRecord): Promise<void> {
     this.records.push(structuredClone(record));
+    if (this.records.length > MemoryConsentStore.MAX_RECORDS) {
+      this.records.splice(0, this.records.length - MemoryConsentStore.MAX_RECORDS);
+    }
   }
 
   async getBySubject(subjectId: string): Promise<ConsentRecord[]> {

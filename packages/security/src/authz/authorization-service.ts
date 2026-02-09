@@ -249,7 +249,8 @@ export class AuthorizationService {
     }
 
     const redactedFields: string[] = [];
-    const result = { ...obj } as Record<string, unknown>;
+    // SEC-14: Deep clone to avoid mutating caller's nested objects
+    const result = structuredClone(obj) as Record<string, unknown>;
 
     for (const key of Object.keys(obj)) {
       if (!visible.has(key)) {

@@ -62,6 +62,9 @@ const DEFAULT_CONFIG: RateLimitConfig = {
 export class SlidingWindowRateLimiter {
   private readonly buckets = new Map<string, BucketEntry>();
   private readonly config: RateLimitConfig;
+  private lastCleanup = Date.now();
+  private static readonly CLEANUP_INTERVAL_MS = 60_000; // cleanup every 60s
+  private static readonly MAX_BUCKETS = 100_000; // hard cap on bucket count
 
   constructor(config?: Partial<RateLimitConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -72,6 +75,13 @@ export class SlidingWindowRateLimiter {
    */
   check(identity: RateLimitIdentity): RateLimitResult {
     const now = Date.now();
+
+    // PERF-04: Periodic cleanup of expired buckets to prevent unbounded memory growth
+    if (now - this.lastCleanup > SlidingWindowRateLimiter.CLEANUP_INTERVAL_MS ||
+        this.buckets.size > SlidingWindowRateLimiter.MAX_BUCKETS) {
+      this.cleanupExpiredBuckets(now);
+      this.lastCleanup = now;
+    }
     const dimensions: Array<{
       key: string;
       dimension: 'tenant' | 'principal' | 'clientApp';
@@ -181,5 +191,25 @@ export class SlidingWindowRateLimiter {
   private pruneExpired(bucket: BucketEntry, now: number, windowMs: number): void {
     const cutoff = now - windowMs;
     bucket.timestamps = bucket.timestamps.filter(ts => ts > cutoff);
+  }
+
+  /**
+   * Remove buckets that have no active timestamps.
+   * PERF-04: Prevents unbounded memory growth from stale entries.
+   */
+  private cleanupExpiredBuckets(now: number): void {
+    const maxWindowMs = Math.max(
+      this.config.tenant?.windowMs ?? 0,
+      this.config.principal?.windowMs ?? 0,
+      this.config.clientApp?.windowMs ?? 0,
+    );
+    const cutoff = now - maxWindowMs;
+
+    for (const [key, bucket] of this.buckets) {
+      bucket.timestamps = bucket.timestamps.filter(ts => ts > cutoff);
+      if (bucket.timestamps.length === 0) {
+        this.buckets.delete(key);
+      }
+    }
   }
 }

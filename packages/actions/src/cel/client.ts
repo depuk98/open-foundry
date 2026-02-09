@@ -142,8 +142,9 @@ export class CelClient {
   private readonly retryBaseDelayMs: number;
   private readonly circuitBreaker: CircuitBreaker;
   private readonly protoPath: string;
+  private readonly useTls: boolean;
 
-  constructor(options: CelClientOptions & { protoPath?: string }) {
+  constructor(options: CelClientOptions & { protoPath?: string; useTls?: boolean }) {
     this.address = options.address;
     this.timeoutMs = options.timeoutMs ?? 5000;
     this.maxRetries = options.maxRetries ?? 3;
@@ -153,6 +154,7 @@ export class CelClient {
       options.circuitBreakerResetMs ?? 30_000,
     );
     this.protoPath = options.protoPath ?? defaultProtoPath();
+    this.useTls = options.useTls ?? false;
   }
 
   /**
@@ -183,9 +185,13 @@ export class CelClient {
       credentials: grpc.ChannelCredentials,
     ) => CelEvaluatorClient;
 
+    const credentials = this.useTls
+      ? grpc.credentials.createSsl()
+      : grpc.credentials.createInsecure();
+
     this.client = new CelEvaluatorConstructor(
       this.address,
-      grpc.credentials.createInsecure(),
+      credentials,
     );
 
     return this.client;

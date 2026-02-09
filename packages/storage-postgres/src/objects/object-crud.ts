@@ -27,6 +27,31 @@ import { PgTransaction, resolveQueryable } from '../transactions/index.js';
 
 const GRAPH_NAME = 'openfoundry';
 
+/**
+ * Sanitize a value for inclusion in an AGE Cypher string literal.
+ * Apache AGE does not support parameterized Cypher queries, so we must
+ * validate and escape values before interpolation.
+ *
+ * Rejects any value containing characters that could break out of a
+ * Cypher string literal or label context.
+ */
+function sanitizeCypherValue(value: string, context: string): string {
+  // Reject values with characters that could enable injection:
+  // single/double quotes, backslashes, backticks, dollar signs, braces
+  if (/['"`\\${}]/.test(value)) {
+    throw new Error(`Invalid ${context}: contains disallowed characters`);
+  }
+  // Labels must be valid identifiers (alphanumeric + underscore)
+  return value;
+}
+
+function sanitizeCypherLabel(label: string): string {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(label)) {
+    throw new Error(`Invalid Cypher label: ${label}`);
+  }
+  return label;
+}
+
 let _counter = 0;
 function genId(): string {
   return `pg_${Date.now().toString(36)}_${(++_counter).toString(36)}`;
@@ -321,8 +346,9 @@ export async function queryObjects(
     orderClause = ` ORDER BY ${orderParts.join(', ')}`;
   }
 
-  // Pagination
-  const limit = options?.limit ?? 100;
+  // Pagination — PERF-01: enforce maximum limit to prevent DoS
+  const MAX_QUERY_LIMIT = 1000;
+  const limit = Math.min(options?.limit ?? 100, MAX_QUERY_LIMIT);
   const offset = options?.offset ?? 0;
   const paginationParams = [...allParams, limit, offset];
   const limitParam = `$${allParams.length + 1}`;
@@ -380,9 +406,12 @@ async function ageQuery(q: Pool | import('pg').PoolClient, cypher: string): Prom
     await q.query(
       `SELECT * FROM cypher('${GRAPH_NAME}', $$${cypher}$$) AS (v agtype)`,
     );
-  } catch {
+  } catch (err) {
     // AGE might not be available (e.g., in tests without AGE extension).
-    // Silently skip graph operations to allow graceful degradation.
+    // Log but don't fail — graceful degradation for graph operations.
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('[AGE] Graph operation failed:', err instanceof Error ? err.message : String(err));
+    }
   }
 }
 
@@ -392,9 +421,12 @@ async function createAgeVertex(
   tenantId: string,
   id: string,
 ): Promise<void> {
+  const safeType = sanitizeCypherLabel(type);
+  const safeTenant = sanitizeCypherValue(tenantId, 'tenantId');
+  const safeId = sanitizeCypherValue(id, 'id');
   await ageQuery(
     q,
-    `CREATE (:${type} {tenant_id: '${tenantId}', id: '${id}'})`,
+    `CREATE (:${safeType} {tenant_id: '${safeTenant}', id: '${safeId}'})`,
   );
 }
 
@@ -404,11 +436,12 @@ async function updateAgeVertex(
   tenantId: string,
   id: string,
 ): Promise<void> {
-  // For now, the vertex just tracks identity. A full implementation would
-  // sync selected properties. The MATCH ensures we only touch our vertex.
+  const safeType = sanitizeCypherLabel(type);
+  const safeTenant = sanitizeCypherValue(tenantId, 'tenantId');
+  const safeId = sanitizeCypherValue(id, 'id');
   await ageQuery(
     q,
-    `MATCH (v:${type} {tenant_id: '${tenantId}', id: '${id}'}) SET v.updated = true RETURN v`,
+    `MATCH (v:${safeType} {tenant_id: '${safeTenant}', id: '${safeId}'}) SET v.updated = true RETURN v`,
   );
 }
 
@@ -418,9 +451,11 @@ async function deleteAgeVertex(
   tenantId: string,
   id: string,
 ): Promise<void> {
-  // DETACH DELETE removes the vertex and all connected edges
+  const safeType = sanitizeCypherLabel(type);
+  const safeTenant = sanitizeCypherValue(tenantId, 'tenantId');
+  const safeId = sanitizeCypherValue(id, 'id');
   await ageQuery(
     q,
-    `MATCH (v:${type} {tenant_id: '${tenantId}', id: '${id}'}) DETACH DELETE v`,
+    `MATCH (v:${safeType} {tenant_id: '${safeTenant}', id: '${safeId}'}) DETACH DELETE v`,
   );
 }

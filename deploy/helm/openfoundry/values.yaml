@@ -65,8 +65,16 @@ sync:
     url: http://debezium:8083
 
 # -- CEL evaluator (Go sidecar)
+# HELM-20: Include grpc:// protocol prefix
 celEvaluator:
-  url: cel-evaluator:50051
+  url: grpc://cel-evaluator:50051
+
+# HELM-25: Configurable runtime environment
+nodeEnv: production
+
+# HELM-14: Service account name for all deployments
+serviceAccount:
+  name: ""
 
 # -- Per-service configuration
 

@@ -29,7 +29,10 @@ function generateAuditId(): string {
   idCounter += 1;
   const ts = Date.now().toString(36);
   const seq = idCounter.toString(36).padStart(4, "0");
-  const rand = Math.random().toString(36).slice(2, 8);
+  // SEC-16: Use crypto for unique IDs across distributed instances
+  const randBytes = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(randBytes);
+  const rand = Array.from(randBytes, (b) => b.toString(36)).join('').slice(0, 8);
   return `aud_${ts}_${seq}_${rand}`;
 }
 

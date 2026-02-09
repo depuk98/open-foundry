@@ -20,10 +20,23 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "openfoundry.serviceAccountName" . | default "default" }}
+      {{/* HELM-07: Security context for all pods */}}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: sync-engine
           image: {{ include "openfoundry.image" (dict "global" .Values.image "svc" .Values.syncEngine.image "name" "sync") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{/* HELM-07: Container security context */}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: {{ .Values.syncEngine.port }}
@@ -74,3 +87,9 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.syncEngine.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

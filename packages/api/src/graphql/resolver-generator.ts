@@ -295,7 +295,12 @@ function generateQueryResolvers(
       const allowedIds = allowedObjects.map((o: string) => {
         const parts = o.split(':');
         return parts[parts.length - 1];
-      });
+      }).filter((id): id is string => id !== undefined && id !== '');
+
+      // SEC-11: If no objects are authorized, return empty connection immediately
+      if (allowedIds.length === 0) {
+        return buildConnection([], 0, 0);
+      }
 
       // Build combined filter
       let combinedFilter: FilterExpression;
@@ -421,7 +426,8 @@ function generateMutationResolver(
       // Publish change events for subscriptions
       for (const affected of result.affectedObjects) {
         const topic = `${lowerFirst(affected.type)}Changed`;
-        void pubsub.publish(topic, {
+        // CQ-18: Log errors from pubsub publish instead of silently swallowing
+        pubsub.publish(topic, {
           [topic]: {
             changeType: affected.changeType.toUpperCase(),
             object: { id: affected.id, _type: affected.type },
@@ -429,6 +435,8 @@ function generateMutationResolver(
             causedBy: action.name,
             timestamp: new Date().toISOString(),
           },
+        }).catch((err: unknown) => {
+          console.warn(`[PubSub] Failed to publish to ${topic}:`, err instanceof Error ? err.message : String(err));
         });
       }
 

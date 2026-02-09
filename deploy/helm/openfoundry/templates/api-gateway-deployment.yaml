@@ -20,17 +20,28 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "openfoundry.serviceAccountName" . | default "default" }}
+      {{/* HELM-07: Security context for all pods */}}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: api-gateway
           image: {{ include "openfoundry.image" (dict "global" .Values.image "svc" .Values.apiGateway.image "name" "api") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{/* HELM-07: Container security context */}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: {{ .Values.apiGateway.port }}
               protocol: TCP
           env:
-            - name: NODE_ENV
-              value: production
             - name: PORT
               value: {{ .Values.apiGateway.port | quote }}
             - name: OTEL_SERVICE_NAME
@@ -64,3 +75,9 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.apiGateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

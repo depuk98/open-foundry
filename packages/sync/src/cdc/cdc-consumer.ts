@@ -124,8 +124,11 @@ export class CdcConsumer {
           }
         } catch (error) {
           this._stats.recordsFailed++;
-          // Continue processing remaining records
-          // In production, this would log to observability
+          // CQ-17: Log error details instead of silently swallowing
+          console.error(
+            `[CDC] Record processing failed for datasource=${this.datasource} table=${record.table}:`,
+            error instanceof Error ? error.message : String(error),
+          );
         }
       }
 

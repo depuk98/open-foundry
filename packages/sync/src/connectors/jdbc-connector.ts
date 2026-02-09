@@ -290,13 +290,24 @@ export class JdbcConnector implements Connector {
 
   /**
    * Escape a SQL identifier to prevent injection.
-   * Uses PostgreSQL's double-quote escaping.
+   * Validates each part of a schema.table identifier separately
+   * and double-quote escapes each part per PostgreSQL convention.
    */
   private escapeIdentifier(identifier: string): string {
-    // Only allow alphanumeric, underscore, and dot (for schema.table)
-    if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(identifier)) {
-      throw new Error(`Invalid SQL identifier: ${identifier}`);
+    const parts = identifier.split('.');
+    if (parts.length > 2) {
+      throw new Error(`Invalid SQL identifier: ${identifier} (too many parts)`);
     }
-    return `"${identifier}"`;
+    for (const part of parts) {
+      // Each part must be a valid PostgreSQL identifier
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(part)) {
+        throw new Error(`Invalid SQL identifier part: ${part}`);
+      }
+      if (part.length > 63) {
+        throw new Error(`SQL identifier part too long: ${part}`);
+      }
+    }
+    // Quote each part separately: "schema"."table"
+    return parts.map(p => `"${p}"`).join('.');
   }
 }

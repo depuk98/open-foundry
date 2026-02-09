@@ -114,14 +114,24 @@ export async function traverse(
   const q = resolveQueryable(pool, tx);
   const includeDeleted = options?.includeDeleted ?? false;
 
+  // PERF-03: Enforce maximum traversal depth to prevent resource exhaustion
+  const MAX_TRAVERSAL_DEPTH = 10;
+  if (path.steps.length > MAX_TRAVERSAL_DEPTH) {
+    throw new Error(`Traversal depth ${path.steps.length} exceeds maximum of ${MAX_TRAVERSAL_DEPTH}`);
+  }
+
   const allNodes: OntologyObject[] = [];
   const allEdges: OntologyLink[] = [];
+
+  // Maximum nodes to collect during traversal to prevent resource exhaustion
+  const MAX_TRAVERSAL_NODES = 10_000;
 
   // Current frontier: set of object IDs we're traversing from
   let currentIds = [startId];
 
   for (const step of path.steps) {
     if (currentIds.length === 0) break;
+    if (allNodes.length >= MAX_TRAVERSAL_NODES) break;
 
     const linkTable = `${pgIdent(schema)}.${pgIdent(snakeCase(step.linkType))}`;
 

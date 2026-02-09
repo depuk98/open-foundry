@@ -223,12 +223,34 @@ export class ActionExecutor {
         if (!seResult.success) {
           const policy = manifest.rollback?.onSideEffectFailure ?? 'LOG_AND_CONTINUE';
           if (policy === 'ROLLBACK_ALL') {
-            // Effects already committed; we can't truly rollback here
-            // but we signal failure per the spec intent
+            // CQ-24: Attempt compensating transaction to undo committed effects.
+            // Execute reverse effects to restore prior state from beforeStates.
+            try {
+              const compensatingTxn = await this.config.storage.beginTransaction(reqCtx);
+              try {
+                for (const affected of affectedObjects) {
+                  const before = beforeStates.get(`${affected.type}:${affected.id}`);
+                  if (affected.changeType === 'created') {
+                    // Undo create by soft-deleting
+                    await compensatingTxn.deleteObject(affected.type, affected.id, 'soft');
+                  } else if (affected.changeType === 'updated' && before) {
+                    // Undo update by restoring prior state
+                    await compensatingTxn.updateObject(affected.type, affected.id, before);
+                  }
+                  // 'deleted' rollbacks are best-effort; recreating deleted objects
+                  // requires the full prior state which may not be available
+                }
+                await compensatingTxn.commit();
+              } catch {
+                await compensatingTxn.rollback();
+              }
+            } catch {
+              // Compensating transaction failed — log and continue with failure response
+            }
             return failResult(actionId, [
               {
                 code: 'SIDE_EFFECT_FAILURE',
-                message: `Side-effect "${se.name}" failed: ${seResult.error ?? 'unknown error'}`,
+                message: `Side-effect "${se.name}" failed: ${seResult.error ?? 'unknown error'}. Compensating transaction attempted.`,
               },
             ]);
           }

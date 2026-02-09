@@ -26,15 +26,16 @@ export function generateUUIDv7(): string {
     t = Math.floor(t / 256);
   }
 
-  // 10 bytes of randomness
+  // 10 bytes of cryptographic randomness
+  // Node.js 20+ always has globalThis.crypto.getRandomValues (Web Crypto API)
   const randBytes = new Uint8Array(10);
   if (typeof globalThis.crypto !== 'undefined' && globalThis.crypto.getRandomValues) {
     globalThis.crypto.getRandomValues(randBytes);
   } else {
-    // Fallback for environments without Web Crypto
-    for (let i = 0; i < 10; i++) {
-      randBytes[i] = Math.floor(Math.random() * 256);
-    }
+    // SEC-13: Use Node.js crypto instead of Math.random for unpredictable IDs
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { randomFillSync } = require('node:crypto') as typeof import('node:crypto');
+    randomFillSync(randBytes);
   }
 
   // Assemble 16 bytes

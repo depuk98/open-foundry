@@ -753,9 +753,9 @@ describe('pagination utilities', () => {
     }
   });
 
-  it('decodes invalid cursor to 0', () => {
-    expect(decodeCursor('not-a-valid-cursor')).toBe(0);
-    expect(decodeCursor('')).toBe(0);
+  it('throws on invalid cursor', () => {
+    expect(() => decodeCursor('not-a-valid-cursor')).toThrow('Invalid cursor format');
+    expect(() => decodeCursor('')).toThrow('Invalid cursor format');
   });
 
   it('resolves first/after pagination', () => {

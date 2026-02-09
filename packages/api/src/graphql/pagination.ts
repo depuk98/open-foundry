@@ -15,7 +15,8 @@ export function decodeCursor(cursor: string): number {
   const decoded = Buffer.from(cursor, 'base64').toString('utf8');
   const match = decoded.match(/^cursor:(\d+)$/);
   if (!match || !match[1]) {
-    return 0;
+    // CQ-30: Throw on invalid cursor instead of silently returning 0
+    throw new Error(`Invalid cursor format: ${cursor}`);
   }
   return parseInt(match[1], 10);
 }

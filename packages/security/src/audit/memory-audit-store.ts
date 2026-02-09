@@ -11,10 +11,16 @@ import type { AuditStore, AuditQueryFilter } from "./types.js";
 
 export class MemoryAuditStore implements AuditStore {
   private readonly records: AuditRecord[] = [];
+  // PERF-05: Maximum records to prevent unbounded memory growth in dev/test
+  private static readonly MAX_RECORDS = 100_000;
 
   async append(record: AuditRecord): Promise<void> {
     // Deep-freeze to enforce immutability — no mutation after write
     this.records.push(Object.freeze(structuredClone(record)));
+    // Evict oldest records if over limit
+    if (this.records.length > MemoryAuditStore.MAX_RECORDS) {
+      this.records.splice(0, this.records.length - MemoryAuditStore.MAX_RECORDS);
+    }
   }
 
   async query(filter: AuditQueryFilter): Promise<AuditRecord[]> {

@@ -327,6 +327,12 @@ function evaluateCelExpr(
 /**
  * Step 3: Uniqueness check.
  * Queries the storage provider to verify @unique field values don't conflict.
+ *
+ * CQ-01: TOCTOU race condition — This check is advisory only. The caller MUST
+ * run within a serializable transaction or rely on DB UNIQUE constraints to
+ * prevent concurrent inserts from creating duplicates between the check and
+ * the subsequent INSERT. The PostgreSQL SPI provider should add UNIQUE indexes
+ * on all @unique fields during schema migration.
  */
 async function checkUniqueness(
   objectType: ObjectType,

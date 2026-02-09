@@ -28,6 +28,24 @@ import type { Queryable } from '../transactions/index.js';
 
 const GRAPH_NAME = 'openfoundry';
 
+/**
+ * Sanitize a value for inclusion in an AGE Cypher string literal.
+ * Apache AGE does not support parameterized Cypher queries.
+ */
+function sanitizeCypherValue(value: string, context: string): string {
+  if (/['"`\\${}]/.test(value)) {
+    throw new Error(`Invalid ${context}: contains disallowed characters`);
+  }
+  return value;
+}
+
+function sanitizeCypherLabel(label: string): string {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(label)) {
+    throw new Error(`Invalid Cypher label: ${label}`);
+  }
+  return label;
+}
+
 let _counter = 0;
 function genId(): string {
   return `lk_${Date.now().toString(36)}_${(++_counter).toString(36)}`;
@@ -86,8 +104,12 @@ async function ageQuery(q: Queryable, cypher: string): Promise<void> {
     await q.query(
       `SELECT * FROM cypher('${GRAPH_NAME}', $$${cypher}$$) AS (v agtype)`,
     );
-  } catch {
-    // AGE might not be available. Silently skip for graceful degradation.
+  } catch (err) {
+    // AGE might not be available (e.g., in tests without AGE extension).
+    // Log but don't fail — graceful degradation for graph operations.
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('[AGE] Graph operation failed:', err instanceof Error ? err.message : String(err));
+    }
   }
 }
 
@@ -249,10 +271,17 @@ export async function createLink(
   const row = result.rows[0] as Record<string, unknown>;
   const link = rowToLink(row);
 
-  // Create AGE edge
+  // Create AGE edge (sanitize all interpolated values)
+  const safeFromType = sanitizeCypherLabel(fromType);
+  const safeToType = sanitizeCypherLabel(toType);
+  const safeLinkType = sanitizeCypherLabel(type);
+  const safeTenant = sanitizeCypherValue(ctx.tenantId, 'tenantId');
+  const safeFromId = sanitizeCypherValue(fromId, 'fromId');
+  const safeToId = sanitizeCypherValue(toId, 'toId');
+  const safeLinkId = sanitizeCypherValue(id, 'linkId');
   await ageQuery(
     q,
-    `MATCH (a:${fromType} {tenant_id: '${ctx.tenantId}', id: '${fromId}'}), (b:${toType} {tenant_id: '${ctx.tenantId}', id: '${toId}'}) CREATE (a)-[:${type} {tenant_id: '${ctx.tenantId}', id: '${id}'}]->(b)`,
+    `MATCH (a:${safeFromType} {tenant_id: '${safeTenant}', id: '${safeFromId}'}), (b:${safeToType} {tenant_id: '${safeTenant}', id: '${safeToId}'}) CREATE (a)-[:${safeLinkType} {tenant_id: '${safeTenant}', id: '${safeLinkId}'}]->(b)`,
   );
 
   return link;
@@ -341,10 +370,13 @@ export async function deleteLink(
     throw new Error(`Link ${type}:${linkId} not found or already deleted`);
   }
 
-  // Remove AGE edge
+  // Remove AGE edge (sanitize all interpolated values)
+  const safeDelType = sanitizeCypherLabel(type);
+  const safeDelTenant = sanitizeCypherValue(ctx.tenantId, 'tenantId');
+  const safeDelId = sanitizeCypherValue(linkId, 'linkId');
   await ageQuery(
     q,
-    `MATCH ()-[e:${type} {tenant_id: '${ctx.tenantId}', id: '${linkId}'}]->() DELETE e`,
+    `MATCH ()-[e:${safeDelType} {tenant_id: '${safeDelTenant}', id: '${safeDelId}'}]->() DELETE e`,
   );
 }
 
@@ -385,8 +417,9 @@ export async function getLinks(
   const countResult = await q.query(countSql, params);
   const totalCount = parseInt(String((countResult.rows[0] as Record<string, unknown>)['cnt']), 10);
 
-  // Pagination
-  const limit = options?.limit ?? 100;
+  // Pagination — PERF-02: enforce maximum limit to prevent DoS
+  const MAX_LINK_QUERY_LIMIT = 1000;
+  const limit = Math.min(options?.limit ?? 100, MAX_LINK_QUERY_LIMIT);
   const offset = options?.offset ?? 0;
   const paginationParams = [...params, limit, offset];
   const limitParam = `$${params.length + 1}`;

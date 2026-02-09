@@ -163,7 +163,18 @@ function generateListRoute(
         const allowedIds = allowedObjects.map((o: string) => {
           const parts = o.split(':');
           return parts[parts.length - 1];
-        });
+        }).filter((id): id is string => id !== undefined && id !== '');
+
+        // SEC-10: If no objects are authorized, return empty result immediately
+        if (allowedIds.length === 0) {
+          return {
+            status: 200,
+            body: {
+              data: [],
+              pagination: { totalCount: 0, limit: parsePagination(req.query).limit, offset: 0, hasNextPage: false, hasPreviousPage: false },
+            },
+          };
+        }
 
         const idFilter: FilterExpression = {
           field: '_id',

@@ -16,9 +16,10 @@ import type {
 
 /**
  * Deep-clone a ParsedSchema to ensure stored snapshots are immutable.
+ * CQ-28: Use structuredClone instead of JSON round-trip for safety.
  */
 function cloneSchema(schema: ParsedSchema): ParsedSchema {
-  return JSON.parse(JSON.stringify(schema));
+  return structuredClone(schema);
 }
 
 // ─── In-Memory Implementation ───
