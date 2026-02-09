@@ -1,0 +1,5 @@
+packages:
+  - "packages/*"
+  - "domain-packs/*"
+  - "tests/*"
+  - "tools/*"
