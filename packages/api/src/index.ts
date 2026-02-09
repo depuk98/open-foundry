@@ -87,3 +87,16 @@ export type {
   FhirReference,
   FhirMeta,
 } from './fhir/index.js';
+
+export {
+  generateRestRoutes,
+  mapErrorToHttpStatus,
+  createRestErrorResponse,
+  wrapErrorToRest,
+} from './rest/index.js';
+
+export type {
+  RestRequest,
+  RestResponse,
+  RestRoute,
+} from './rest/index.js';
