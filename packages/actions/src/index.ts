@@ -42,3 +42,23 @@ export type {
   ManifestIssueSeverity,
   ManifestValidationResult,
 } from './parser/index.js';
+
+export { ActionExecutor } from './executor/index.js';
+
+export type {
+  ActionActor,
+  ActionContext,
+  ActionResult,
+  ActionError,
+  AffectedObject,
+  ChangeType,
+  ActionExecutorConfig,
+  SecurityLayer,
+  PermissionResult,
+  CelEvaluator,
+  CelEvalResult,
+  SideEffectHandler,
+  SideEffectResult,
+  AuditWriter,
+  ActionEventPublisher,
+} from './executor/index.js';
