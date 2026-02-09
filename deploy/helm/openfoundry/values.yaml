@@ -78,6 +78,9 @@ serviceAccount:
 
 # -- Per-service configuration
 
+# HELM-12: Per-service resource profiles (differentiated by workload type).
+# HELM-13: Ephemeral storage limits included to prevent disk exhaustion.
+
 apiGateway:
   replicaCount: 1
   image:
@@ -85,11 +88,13 @@ apiGateway:
   port: 4000
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 200m
+      memory: 384Mi
+      ephemeral-storage: 100Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "1"
+      memory: 768Mi
+      ephemeral-storage: 500Mi
 
 ontologyEngine:
   replicaCount: 1
@@ -98,11 +103,13 @@ ontologyEngine:
   port: 4001
   resources:
     requests:
-      cpu: 100m
+      cpu: 150m
       memory: 256Mi
+      ephemeral-storage: 100Mi
     limits:
       cpu: 500m
       memory: 512Mi
+      ephemeral-storage: 500Mi
 
 actionExecutor:
   replicaCount: 1
@@ -113,9 +120,11 @@ actionExecutor:
     requests:
       cpu: 100m
       memory: 256Mi
+      ephemeral-storage: 100Mi
     limits:
       cpu: 500m
       memory: 512Mi
+      ephemeral-storage: 500Mi
 
 syncEngine:
   replicaCount: 1
@@ -124,11 +133,13 @@ syncEngine:
   port: 4003
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 150m
+      memory: 384Mi
+      ephemeral-storage: 100Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 750m
+      memory: 768Mi
+      ephemeral-storage: 500Mi
 
 securityService:
   replicaCount: 1
@@ -139,9 +150,11 @@ securityService:
     requests:
       cpu: 100m
       memory: 256Mi
+      ephemeral-storage: 100Mi
     limits:
       cpu: 500m
       memory: 512Mi
+      ephemeral-storage: 500Mi
 
 celEvaluatorService:
   replicaCount: 1
@@ -150,11 +163,13 @@ celEvaluatorService:
   port: 50051
   resources:
     requests:
-      cpu: 50m
+      cpu: 100m
       memory: 128Mi
+      ephemeral-storage: 50Mi
     limits:
-      cpu: 250m
+      cpu: 500m
       memory: 256Mi
+      ephemeral-storage: 200Mi
 
 # -- Ingress for api-gateway
 ingress:

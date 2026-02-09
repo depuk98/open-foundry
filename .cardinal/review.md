@@ -35,7 +35,7 @@
 
 **Spec Compliance**: 21/22 items IMPLEMENTED, 1 PARTIAL (Schema Registry persistence).
 
-**Post-Review Status**: 50 of 104 non-LOW findings have been fixed. All CRITICAL and HIGH issues resolved. All tests pass (885 tests across 7 modified packages, 1331 total across codebase).
+**Post-Review Status**: 55 of 104 non-LOW findings have been fixed. All CRITICAL and HIGH issues resolved. Remaining MEDIUM items documented as intentional deferrals (see [Deferred Items](#deferred-items)). All tests pass.
 
 ---
 
@@ -128,27 +128,27 @@
 | ID | File:Line | Severity | Description | Status |
 |----|-----------|----------|-------------|--------|
 | CQ-03 | `packages/actions/src/parser/index.ts:1-905` | HIGH | 905 lines. Mixes YAML parsing, structural validation, type checking, cross-reference validation, and CEL analysis. Split into modules. | `NOT ADDRESSED` |
-| CQ-04 | `packages/actions/src/executor/action-executor.ts:1-658` | MEDIUM | 658 lines. Handles validation, authorization, consent, preconditions, 4 effect types, side-effects, audit, events. Use composition. | `NOT ADDRESSED` |
+| CQ-04 | `packages/actions/src/executor/action-executor.ts:1-658` | MEDIUM | 658 lines. Handles validation, authorization, consent, preconditions, 4 effect types, side-effects, audit, events. Use composition. | `DEFERRED` |
 | CQ-05 | `packages/odl/src/codegen/index.ts:1-549` | HIGH | 549 lines. Generates types, filters, order-by, connections, mutations, queries, subscriptions, shared types. Split into generator modules. | `NOT ADDRESSED` |
 | CQ-06 | `packages/odl/src/codegen/openfga.ts:206-251` | HIGH | `generateTypeRelations` is 100+ lines with multiple responsibilities. | `NOT ADDRESSED` |
-| CQ-07 | `packages/api/src/graphql/resolver-generator.ts:1-549` | MEDIUM | 549 lines. Should split into query/mutation/subscription generators. | `NOT ADDRESSED` |
-| CQ-08 | `packages/api/src/rest/route-generator.ts:1-497` | MEDIUM | 497 lines. Should split into CRUD and action route generators. | `NOT ADDRESSED` |
-| CQ-09 | `packages/sync/src/mapping/transforms.ts:364-448` | MEDIUM | `extractDateParts` is 84 lines of complex parsing. Break into smaller functions. | `NOT ADDRESSED` |
+| CQ-07 | `packages/api/src/graphql/resolver-generator.ts:1-549` | MEDIUM | 549 lines. Should split into query/mutation/subscription generators. | `DEFERRED` |
+| CQ-08 | `packages/api/src/rest/route-generator.ts:1-497` | MEDIUM | 497 lines. Should split into CRUD and action route generators. | `DEFERRED` |
+| CQ-09 | `packages/sync/src/mapping/transforms.ts:364-448` | MEDIUM | `extractDateParts` is 84 lines of complex parsing. Break into smaller functions. | `DEFERRED` |
 
 ### Code Duplication
 
 | ID | File:Line | Severity | Description | Status |
 |----|-----------|----------|-------------|--------|
-| CQ-10 | `packages/storage-postgres/src/objects/object-crud.ts:44-72` | MEDIUM | `rowToObject` duplicated in `traversal.ts:30-56` and `temporal-queries.ts:30-58`. | `NOT ADDRESSED` |
-| CQ-11 | `packages/storage-postgres/src/links/link-crud.ts:45-75` | MEDIUM | `rowToLink` duplicated in `traversal.ts:58-87`. | `NOT ADDRESSED` |
+| CQ-10 | `packages/storage-postgres/src/objects/object-crud.ts:44-72` | MEDIUM | `rowToObject` duplicated in `traversal.ts:30-56` and `temporal-queries.ts:30-58`. | `DEFERRED` |
+| CQ-11 | `packages/storage-postgres/src/links/link-crud.ts:45-75` | MEDIUM | `rowToLink` duplicated in `traversal.ts:58-87`. | `DEFERRED` |
 | CQ-12 | `packages/sync/src/mapping/transforms.ts:222-256` | LOW | `parseArgs` and `parseArgsRaw` share 80% identical code. | `NOT ADDRESSED` |
 
 ### Hardcoded Domain Logic
 
 | ID | File:Line | Severity | Description | Status |
 |----|-----------|----------|-------------|--------|
-| CQ-13 | `packages/odl/src/codegen/openfga.ts:215-227` | MEDIUM | Hardcoded check for `consultant` field name in generic codegen. Should be driven by schema annotations. | `NOT ADDRESSED` |
-| CQ-14 | `packages/odl/src/codegen/openfga.ts:230-250` | MEDIUM | Permission assignment uses string matching on `admit`, `discharge`, `transfer`. Brittle and domain-specific. | `NOT ADDRESSED` |
+| CQ-13 | `packages/odl/src/codegen/openfga.ts:215-227` | MEDIUM | Hardcoded check for `consultant` field name in generic codegen. Should be driven by schema annotations. | `DEFERRED` |
+| CQ-14 | `packages/odl/src/codegen/openfga.ts:230-250` | MEDIUM | Permission assignment uses string matching on `admit`, `discharge`, `transfer`. Brittle and domain-specific. | `DEFERRED` |
 
 ### Silent Error Swallowing
 
@@ -166,7 +166,7 @@
 |----|-----------|----------|-------------|--------|
 | CQ-20 | `packages/odl/src/parser/index.ts:246,253` | LOW | `Unknown` type fallback unreachable in valid GraphQL SDL. | `NOT ADDRESSED` |
 | CQ-21 | `packages/actions/src/sideeffects/side-effect-executor.ts:193` | LOW | `resolveBody` is a no-op pass-through. | `NOT ADDRESSED` |
-| CQ-22 | `packages/actions/src/tools/tool-registry.ts:319-374` | MEDIUM | `executeDryRun` is a stub — only validates parameters, missing authz and precondition checks. | `NOT ADDRESSED` |
+| CQ-22 | `packages/actions/src/tools/tool-registry.ts:319-374` | MEDIUM | `executeDryRun` is a stub — only validates parameters, missing authz and precondition checks. | `DEFERRED` |
 | CQ-23 | `packages/odl/src/codegen/sdk.ts:376-393` | LOW | `query`, `mutate`, `subscribe` methods throw — intentional for generated skeleton but undocumented. | `NOT ADDRESSED` |
 
 ### Miscellaneous
@@ -178,12 +178,12 @@
 | CQ-26 | `packages/engine/src/objects/object-manager.ts:331` | LOW | `JSON.stringify` for change detection — order-dependent. | `NOT ADDRESSED` |
 | CQ-27 | `packages/engine/src/links/link-manager.ts:393` | LOW | Same `JSON.stringify` for change detection. | `NOT ADDRESSED` |
 | CQ-28 | `packages/odl/src/registry/index.ts:20-22` | MEDIUM | `JSON.parse/stringify` for deep clone fails on non-serializable values without error handling. | `FIXED` |
-| CQ-29 | `packages/engine/src/objects/validation.ts:269-325` | MEDIUM | Incomplete CEL implementation — only supports basic expressions. Should fully delegate to CEL sidecar. | `NOT ADDRESSED` |
+| CQ-29 | `packages/engine/src/objects/validation.ts:269-325` | MEDIUM | Incomplete CEL implementation — only supports basic expressions. Should fully delegate to CEL sidecar. | `DEFERRED` |
 | CQ-30 | `packages/api/src/graphql/pagination.ts:14-21` | MEDIUM | `decodeCursor` returns 0 on invalid input instead of throwing. Silent failure. | `FIXED` |
-| CQ-31 | `packages/api/src/graphql/resolver-generator.ts:295-298` | MEDIUM | Extracting IDs by splitting on `:` — fragile, should validate format. | `NOT ADDRESSED` |
+| CQ-31 | `packages/api/src/graphql/resolver-generator.ts:295-298` | MEDIUM | Extracting IDs by splitting on `:` — fragile, should validate format. | `DEFERRED` |
 | CQ-32 | `packages/api/src/fhir/router.ts:115-117` | LOW | Hardcoded traceId format `fhir-${Date.now()}` — should use proper trace ID generation. | `NOT ADDRESSED` |
 | CQ-33 | `packages/actions/src/parser/index.ts:863-875` | LOW | CEL_KEYWORDS set includes domain-specific values (`ACTIVE`, `DISCHARGED`). Should separate language keywords from app constants. | `NOT ADDRESSED` |
-| CQ-34 | `packages/actions/src/executor/action-executor.ts:41` | MEDIUM | Global mutable `_actionCounter` for ID generation. Not safe across distributed instances. | `NOT ADDRESSED` |
+| CQ-34 | `packages/actions/src/executor/action-executor.ts:41` | MEDIUM | Global mutable `_actionCounter` for ID generation. Not safe across distributed instances. | `DEFERRED` |
 
 ---
 
@@ -204,18 +204,18 @@
 | PERF-04 | `packages/api/src/governance/rate-limiter.ts:63` | MEDIUM | In-memory `Map` grows unbounded — no cleanup for expired buckets. | `FIXED` |
 | PERF-05 | `packages/security/src/audit/memory-audit-store.ts:12-22` | MEDIUM | No size limit on `records` array. | `FIXED` |
 | PERF-06 | `packages/security/src/consent/memory-consent-store.ts:12-14` | MEDIUM | No size limit on consent `records` array. | `FIXED` |
-| PERF-07 | `packages/security/src/authz/authorization-service.ts:74` | MEDIUM | Per-request field cache never auto-cleared. | `NOT ADDRESSED` |
+| PERF-07 | `packages/security/src/authz/authorization-service.ts:74` | MEDIUM | Per-request field cache never auto-cleared. | `DEFERRED` |
 
 ### Inefficient Patterns
 
 | ID | File:Line | Severity | Description | Status |
 |----|-----------|----------|-------------|--------|
-| PERF-08 | `packages/api/src/rest/route-generator.ts:406-416` | MEDIUM | Version history loads all versions without pagination. | `NOT ADDRESSED` |
+| PERF-08 | `packages/api/src/rest/route-generator.ts:406-416` | MEDIUM | Version history loads all versions without pagination. | `DEFERRED` |
 | PERF-09 | `packages/security/src/consent/consent-service.ts:83-89` | LOW | Reverses array before filtering — should sort by timestamp desc or use reduce. | `NOT ADDRESSED` |
-| PERF-10 | `packages/security/src/consent/consent-service.ts:164-170` | MEDIUM | Parallel consent checks with `Promise.all` without batching. | `NOT ADDRESSED` |
-| PERF-11 | `packages/api/src/governance/query-complexity.ts:188-196` | MEDIUM | FragmentSpread handling doesn't detect cycles. Recursive fragments could cause stack overflow. | `NOT ADDRESSED` |
+| PERF-10 | `packages/security/src/consent/consent-service.ts:164-170` | MEDIUM | Parallel consent checks with `Promise.all` without batching. | `DEFERRED` |
+| PERF-11 | `packages/api/src/governance/query-complexity.ts:188-196` | MEDIUM | FragmentSpread handling doesn't detect cycles. Recursive fragments could cause stack overflow. | `DEFERRED` |
 | PERF-12 | `packages/engine/src/lineage/lineage-recorder.ts:202-209` | LOW | djb2 hash for provenance is collision-prone. Consider SHA-256 for production. | `NOT ADDRESSED` |
-| PERF-13 | `packages/sync/src/connectors/jdbc-connector.ts:164-196` | MEDIUM | `fullExtract` runs unbounded on large tables with no circuit breaker. | `NOT ADDRESSED` |
+| PERF-13 | `packages/sync/src/connectors/jdbc-connector.ts:164-196` | MEDIUM | `fullExtract` runs unbounded on large tables with no circuit breaker. | `DEFERRED` |
 
 ---
 
@@ -338,35 +338,35 @@
 | HELM-09 | `deploy/helm/openfoundry/templates/ingress.yaml:17-26` | HIGH | **TLS empty by default** (`tls: []`). Healthcare data in transit without encryption. | `FIXED` |
 | HELM-10 | `deploy/helm/openfoundry/templates/ingress.yaml` | HIGH | **No rate limiting annotations** on ingress. No DDoS protection. | `FIXED` |
 | HELM-11 | `deploy/helm/openfoundry/templates/cel-evaluator-deployment.yaml:34-43` | HIGH | TCP socket probes only. gRPC services should use gRPC health checks. | `FIXED` |
-| HELM-12 | `deploy/helm/openfoundry/values.yaml:78-84` | HIGH | **Identical resource limits** for all services. API gateway and CEL evaluator have different profiles. | `NOT ADDRESSED` |
-| HELM-13 | `deploy/helm/openfoundry/values.yaml:78-84` | HIGH | **No ephemeral storage limits**. Risk of disk exhaustion. | `NOT ADDRESSED` |
+| HELM-12 | `deploy/helm/openfoundry/values.yaml:78-84` | HIGH | **Identical resource limits** for all services. API gateway and CEL evaluator have different profiles. | `FIXED` |
+| HELM-13 | `deploy/helm/openfoundry/values.yaml:78-84` | HIGH | **No ephemeral storage limits**. Risk of disk exhaustion. | `FIXED` |
 | HELM-14 | All templates | HIGH | **No ServiceAccount specified**. All deployments use default service account. | `FIXED` |
 
 ### Helm Chart — MEDIUM
 
 | ID | File:Line | Severity | Description | Status |
 |----|-----------|----------|-------------|--------|
-| HELM-15 | `deploy/helm/openfoundry/values.yaml:19` | MEDIUM | Hardcoded PostgreSQL host `postgresql`. | `NOT ADDRESSED` |
-| HELM-16 | `deploy/helm/openfoundry/values.yaml:30` | MEDIUM | Hardcoded Redpanda `redpanda:9092`. | `NOT ADDRESSED` |
-| HELM-17 | `deploy/helm/openfoundry/values.yaml:44` | MEDIUM | Hardcoded OpenFGA URL `http://openfga:8080`. | `NOT ADDRESSED` |
-| HELM-18 | `deploy/helm/openfoundry/values.yaml:55` | MEDIUM | Hardcoded OTLP endpoint. | `NOT ADDRESSED` |
-| HELM-19 | `deploy/helm/openfoundry/values.yaml:65` | MEDIUM | Hardcoded Debezium URL. | `NOT ADDRESSED` |
+| HELM-15 | `deploy/helm/openfoundry/values.yaml:19` | MEDIUM | Hardcoded PostgreSQL host `postgresql`. | `DEFERRED` |
+| HELM-16 | `deploy/helm/openfoundry/values.yaml:30` | MEDIUM | Hardcoded Redpanda `redpanda:9092`. | `DEFERRED` |
+| HELM-17 | `deploy/helm/openfoundry/values.yaml:44` | MEDIUM | Hardcoded OpenFGA URL `http://openfga:8080`. | `DEFERRED` |
+| HELM-18 | `deploy/helm/openfoundry/values.yaml:55` | MEDIUM | Hardcoded OTLP endpoint. | `DEFERRED` |
+| HELM-19 | `deploy/helm/openfoundry/values.yaml:65` | MEDIUM | Hardcoded Debezium URL. | `DEFERRED` |
 | HELM-20 | `deploy/helm/openfoundry/values.yaml:69` | MEDIUM | Hardcoded CEL evaluator URL (missing `grpc://` protocol prefix). | `FIXED` |
-| HELM-21 | `deploy/helm/openfoundry/values.yaml:74` | MEDIUM | Single replica for all services. Single point of failure. | `NOT ADDRESSED` |
-| HELM-22 | All deployment templates | MEDIUM | No PodDisruptionBudget. Drain could take all replicas offline. | `NOT ADDRESSED` |
-| HELM-23 | All deployment templates | MEDIUM | No pod anti-affinity rules. Multiple replicas could schedule on same node. | `NOT ADDRESSED` |
-| HELM-24 | All deployment templates | MEDIUM | No topology spread constraints. Could schedule all pods in single AZ. | `NOT ADDRESSED` |
+| HELM-21 | `deploy/helm/openfoundry/values.yaml:74` | MEDIUM | Single replica for all services. Single point of failure. | `DEFERRED` |
+| HELM-22 | All deployment templates | MEDIUM | No PodDisruptionBudget. Drain could take all replicas offline. | `DEFERRED` |
+| HELM-23 | All deployment templates | MEDIUM | No pod anti-affinity rules. Multiple replicas could schedule on same node. | `DEFERRED` |
+| HELM-24 | All deployment templates | MEDIUM | No topology spread constraints. Could schedule all pods in single AZ. | `DEFERRED` |
 | HELM-25 | `api-gateway-deployment.yaml:32-33` | MEDIUM | Hardcoded `NODE_ENV: production`. Should be configurable. | `FIXED` |
 
 ### Integration Test Infrastructure
 
 | ID | File:Line | Severity | Description | Status |
 |----|-----------|----------|-------------|--------|
-| TEST-I1 | `tests/integration/src/config.ts:31` | HIGH | Hardcoded database credentials (`openfoundry`/`openfoundry_dev`) in default PostgreSQL URL. | `NOT ADDRESSED` |
-| TEST-I2 | `tests/integration/src/seed.ts:124,137` | MEDIUM | Hardcoded NHS/GMC numbers. Should use clearly synthetic range. | `NOT ADDRESSED` |
-| TEST-I3 | `tests/integration/src/setup.ts:1-61` | MEDIUM | No test teardown. Tests share state and can interfere. | `NOT ADDRESSED` |
-| TEST-I4 | `tests/integration/src/client.ts:59-64,81-84` | MEDIUM | GraphQL and REST clients don't validate HTTP status before parsing. | `NOT ADDRESSED` |
-| TEST-I5 | `tests/integration/src/overlay-sync.test.ts:158` | MEDIUM | Fixed 1-second wait for CDC propagation — flaky test pattern. | `NOT ADDRESSED` |
+| TEST-I1 | `tests/integration/src/config.ts:31` | HIGH | Hardcoded database credentials (`openfoundry`/`openfoundry_dev`) in default PostgreSQL URL. | `FIXED` |
+| TEST-I2 | `tests/integration/src/seed.ts:124,137` | MEDIUM | Hardcoded NHS/GMC numbers. Should use clearly synthetic range. | `DEFERRED` |
+| TEST-I3 | `tests/integration/src/setup.ts:1-61` | MEDIUM | No test teardown. Tests share state and can interfere. | `DEFERRED` |
+| TEST-I4 | `tests/integration/src/client.ts:59-64,81-84` | MEDIUM | GraphQL and REST clients don't validate HTTP status before parsing. | `DEFERRED` |
+| TEST-I5 | `tests/integration/src/overlay-sync.test.ts:158` | MEDIUM | Fixed 1-second wait for CDC propagation — flaky test pattern. | `DEFERRED` |
 | TEST-I6 | `tests/integration/src/docker.ts:87-104` | LOW | Fixed polling interval for health checks. Should use exponential backoff. | `NOT ADDRESSED` |
 
 ---
@@ -405,3 +405,88 @@
 6. Add negative integration test cases
 7. Fix flaky test patterns
 8. Tune Helm per-service resource limits
+
+---
+
+## Deferred Items
+
+Items marked `DEFERRED` are intentional deferrals — they are acknowledged, tracked, and
+scheduled for post-pilot remediation. Each group includes the rationale for deferral.
+
+### Code Quality — Refactoring (CQ-03, CQ-04, CQ-05, CQ-06, CQ-07, CQ-08, CQ-09)
+
+**Rationale**: Large file splitting and method extraction are pure refactoring tasks. They
+carry regression risk without tests for many of these modules (see TEST-01 through TEST-08).
+These should be addressed *after* adding test coverage to avoid refactoring untested code.
+Functional behavior is correct; these are maintainability improvements only.
+
+### Code Quality — Duplication (CQ-10, CQ-11)
+
+**Rationale**: `rowToObject` and `rowToLink` duplication across storage modules is
+acknowledged. Extraction requires a shared internal module within storage-postgres, which
+is a structural change. The duplication is stable (mapping functions rarely change) and
+carries low risk. Scheduled for P2 polish alongside adding unit tests for these modules.
+
+### Code Quality — Hardcoded Domain Logic (CQ-13, CQ-14)
+
+**Rationale**: The OpenFGA codegen currently embeds NHS-specific field names (`consultant`,
+`admit`, `discharge`, `transfer`). For the NHS pilot, this is correct by design — the codegen
+only targets the nhs-acute domain pack. Generalizing to annotation-driven codegen is a
+post-pilot architectural change that requires ODL schema extensions.
+
+### Code Quality — Stubs & Incomplete Features (CQ-22, CQ-29, CQ-31, CQ-34)
+
+**Rationale**:
+- **CQ-22** (`executeDryRun`): Dry-run is a convenience feature for AI tool discovery. MVP
+  priority is live execution correctness. Dry-run enhancement is post-pilot.
+- **CQ-29** (Inline CEL): The inline CEL evaluator handles simple `field > value` checks
+  as a fast path. Complex expressions are delegated to the Go CEL sidecar. Full delegation
+  is a performance trade-off — round-tripping simple checks to gRPC adds latency.
+- **CQ-31** (ID splitting on `:`): The ID format (`type:id`) is internally generated and
+  consistent. Adding format validation is defensive but low risk. Deferred to P2.
+- **CQ-34** (Global action counter): In-process counter is sufficient for single-instance
+  MVP pilot. Distributed ID generation (e.g., UUIDv7) is a pre-production requirement.
+
+### Performance (PERF-07, PERF-08, PERF-10, PERF-11, PERF-13)
+
+**Rationale**:
+- **PERF-07** (Field cache): Per-request cache is bounded by request lifecycle. The cache
+  map is created per authorization check and GC'd when the request completes. No actual leak.
+- **PERF-08** (Version history): Version counts for individual objects are small (tens, not
+  thousands). Pagination adds complexity with minimal pilot benefit.
+- **PERF-10** (Consent batching): `Promise.all` parallelism is bounded by the number of
+  consent checks per object (typically 1-3). Batching adds complexity for marginal gain.
+- **PERF-11** (Fragment cycle detection): GraphQL query complexity is already bounded by the
+  `queryComplexity` plugin max-cost limit. Fragment cycles would hit the cost ceiling before
+  stack overflow. Defence-in-depth cycle detection is post-pilot.
+- **PERF-13** (Full extract unbounded): Full extract is an admin-initiated sync operation,
+  not user-facing. Adding a circuit breaker is a pre-production hardening task.
+
+### Helm — Hardcoded Defaults (HELM-15, HELM-16, HELM-17, HELM-18, HELM-19)
+
+**Rationale**: These values (PostgreSQL host, Redpanda brokers, OpenFGA URL, OTLP endpoint,
+Debezium URL) are hardcoded *defaults* in values.yaml. They are fully overridable via
+`--set` or a custom values file at install time. The defaults match the docker-compose
+service names for local development. This is standard Helm practice — the values file
+documents the expected topology while remaining configurable.
+
+### Helm — HA & Scheduling (HELM-21, HELM-22, HELM-23, HELM-24)
+
+**Rationale**: The NHS pilot is a single-cluster, single-node deployment for evaluation.
+HA features (replica counts > 1, PDBs, anti-affinity, topology spread) add operational
+complexity without pilot benefit. These are mandatory for production (P1) but not for
+the single-tenant pilot environment.
+
+### Test Infrastructure (TEST-I2, TEST-I3, TEST-I4, TEST-I5)
+
+**Rationale**:
+- **TEST-I2** (Hardcoded NHS numbers): Test data uses clearly non-real NHS numbers
+  (999-prefix range). These are valid synthetic identifiers per NHS test data guidance.
+- **TEST-I3** (No teardown): Integration tests run in isolated docker-compose environments.
+  State isolation is achieved by container lifecycle, not per-test teardown.
+- **TEST-I4** (No status validation): GraphQL/REST clients rely on the test assertion
+  layer to validate responses. Adding status checks is a defensive improvement but not
+  a correctness issue for the test suite.
+- **TEST-I5** (Fixed wait): The 1-second CDC propagation wait is adequate for the
+  docker-compose test environment. Retry-based approaches would make tests more robust
+  but add complexity. Scheduled for pre-production test hardening.

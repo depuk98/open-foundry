@@ -55,11 +55,14 @@ postgresql://$(POSTGRES_USERNAME):$(POSTGRES_PASSWORD)@{{ .Values.storage.postgr
 {{/*
 Service account name.
 HELM-14: Explicit service account for all deployments.
+Falls back to release-scoped name (not cluster default) when no override is set.
 */}}
 {{- define "openfoundry.serviceAccountName" -}}
-{{- if .Values.serviceAccount }}
-{{- .Values.serviceAccount.name | default "" }}
-{{- end }}
+{{- if and .Values.serviceAccount .Values.serviceAccount.name -}}
+{{- .Values.serviceAccount.name }}
+{{- else -}}
+{{- include "openfoundry.fullname" . }}
+{{- end -}}
 {{- end }}
 
 {{/*

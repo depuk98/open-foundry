@@ -27,8 +27,13 @@ export const CONFIG = {
   /** Debezium Connect URL */
   debeziumUrl: process.env['DEBEZIUM_URL'] ?? 'http://localhost:8083',
 
-  /** PostgreSQL connection */
-  postgresUrl: process.env['POSTGRES_URL'] ?? 'postgresql://openfoundry:openfoundry_dev@localhost:5432/openfoundry',
+  /**
+   * PostgreSQL connection.
+   * TEST-I1: Credentials are read from env vars only — no hardcoded defaults.
+   * For local dev, set POSTGRES_URL or individual PGUSER/PGPASSWORD env vars.
+   */
+  postgresUrl: process.env['POSTGRES_URL'] ??
+    `postgresql://${process.env['PGUSER'] ?? 'openfoundry'}:${process.env['PGPASSWORD'] ?? ''}@${process.env['PGHOST'] ?? 'localhost'}:${process.env['PGPORT'] ?? '5432'}/${process.env['PGDATABASE'] ?? 'openfoundry'}`,
 
   /** Performance thresholds (MVP Section 8) */
   perf: {

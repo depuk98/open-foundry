@@ -20,7 +20,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "openfoundry.serviceAccountName" . | default "default" }}
+      serviceAccountName: {{ include "openfoundry.serviceAccountName" . }}
       {{/* HELM-07: Security context for all pods */}}
       securityContext:
         runAsNonRoot: true
