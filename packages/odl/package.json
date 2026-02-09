@@ -1,0 +1,29 @@
+{
+  "name": "@openfoundry/odl",
+  "version": "0.0.1",
+  "description": "Open Foundry ODL (Ontology Definition Language) parser",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist coverage"
+  },
+  "files": ["dist"],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "graphql": "^16.10.0"
+  },
+  "devDependencies": {
+    "@openfoundry/spi": "workspace:*",
+    "vitest": "^3.0.0"
+  }
+}
