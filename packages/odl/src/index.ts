@@ -9,12 +9,34 @@
 export { parseOdl } from './parser/index.js';
 export { validateSchema } from './validator/index.js';
 export { generateGraphQLSchema } from './codegen/index.js';
+export { diff, classify, reverseDiff } from './diff/index.js';
+export {
+  generateOpenFGASchema,
+  generateOpenFGAModel,
+  renderOpenFGADSL,
+  mergeOpenFGAOverrides,
+} from './codegen/openfga.js';
 
 export type {
   ValidationResult,
   ValidationIssue,
   ValidationSeverity,
 } from './validator/types.js';
+
+export type {
+  SchemaDiff,
+  SchemaChange,
+  MigrationClass,
+  FieldAddition,
+  FieldRemoval,
+  FieldModification,
+  TypeAddition,
+  TypeRemoval,
+  EnumValueAddition,
+  EnumValueRemoval,
+  LinkModification,
+  TypeModification,
+} from './diff/types.js';
 
 export type {
   ParsedSchema,
