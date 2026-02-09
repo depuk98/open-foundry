@@ -61,3 +61,37 @@ export {
   RecordMapper,
   createRecordMapper,
 } from "./mapping/index.js";
+
+// Overlay mode (Section 6.4)
+export type {
+  OverlayLineage,
+  OverlayObject,
+  OverlayEngineConfig,
+} from "./overlay/index.js";
+
+export { OverlayEngine } from "./overlay/index.js";
+
+// CDC (Change Data Capture)
+export type {
+  ChangeApplier,
+  CheckpointStore,
+  CdcStats,
+  CdcConsumerConfig,
+} from "./cdc/index.js";
+
+export { CdcConsumer } from "./cdc/index.js";
+
+// Conflict resolution (Section 6.6)
+export type {
+  ConflictStrategy,
+  FieldRule,
+  ConflictResolverConfig,
+  IncomingValue,
+  ExistingValue,
+  FieldResolution,
+  ConflictResolutionResult,
+  ConflictEventData,
+  ConflictEventHandler,
+} from "./conflict/index.js";
+
+export { ConflictResolver } from "./conflict/index.js";
