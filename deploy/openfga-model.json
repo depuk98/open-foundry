@@ -1,0 +1,171 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "user"
+    },
+    {
+      "type": "ward",
+      "relations": {
+        "assigned": {
+          "this": {}
+        },
+        "viewer": {
+          "computedUserset": {
+            "relation": "assigned"
+          }
+        },
+        "editor": {
+          "computedUserset": {
+            "relation": "assigned"
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "assigned": {
+            "directly_related_user_types": [
+              { "type": "user" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "patient",
+      "relations": {
+        "admitted_to": {
+          "this": {}
+        },
+        "viewer": {
+          "tupleToUserset": {
+            "tupleset": {
+              "relation": "admitted_to"
+            },
+            "computedUserset": {
+              "relation": "viewer"
+            }
+          }
+        },
+        "editor": {
+          "tupleToUserset": {
+            "tupleset": {
+              "relation": "admitted_to"
+            },
+            "computedUserset": {
+              "relation": "editor"
+            }
+          }
+        },
+        "clinician": {
+          "this": {}
+        },
+        "can_admit": {
+          "this": {}
+        },
+        "can_discharge": {
+          "computedUserset": {
+            "relation": "clinician"
+          }
+        },
+        "can_transfer": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "clinician"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "editor"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "admitted_to": {
+            "directly_related_user_types": [
+              { "type": "ward" }
+            ]
+          },
+          "clinician": {
+            "directly_related_user_types": [
+              { "type": "user" }
+            ]
+          },
+          "can_admit": {
+            "directly_related_user_types": [
+              { "type": "user" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "bed",
+      "relations": {
+        "in_ward": {
+          "this": {}
+        },
+        "viewer": {
+          "tupleToUserset": {
+            "tupleset": {
+              "relation": "in_ward"
+            },
+            "computedUserset": {
+              "relation": "viewer"
+            }
+          }
+        },
+        "editor": {
+          "tupleToUserset": {
+            "tupleset": {
+              "relation": "in_ward"
+            },
+            "computedUserset": {
+              "relation": "editor"
+            }
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "in_ward": {
+            "directly_related_user_types": [
+              { "type": "ward" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "consultant",
+      "relations": {
+        "viewer": {
+          "this": {}
+        },
+        "self": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "viewer": {
+            "directly_related_user_types": [
+              { "type": "user" }
+            ]
+          },
+          "self": {
+            "directly_related_user_types": [
+              { "type": "user" }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
