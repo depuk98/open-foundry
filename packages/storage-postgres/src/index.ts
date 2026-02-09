@@ -40,6 +40,22 @@ export {
 
 export type { SqlFragment } from './objects/index.js';
 
+// ─── Link CRUD ───
+export {
+  createLink,
+  getLink,
+  updateLink,
+  deleteLink,
+  getLinks,
+  traverse,
+} from './links/index.js';
+
+// ─── Temporal ───
+export {
+  getObjectAtVersion,
+  getObjectAtTime,
+} from './temporal/index.js';
+
 // ─── Transactions ───
 export { PgTransaction, resolveQueryable } from './transactions/index.js';
 export type { Queryable } from './transactions/index.js';
