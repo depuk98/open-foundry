@@ -21,3 +21,43 @@ export type {
 
 // Connector implementations
 export { JdbcConnector } from "./connectors/index.js";
+
+// Mapping types and parser (Section 6.3)
+export type {
+  TransformFn,
+  SyncMode,
+  ConflictResolution,
+  RateLimitConfig,
+  SyncConfig,
+  ConnectionConfig,
+  PrimaryKeyMapping,
+  PropertyMapping,
+  LinkKeyMapping,
+  LinkMapping,
+  ObjectMapping,
+  DatasourceMappingConfig,
+  MappedObject,
+  MappedLink,
+} from "./mapping/index.js";
+
+// Mapping implementations
+export {
+  concat,
+  prefix,
+  suffix,
+  parseDate,
+  parseDateTime,
+  toUpper,
+  toLower,
+  trim,
+  ifPresent,
+  coalesce,
+  map,
+  custom,
+  registerCustomTransform,
+  clearCustomTransforms,
+  parseTransformExpression,
+  parseMappingConfig,
+  RecordMapper,
+  createRecordMapper,
+} from "./mapping/index.js";

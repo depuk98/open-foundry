@@ -19,15 +19,19 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "@openfoundry/spi": "workspace:*",
     "@openfoundry/observability": "workspace:*",
-    "pg": "^8.13.0"
+    "@openfoundry/spi": "workspace:*",
+    "pg": "^8.13.0",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
+    "@types/node": "^25.2.2",
     "@types/pg": "^8.11.0",
-    "vitest": "^3.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "license": "UNLICENSED"
 }
