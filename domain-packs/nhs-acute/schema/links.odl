@@ -1,0 +1,30 @@
+# NHS Acute Domain Pack — LinkTypes
+#
+# Per MVP Section 4.2. Defines the 4 primary link types.
+# Note: DischargedPatient and DischargedFromWard are implicit reference links
+# on DischargeRecord — they use @link on fields but do not need separate
+# @linkType declarations since DischargeRecord stores the foreign keys directly.
+
+extend schema @namespace(name: "nhs.acute", version: "0.1.0")
+
+type AdmittedTo @linkType(from: "Patient", to: "Ward", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+  admissionDate: DateTime!
+  expectedDischarge: DateTime
+  reason: String
+}
+
+type OccupiesBed @linkType(from: "Patient", to: "Bed", cardinality: ONE_TO_ONE) {
+  id: ID! @primary
+  assignedAt: DateTime!
+}
+
+type UnderCareOf @linkType(from: "Patient", to: "Consultant", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+  assignedDate: DateTime!
+  role: CareRole!
+}
+
+type BedInWard @linkType(from: "Bed", to: "Ward", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+}

@@ -1,0 +1,18 @@
+# NHS Acute Domain Pack — Patient ObjectType
+#
+# Per MVP Section 4.1.
+
+extend schema @namespace(name: "nhs.acute", version: "0.1.0")
+
+type Patient @objectType {
+  id: ID! @primary
+  nhsNumber: String @unique @indexed
+  name: String! @sensitive @searchable(weight: 2.0)
+  dateOfBirth: Date! @sensitive
+  status: PatientStatus!
+  triageCategory: TriageCategory
+  currentWard: Ward @link(type: "AdmittedTo", direction: OUTBOUND)
+  currentBed: Bed @link(type: "OccupiesBed", direction: OUTBOUND)
+  admissions: [AdmittedTo!]! @link(type: "AdmittedTo", direction: OUTBOUND, history: true)
+  consultant: Consultant @link(type: "UnderCareOf", direction: OUTBOUND)
+}

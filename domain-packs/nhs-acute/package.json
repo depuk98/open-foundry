@@ -1,0 +1,17 @@
+{
+  "name": "@openfoundry/domain-pack-nhs-acute",
+  "version": "0.1.0",
+  "description": "NHS acute healthcare domain pack — pilot slice",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@openfoundry/odl": "workspace:*",
+    "@openfoundry/actions": "workspace:*",
+    "vitest": "^3.0.0",
+    "yaml": "^2.8.0"
+  }
+}
