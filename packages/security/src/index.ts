@@ -17,6 +17,17 @@ export { OidcAuthenticator } from "./auth/index.js";
 
 export { CIS2_ROLE_MAPPINGS, resolveRoles, resolveGroups } from "./auth/index.js";
 
+// Authorization — ReBAC via OpenFGA (Section 7.1)
+export type {
+  PermissionLevel,
+  FieldPermissionRule,
+  FieldPermissionConfig,
+  RedactionResult,
+  FieldCacheKey,
+  OpenFgaClientInterface,
+} from "./authz/index.js";
+export { AuthorizationError, AuthorizationService } from "./authz/index.js";
+
 // Audit trail (Section 7.2)
 export type { AuditStore, AuditQueryFilter, AuditWriteInput } from "./audit/index.js";
 export { AuditWriter, AuditQuery, MemoryAuditStore } from "./audit/index.js";

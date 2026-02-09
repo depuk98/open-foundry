@@ -19,13 +19,14 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
-    "jose": "^6.0.0",
+    "@openfga/sdk": "^0.9.1",
+    "@openfoundry/observability": "workspace:*",
     "@openfoundry/spi": "workspace:*",
-    "@openfoundry/observability": "workspace:*"
+    "jose": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "vitest": "^3.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }

@@ -1,0 +1,299 @@
+/**
+ * ReBAC authorization service via OpenFGA.
+ *
+ * Implements relationship-based access control per spec Section 7.1.
+ * Provides check, listObjects, writeRelationship, deleteRelationship,
+ * field-level redaction, and permission batching.
+ */
+
+import { getTracer, withSpan } from "@openfoundry/observability";
+
+import type {
+  FieldPermissionConfig,
+  RedactionResult,
+} from "./types.js";
+import { AuthorizationError } from "./types.js";
+
+const tracer = getTracer("security", "authz");
+
+/**
+ * Minimal interface for OpenFGA client operations.
+ *
+ * Abstracts the @openfga/sdk OpenFgaClient to enable testing without
+ * a running OpenFGA server. Production code passes the real SDK client;
+ * tests can provide a stub implementation.
+ */
+export interface OpenFgaClientInterface {
+  check(body: {
+    user: string;
+    relation: string;
+    object: string;
+  }): Promise<{ allowed?: boolean }>;
+
+  listObjects(body: {
+    user: string;
+    relation: string;
+    type: string;
+  }): Promise<{ objects?: string[] }>;
+
+  writeTuples(tuples: Array<{
+    user: string;
+    relation: string;
+    object: string;
+  }>): Promise<unknown>;
+
+  deleteTuples(tuples: Array<{
+    user: string;
+    relation: string;
+    object: string;
+  }>): Promise<unknown>;
+}
+
+/**
+ * Authorization service implementing ReBAC via OpenFGA.
+ *
+ * Usage:
+ * ```ts
+ * const authz = new AuthorizationService(fgaClient, [patientFieldConfig]);
+ * const allowed = await authz.check("user:alice", "viewer", "patient:123");
+ * const patients = await authz.listObjects("user:alice", "viewer", "patient");
+ * const result = authz.redactFields("user:alice", ["nurse"], "patient", patientObj);
+ * ```
+ */
+export class AuthorizationService {
+  private readonly client: OpenFgaClientInterface;
+  private readonly fieldConfigs: Map<string, FieldPermissionConfig>;
+
+  /**
+   * Per-request field permission cache.
+   * Key: `${userId}|${sortedRoles}|${objectType}`
+   * Value: set of visible field names.
+   *
+   * Call clearFieldCache() at the start of each request.
+   */
+  private fieldCache = new Map<string, Set<string>>();
+
+  constructor(
+    client: OpenFgaClientInterface,
+    fieldPermissions: FieldPermissionConfig[] = [],
+  ) {
+    this.client = client;
+    this.fieldConfigs = new Map();
+    for (const config of fieldPermissions) {
+      this.fieldConfigs.set(config.objectType, config);
+    }
+  }
+
+  /**
+   * Check if a user has a particular relation with an object.
+   *
+   * Maps to OpenFGA Check API: check(user:X, relation, object:Y)
+   * per Section 7.1.4.
+   *
+   * @param user - OpenFGA user string, e.g. "user:alice"
+   * @param relation - Relation to check, e.g. "viewer"
+   * @param resource - OpenFGA object string, e.g. "patient:123"
+   * @returns true if the relationship holds
+   */
+  async check(user: string, relation: string, resource: string): Promise<boolean> {
+    return withSpan(tracer, "authz.check", {}, async () => {
+      try {
+        const result = await this.client.check({
+          user,
+          relation,
+          object: resource,
+        });
+        return result.allowed === true;
+      } catch (error: unknown) {
+        throw this.wrapError("CHECK_FAILED", error);
+      }
+    });
+  }
+
+  /**
+   * List objects of a given type that a user has a relation to.
+   *
+   * Maps to OpenFGA ListObjects API for batch pre-filtering
+   * per Section 7.1.5. Returns object IDs (e.g., ["patient:1", "patient:2"]).
+   *
+   * @param user - OpenFGA user string, e.g. "user:alice"
+   * @param relation - Relation to query, e.g. "viewer"
+   * @param type - Object type, e.g. "patient"
+   * @returns Array of full object identifiers
+   */
+  async listObjects(user: string, relation: string, type: string): Promise<string[]> {
+    return withSpan(tracer, "authz.listObjects", {}, async () => {
+      try {
+        const result = await this.client.listObjects({
+          user,
+          relation,
+          type,
+        });
+        return result.objects ?? [];
+      } catch (error: unknown) {
+        throw this.wrapError("LIST_OBJECTS_FAILED", error);
+      }
+    });
+  }
+
+  /**
+   * Write a relationship tuple (e.g., assign nurse to ward).
+   *
+   * @param user - OpenFGA user string, e.g. "user:alice"
+   * @param relation - Relation to write, e.g. "assigned"
+   * @param resource - OpenFGA object string, e.g. "ward:cardiology"
+   */
+  async writeRelationship(user: string, relation: string, resource: string): Promise<void> {
+    return withSpan(tracer, "authz.writeRelationship", {}, async () => {
+      try {
+        await this.client.writeTuples([{
+          user,
+          relation,
+          object: resource,
+        }]);
+      } catch (error: unknown) {
+        throw this.wrapError("WRITE_FAILED", error);
+      }
+    });
+  }
+
+  /**
+   * Delete a relationship tuple.
+   *
+   * @param user - OpenFGA user string, e.g. "user:alice"
+   * @param relation - Relation to remove, e.g. "assigned"
+   * @param resource - OpenFGA object string, e.g. "ward:cardiology"
+   */
+  async deleteRelationship(user: string, relation: string, resource: string): Promise<void> {
+    return withSpan(tracer, "authz.deleteRelationship", {}, async () => {
+      try {
+        await this.client.deleteTuples([{
+          user,
+          relation,
+          object: resource,
+        }]);
+      } catch (error: unknown) {
+        throw this.wrapError("DELETE_FAILED", error);
+      }
+    });
+  }
+
+  /**
+   * Compute which fields are visible to a user for a given object type,
+   * based on their roles/relations.
+   *
+   * Uses the field permission configuration and caches results
+   * per (user, role-set, objectType) within a request per Section 7.1.5.
+   *
+   * @param userId - The user identifier (without "user:" prefix)
+   * @param roles - The user's resolved platform roles
+   * @param objectType - The object type (e.g., "patient")
+   * @returns Set of visible field names, or undefined if no config exists
+   */
+  getVisibleFields(userId: string, roles: string[], objectType: string): Set<string> | undefined {
+    const config = this.fieldConfigs.get(objectType);
+    if (!config) {
+      return undefined;
+    }
+
+    // Check cache
+    const cacheKey = this.buildFieldCacheKey(userId, roles, objectType);
+    const cached = this.fieldCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // Compute visible fields: union of all fields from matching relations + alwaysVisible
+    const visible = new Set<string>(config.alwaysVisible);
+
+    for (const role of roles) {
+      const fields = config.fieldsByRelation[role];
+      if (fields) {
+        for (const field of fields) {
+          visible.add(field);
+        }
+      }
+    }
+
+    // Cache for this request
+    this.fieldCache.set(cacheKey, visible);
+    return visible;
+  }
+
+  /**
+   * Redact fields on an object based on user permissions.
+   *
+   * Sets impermissible fields to null and populates _redactedFields
+   * per Section 7.1.3.
+   *
+   * @param userId - The user identifier
+   * @param roles - The user's resolved platform roles
+   * @param objectType - The object type (e.g., "patient")
+   * @param obj - The data object to redact
+   * @returns Redacted object with _redactedFields array
+   */
+  redactFields<T extends Record<string, unknown>>(
+    userId: string,
+    roles: string[],
+    objectType: string,
+    obj: T,
+  ): RedactionResult<T> {
+    const visible = this.getVisibleFields(userId, roles, objectType);
+
+    // If no field config, no redaction needed
+    if (!visible) {
+      return {
+        data: { ...obj },
+        _redactedFields: [],
+      };
+    }
+
+    const redactedFields: string[] = [];
+    const result = { ...obj } as Record<string, unknown>;
+
+    for (const key of Object.keys(obj)) {
+      if (!visible.has(key)) {
+        result[key] = null;
+        redactedFields.push(key);
+      }
+    }
+
+    return {
+      data: result as T,
+      _redactedFields: redactedFields,
+    };
+  }
+
+  /**
+   * Redact fields on a list of objects.
+   *
+   * Leverages field-level caching: the visible field set is computed once
+   * per (user, role-set, objectType) and reused for all objects in the list.
+   */
+  redactFieldsBatch<T extends Record<string, unknown>>(
+    userId: string,
+    roles: string[],
+    objectType: string,
+    objects: T[],
+  ): RedactionResult<T>[] {
+    return objects.map(obj => this.redactFields(userId, roles, objectType, obj));
+  }
+
+  /**
+   * Clear the per-request field permission cache.
+   * Call this at the start of each API request.
+   */
+  clearFieldCache(): void {
+    this.fieldCache.clear();
+  }
+
+  private buildFieldCacheKey(userId: string, roles: string[], objectType: string): string {
+    const sortedRoles = [...roles].sort().join(",");
+    return `${userId}|${sortedRoles}|${objectType}`;
+  }
+
+  private wrapError(code: string, error: unknown): AuthorizationError {
+    const message = error instanceof Error ? error.message : String(error);
+    return new AuthorizationError(code, message);
+  }
+}
