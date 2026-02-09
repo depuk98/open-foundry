@@ -278,6 +278,34 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@25.2.2)(tsx@4.21.0)(yaml@2.8.2)
 
+  tests/pilot-scenarios:
+    dependencies:
+      '@openfoundry/actions':
+        specifier: workspace:*
+        version: link:../../packages/actions
+      '@openfoundry/api':
+        specifier: workspace:*
+        version: link:../../packages/api
+      '@openfoundry/odl':
+        specifier: workspace:*
+        version: link:../../packages/odl
+      '@openfoundry/security':
+        specifier: workspace:*
+        version: link:../../packages/security
+      '@openfoundry/spi':
+        specifier: workspace:*
+        version: link:../../packages/spi
+      '@openfoundry/storage-memory':
+        specifier: workspace:*
+        version: link:../../packages/storage-memory
+      '@openfoundry/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
+    devDependencies:
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@25.2.2)(tsx@4.21.0)(yaml@2.8.2)
+
   tests/spi-conformance:
     dependencies:
       '@openfoundry/spi':
