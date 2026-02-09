@@ -10,6 +10,7 @@ export { parseOdl } from './parser/index.js';
 export { validateSchema } from './validator/index.js';
 export { generateGraphQLSchema } from './codegen/index.js';
 export { diff, classify, reverseDiff } from './diff/index.js';
+export { InMemorySchemaRegistry } from './registry/index.js';
 export {
   generateOpenFGASchema,
   generateOpenFGAModel,
@@ -74,3 +75,10 @@ export type {
   ActionTypeDirective,
   FunctionDirective,
 } from './parser/types.js';
+
+export type {
+  SchemaRegistry,
+  SchemaVersion,
+  ApplySchemaOptions,
+  MigrationPlan,
+} from './registry/types.js';
