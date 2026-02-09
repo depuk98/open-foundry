@@ -1,11 +1,18 @@
 /**
- * @openfoundry/odl - Ontology Definition Language parser.
+ * @openfoundry/odl - Ontology Definition Language parser and validator.
  *
  * Parses GraphQL SDL files extended with Open Foundry directives
- * into a structured ParsedSchema AST.
+ * into a structured ParsedSchema AST, and validates structural correctness.
  */
 
 export { parseOdl } from './parser/index.js';
+export { validateSchema } from './validator/index.js';
+
+export type {
+  ValidationResult,
+  ValidationIssue,
+  ValidationSeverity,
+} from './validator/types.js';
 
 export type {
   ParsedSchema,
