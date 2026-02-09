@@ -1,0 +1,170 @@
+# Open Foundry Helm Chart — values.yaml
+# Matches MVP Section 5.3 helm install parameters.
+
+# -- Global image settings
+image:
+  registry: openfoundry
+  pullPolicy: IfNotPresent
+  tag: "0.1"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Storage provider configuration
+# MVP supports postgres only.
+storage:
+  provider: postgres
+  postgres:
+    host: postgresql
+    port: 5432
+    database: openfoundry
+    existingSecret: openfoundry-postgres
+    secretKeys:
+      username: username
+      password: password
+
+# -- Event bus (Kafka-compatible)
+eventBus:
+  redpanda:
+    bootstrapServers: redpanda:9092
+
+# -- Authentication / OIDC
+auth:
+  oidc:
+    issuer: https://am.nhsidentity.spineservices.nhs.uk
+    clientId: ""
+    existingSecret: openfoundry-oidc
+    secretKeys:
+      clientSecret: clientSecret
+
+# -- Authorization (OpenFGA)
+authz:
+  openfga:
+    url: http://openfga:8080
+    storeId: ""
+
+# -- Domain packs to load at startup
+domainPacks:
+  - name: nhs-acute
+    version: "0.1.0"
+
+# -- Observability (OpenTelemetry)
+observability:
+  otlp:
+    endpoint: otel-collector:4317
+
+# -- Sync engine / CDC
+sync:
+  pas:
+    dbUrl: ""
+    existingSecret: openfoundry-pas
+    secretKeys:
+      dbUrl: dbUrl
+  debezium:
+    url: http://debezium:8083
+
+# -- CEL evaluator (Go sidecar)
+celEvaluator:
+  url: cel-evaluator:50051
+
+# -- Per-service configuration
+
+apiGateway:
+  replicaCount: 1
+  image:
+    repository: openfoundry/api
+  port: 4000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+ontologyEngine:
+  replicaCount: 1
+  image:
+    repository: openfoundry/engine
+  port: 4001
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+actionExecutor:
+  replicaCount: 1
+  image:
+    repository: openfoundry/actions
+  port: 4002
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+syncEngine:
+  replicaCount: 1
+  image:
+    repository: openfoundry/sync
+  port: 4003
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+securityService:
+  replicaCount: 1
+  image:
+    repository: openfoundry/security
+  port: 4004
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+celEvaluatorService:
+  replicaCount: 1
+  image:
+    repository: openfoundry/cel
+  port: 50051
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# -- Ingress for api-gateway
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: openfoundry.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# -- PostgreSQL PVC (for bundled PostgreSQL; disable if using external)
+postgresql:
+  enabled: false
+  persistence:
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce

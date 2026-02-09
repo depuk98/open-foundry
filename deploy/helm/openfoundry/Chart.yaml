@@ -1,0 +1,14 @@
+apiVersion: v2
+name: openfoundry
+description: Open Foundry — ontology-driven clinical data platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - openfoundry
+  - ontology
+  - clinical
+  - nhs
+home: https://github.com/syzygy/silmaril
+maintainers:
+  - name: Syzygy
