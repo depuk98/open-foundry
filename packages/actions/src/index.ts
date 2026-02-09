@@ -22,3 +22,23 @@ export type {
   BatchEvalResult,
   ProtobufValue,
 } from './cel/index.js';
+
+export { parseActionManifest } from './parser/index.js';
+
+export type {
+  ActionManifest,
+  ActionEffect,
+  UpdateObjectEffect,
+  CreateLinkEffect,
+  DeleteLinkEffect,
+  CreateObjectEffect,
+  Precondition,
+  SideEffect,
+  RollbackConfig,
+  RollbackPolicy,
+  UndoConfig,
+  UndoOverride,
+  ManifestIssue,
+  ManifestIssueSeverity,
+  ManifestValidationResult,
+} from './parser/index.js';

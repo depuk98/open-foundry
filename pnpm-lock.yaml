@@ -32,9 +32,15 @@ importers:
       '@grpc/proto-loader':
         specifier: ^0.7.0
         version: 0.7.15
+      '@openfoundry/odl':
+        specifier: workspace:*
+        version: link:../odl
       '@openfoundry/spi':
         specifier: workspace:*
         version: link:../spi
+      yaml:
+        specifier: ^2.8.0
+        version: 2.8.2
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
