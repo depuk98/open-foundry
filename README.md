@@ -53,7 +53,7 @@ action AdmitPatient @actionType {
 }
 ```
 
-**Storage Provider Interface (SPI)** — All persistence goes through a pluggable interface. The platform ships with PostgreSQL+AGE (graph + relational) for production and an in-memory provider for tests. The SPI covers schema management, CRUD, links, queries, transactions, temporal queries, lineage, and multi-tenancy.
+**Storage Provider Interface (SPI)** — All persistence goes through a pluggable interface. The platform ships with PostgreSQL+AGE (graph + relational) for production and an in-memory provider for tests. The SPI covers schema management, CRUD, links, queries, aggregation, full-text search, transactions, temporal queries, lineage, and multi-tenancy.
 
 **Action Framework** — Actions are transactional mutations defined in YAML manifests with CEL preconditions and effects. The pipeline runs: validate → authorise → consent → preconditions → execute → audit → emit. A Go gRPC sidecar handles CEL expression evaluation.
 
@@ -124,7 +124,7 @@ The monorepo contains 20 packages across four workspace roots:
 
 | Package | Purpose |
 |---------|---------|
-| `@openfoundry/spi-conformance` | Reusable SPI conformance suite (253 tests, 8 categories) |
+| `@openfoundry/spi-conformance` | Reusable SPI conformance suite (287 tests, 10 categories) |
 | `@openfoundry/pilot-scenarios` | NHS pilot scenario tests |
 | `@openfoundry/integration-tests` | Full Docker Compose stack integration tests |
 
@@ -191,15 +191,15 @@ helm install openfoundry deploy/helm/openfoundry \
 
 | Suite | Tests |
 |-------|-------|
-| SPI Conformance | 253 |
+| SPI Conformance | 287 |
 | ODL Compiler | 270 |
-| API Layer | 135 |
-| Sync Engine | 133 |
+| Sync Engine | 161 |
+| API Layer | 141 |
 | Actions Framework | 123 |
 | Security | 99 |
 | Postgres Storage | 97 |
+| Engine | 94 |
 | AML Pack | 88 |
-| Engine | 73 |
 | Supply Chain Pack | 72 |
 | Memory Storage | 56 |
 | NHS Acute Pack | 53 |
@@ -208,7 +208,7 @@ helm install openfoundry deploy/helm/openfoundry \
 | SPI Types | 16 |
 | Observability | 16 |
 | Core Pack | 14 |
-| **Total** | **1,591** |
+| **Total** | **1,680** |
 
 91 Postgres integration tests are skipped when no database is available. This is expected.
 
@@ -276,7 +276,7 @@ The process:
 | Specification + MVP docs | ~4,200 lines |
 | Commits | 70 |
 | Packages | 20 |
-| Unit tests | 1,591 |
+| Unit tests | 1,680 |
 | Human-written lines of code | 0 |
 
 ---
