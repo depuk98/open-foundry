@@ -1,6 +1,6 @@
 {
   "name": "@openfoundry/security",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "OIDC authentication and authorization for the Open Foundry platform",
   "type": "module",

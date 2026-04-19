@@ -1,6 +1,6 @@
 {
   "name": "@openfoundry/spi",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Open Foundry Storage Provider Interface - core type definitions",
   "type": "module",
   "main": "./dist/index.js",
