@@ -300,6 +300,7 @@ type Diagnosis @objectType {
 | `@param` | field (on @actionType or @function) | Marks a field as an input parameter |
 | `@constraint(expr)` | field, type | Validation expression. Field-level: `value` refers to the field (e.g., `"value >= 0"`). Type-level: `this` refers to the object (e.g., `"this.endDate > this.startDate"`). See Section 2.3.2. |
 | `@default(value)` | field | Default value for optional fields |
+| `@immutable` | field | Field value cannot be changed after object creation. See Section 2.3.3. |
 | `@sensitive` | field | Marks field as containing sensitive data (affects logging, access) |
 | `@terminology(system)` | field | Binds a CodeableConcept field to a terminology system |
 | `@searchable(weight?, analyzer?)` | field | Includes field in full-text index when supported |
@@ -372,6 +373,28 @@ Constraint evaluation rules:
 3. On `updateObject`, field-level constraints evaluate only for fields included in the update. Type-level constraints always evaluate against the full merged state (existing values + proposed changes).
 4. Constraint expressions use CEL and are type-checked at schema compilation time against the ODL type system (Section 5.2.3).
 5. Constraint failures produce `CONSTRAINT_VIOLATION` errors with the failing expression and the field(s) involved.
+
+#### 2.3.3 `@immutable` Directive Semantics
+
+The `@immutable` directive prevents a field's value from being changed after object creation. The field MUST be set during `createObject` (if required) and is rejected on any subsequent `updateObject` that includes the field.
+
+```graphql
+type DischargeRecord @objectType {
+  id: ID! @primary
+  patient: Patient! @link(type: "DischargedPatient", direction: OUTBOUND) @immutable
+  dischargeDate: DateTime! @immutable
+  destination: DischargeDestination! @immutable
+  notes: String                    # Mutable — can be amended after discharge
+}
+```
+
+Behaviour:
+
+1. `@immutable` fields are writable during `createObject` and read-only on all subsequent `updateObject` calls. Any update that includes an immutable field returns an `IMMUTABLE_FIELD` error.
+2. `@immutable` is distinct from `@readonly`. `@readonly` fields (like `_createdAt`) are managed by the engine and cannot be set by users at all. `@immutable` fields are set by the user at creation time and frozen thereafter.
+3. `@immutable` MAY be combined with `@constraint` — the constraint is evaluated at creation time only.
+4. Soft-delete and hard-delete are not affected by `@immutable` — the directive constrains field-level updates, not object lifecycle operations.
+5. The ODL compiler rejects `@immutable` on `@computed` fields (they are engine-managed) and on `@primary` fields (already immutable by definition).
 
 ### 2.4 Namespaces
 
@@ -668,6 +691,26 @@ Soft-deleted objects (those with a non-null `_deletedAt`) follow these rules:
 4. **Link cardinality** is evaluated against active (non-deleted) links only. A soft-deleted link does not count against cardinality limits. An active link pointing to a soft-deleted object does not count against cardinality limits either, since the target is not a valid endpoint.
 5. **New links to soft-deleted objects** are rejected. The `createLink` operation MUST verify that both `fromId` and `toId` reference non-deleted objects (i.e., `_deletedAt` is null). Attempting to link to or from a soft-deleted object returns a `REFERENTIAL_INTEGRITY` error.
 6. **Hard-delete** physically removes the object and all its inbound and outbound links from the store. This is irreversible and SHOULD be restricted to data retention compliance workflows.
+7. **Soft-delete TTL and auto-purge:** ObjectTypes MAY declare a soft-delete retention period via schema configuration. When configured, the Ontology Engine schedules automatic hard-deletion of soft-deleted objects after the TTL expires.
+
+```yaml
+# Schema-level soft-delete retention policy (per ObjectType)
+retention:
+  Patient:
+    softDeleteTTL: "P7Y"        # 7 years (NHS records retention)
+    purgeStrategy: HARD_DELETE   # HARD_DELETE | ARCHIVE
+  DischargeRecord:
+    softDeleteTTL: "P10Y"       # 10 years
+    purgeStrategy: ARCHIVE       # Move to cold storage before deletion
+```
+
+TTL auto-purge rules:
+
+- The purge job runs on a configurable schedule (default: daily). It queries for soft-deleted objects where `_deletedAt + softDeleteTTL < now`.
+- `HARD_DELETE` permanently removes the object and its links via the existing hard-delete path (rule 6).
+- `ARCHIVE` exports the object (including links and lineage) to a configured archive store (e.g., object storage) before hard-deleting. The archive record includes sufficient metadata for regulatory retrieval.
+- Purge operations are audited. Each purge run emits an `openfoundry.retention.purge` event with counts per ObjectType.
+- When no `softDeleteTTL` is configured for an ObjectType, soft-deleted objects are retained indefinitely (current default behaviour).
 
 ### 3.4 Transaction Semantics
 
@@ -918,6 +961,12 @@ When a computed field uses `cache: EAGER`, the Ontology Engine MUST track which 
 3. When any write matches an invalidation trigger, re-evaluating the computed field and storing the updated value.
 
 The dependency tracker is an internal component of the Ontology Engine. It is not exposed via the SPI. Functions that use non-deterministic inputs (e.g., `now`) cannot use `EAGER` caching and the compiler will reject this combination.
+
+**Static dependency analysis:** For built-in computed functions (`countLinks`, `sumField`, etc.), the ODL compiler SHOULD perform static dependency analysis at schema compilation time rather than relying solely on runtime observation. The compiler knows that `countLinks(args: { type: "AdmittedTo" })` on `Ward` depends on `AdmittedTo` link creation/deletion events targeting that ward. Static analysis produces a deterministic dependency graph that:
+
+1. Catches missing invalidation triggers before deployment (e.g., a function that reads `Patient.status` but is not triggered by `Patient.updated` events).
+2. Enables the compiler to emit a `dependencyGraph` artifact alongside the compiled schema, documenting which writes trigger which recomputations.
+3. For custom functions (user-defined TypeScript), static analysis is best-effort. The compiler emits a warning if it cannot determine dependencies statically, and the function falls back to runtime observation on first evaluation.
 
 #### 4.4.3 Cache Interface
 
@@ -1779,6 +1828,22 @@ List queries can generate a large number of permission checks (N objects x M fie
 3. **Warm cache:** For frequently-accessed role/type combinations, the Security Layer SHOULD maintain a short-lived (TTL: 30s) local cache of `ListObjects` results to avoid redundant OpenFGA calls across concurrent requests from the same user.
 4. **Consent pre-filter:** When the consent manager is active, the Query Layer SHOULD issue a batch consent check for all data-subject IDs in the result set before assembling the response, rather than checking consent per-object sequentially.
 
+#### 7.1.6 Security Layer Circuit Breaker
+
+The Security Layer MUST implement circuit breaker logic for its external dependencies (OpenFGA, consent store, OIDC provider) to prevent cascade failures when a dependency becomes unavailable or degraded.
+
+Circuit breaker states:
+
+1. **Closed** (normal): Requests flow to the dependency. The breaker monitors error rate and latency.
+2. **Open** (tripped): The dependency has exceeded the failure threshold. All requests fail immediately with a structured error (`AUTH_SERVICE_UNAVAILABLE`, `CONSENT_SERVICE_UNAVAILABLE`) rather than waiting for timeouts. The breaker enters this state when the error rate exceeds a configurable threshold (default: 50% over a 30-second window).
+3. **Half-open** (probing): After a configurable cooldown (default: 15 seconds), the breaker allows a single probe request. If it succeeds, the breaker returns to Closed. If it fails, the breaker returns to Open.
+
+Fail-closed policy:
+
+- When the OpenFGA circuit is open, all permission checks return **denied**. The system does not degrade to "allow all" — it fails closed.
+- When the consent circuit is open, consent-protected operations return `CONSENT_SERVICE_UNAVAILABLE` unless an emergency override policy is enabled (see Section 12.4 degraded mode).
+- Circuit breaker state transitions emit `openfoundry.security.circuit_breaker` events and are visible in the health endpoint (Section 3.1).
+
 ### 7.2 Audit Trail
 
 Every operation produces an immutable audit record.
@@ -2090,6 +2155,14 @@ type FooChangeEvent {
 
 Subscriptions are delivered via WebSocket (GraphQL Subscriptions protocol) or Server-Sent Events.
 
+Subscription filtering and delivery:
+
+1. **Server-side filter evaluation:** The `filter` argument on `foosChanged` is evaluated server-side against each change event before delivery. Only events matching the filter are sent to the subscriber. This prevents bandwidth waste and information leakage — clients never receive events they would discard.
+2. **Security filtering:** Subscription events pass through the same ReBAC and consent checks as query responses. If a permission or consent change causes an object to become invisible to the subscriber, no further events for that object are delivered. The subscription remains open for other matching objects.
+3. **Change type filtering:** Subscribers MAY include a `changeTypes: [ChangeType!]` argument to receive only specific change types (e.g., `[UPDATED, DELETED]` but not `CREATED`).
+4. **Backpressure:** If a subscriber cannot consume events fast enough, the server buffers up to a configurable limit (default: 1000 events). If the buffer overflows, the subscription is terminated with an `OVERFLOW` close reason and the client must reconnect.
+5. **Reconnection:** Subscriptions support a `resumeAfter: DateTime` argument for reconnection. On reconnect, the server replays events that occurred after the given timestamp (subject to event retention, default: 1 hour). Events older than the retention window are lost; the client should perform a full query to catch up.
+
 #### 8.1.5 Search and Discovery
 
 Search is capability-gated and security-aware.
@@ -2117,7 +2190,42 @@ GET    /api/v1/{objectType}/{id}         # Get by ID
 POST   /api/v1/actions/{actionType}      # Execute action
 GET    /api/v1/{objectType}/{id}/links/{linkType}  # Get linked objects
 GET    /api/v1/{objectType}/{id}/history  # Version history
+GET    /health                            # Aggregate health (see below)
 ```
+
+#### 8.2.1 Aggregate Health Endpoint
+
+The platform exposes a single `/health` endpoint that aggregates health status from all subsystems. This is intended for load balancer probes, monitoring dashboards, and ops runbooks.
+
+```json
+GET /health
+
+{
+  "status": "DEGRADED",
+  "timestamp": "2026-02-06T14:30:00Z",
+  "subsystems": {
+    "storage":       { "status": "HEALTHY", "latencyMs": 2 },
+    "openfga":       { "status": "HEALTHY", "latencyMs": 3 },
+    "eventBus":      { "status": "HEALTHY", "latencyMs": 5 },
+    "celEvaluator":  { "status": "HEALTHY", "latencyMs": 1 },
+    "consentStore":  { "status": "DEGRADED", "latencyMs": 450, "message": "Elevated latency" },
+    "syncEngine":    { "status": "HEALTHY", "connectors": { "healthy": 1, "unhealthy": 0 } },
+    "auditStore":    { "status": "HEALTHY", "latencyMs": 4 }
+  },
+  "circuitBreakers": {
+    "openfga": "CLOSED",
+    "consentStore": "HALF_OPEN"
+  }
+}
+```
+
+Health endpoint contract:
+
+1. **Aggregate status** is the worst status across all subsystems: `HEALTHY` if all are healthy, `DEGRADED` if any subsystem is degraded, `UNHEALTHY` if any critical subsystem (storage, openfga) is down.
+2. The endpoint MUST respond within 5 seconds. Subsystem health checks that do not respond within 3 seconds are reported as `TIMEOUT`.
+3. The endpoint is unauthenticated (for load balancer probes) but returns only status information, never data. A separate authenticated `/health/detail` endpoint MAY expose additional diagnostics (connection pool stats, queue depths).
+4. Circuit breaker states (Section 7.1.6) are included for operational visibility.
+5. HTTP status codes: `200` for HEALTHY, `200` for DEGRADED (service is still accepting requests), `503` for UNHEALTHY.
 
 ### 8.3 FHIR R4 API
 
@@ -2448,6 +2556,23 @@ When an entity moves between instances (e.g., patient transfer between trusts):
 5. Both instances audit the handoff.
 
 The source instance retains its historical data. The destination instance starts a new version history. The handoff record links the two.
+
+#### 9.5.1 Handoff Conflict Resolution
+
+The destination instance MAY already have a local object with the same identity (e.g., a patient previously transferred away and now returning). The handoff protocol MUST handle this:
+
+| Scenario | Resolution |
+|----------|------------|
+| No existing object at destination | Normal handoff: create new object with full state from source. |
+| Existing object with status `TRANSFERRED` | **Return handoff:** Reactivate the existing object, merge the incoming state as a new version. The object's version history spans both instances. |
+| Existing object with active status | **Conflict:** The handoff is rejected with `HANDOFF_CONFLICT`. Both instances are notified. An operator must resolve the conflict manually — either merge the objects (keeping one identity) or fork them (two distinct records). |
+| Existing object that was hard-deleted | Normal handoff: create new object. The hard-deleted object's history is not recoverable. |
+
+Conflict resolution requirements:
+
+1. Handoff conflicts MUST NOT be auto-resolved — they produce a quarantine record at the destination instance, analogous to the sync identity conflict quarantine (Section 6.6).
+2. Both instances emit `openfoundry.federation.handoff_conflict` events with the conflicting object states.
+3. The source instance does NOT mark the object as `TRANSFERRED` until the destination acknowledges successful receipt. On conflict, the source object remains in its current state.
 
 ---
 
@@ -2870,6 +2995,7 @@ Degraded mode requirements:
 | `@param` | field | `@param` |
 | `@constraint` | field, type | `@constraint(expr: String!)` |
 | `@default` | field | `@default(value: Any!)` |
+| `@immutable` | field | `@immutable` |
 | `@sensitive` | field | `@sensitive` |
 | `@terminology` | field | `@terminology(system: String!)` |
 | `@searchable` | field | `@searchable(weight: Float, analyzer: String)` |
