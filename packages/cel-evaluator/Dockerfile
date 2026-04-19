@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /cel-evaluator .
 # Runtime stage
 FROM alpine:3.20
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates grpc-health-probe --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing/
 
 COPY --from=builder /cel-evaluator /usr/local/bin/cel-evaluator
 

@@ -35,6 +35,14 @@ function lowerFirst(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }
 
+/** Convert PascalCase to snake_case — must match FGA codegen convention. */
+function toSnakeCase(s: string): string {
+  return s
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+}
+
 function isPrimaryField(field: FieldDefinition): boolean {
   return field.directives.some(d => d.kind === 'primary');
 }
@@ -200,6 +208,7 @@ function generateQueryResolvers(
 ): void {
   const typeName = obj.name;
   const lower = lowerFirst(typeName);
+  const fgaType = toSnakeCase(typeName);
 
   // Single object query: foo(id: ID!): Foo
   resolvers['Query']![lower] = async (
@@ -215,7 +224,7 @@ function generateQueryResolvers(
       const allowed = await deps.authorizationService.check(
         `user:${user.id}`,
         'viewer',
-        `${lower}:${args.id}`,
+        `${fgaType}:${args.id}`,
       );
       if (!allowed) {
         throw createOpenFoundryError({
@@ -285,7 +294,7 @@ function generateQueryResolvers(
       const allowedObjects = await deps.authorizationService.listObjects(
         `user:${user.id}`,
         'viewer',
-        lower,
+        fgaType,
       );
 
       // Build filter: combine user filter with authorization filter

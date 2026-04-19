@@ -721,14 +721,14 @@ describe('AML Domain Pack — OpenFGA permissions', () => {
     const fgaPath = resolve(PACK_ROOT, 'permissions', 'aml-roles.fga');
     const content = readFileSync(fgaPath, 'utf-8');
 
-    // bsa_officer should appear in can_view for customer, account, transaction, alert
+    // bsa_officer should appear in viewer for customer, account, transaction, alert
     const lines = content.split('\n');
     let currentType = '';
     for (const line of lines) {
       const typeMatch = line.match(/^type (\w+)$/);
       if (typeMatch) currentType = typeMatch[1]!;
       if (['customer', 'account', 'transaction', 'alert'].includes(currentType)) {
-        if (line.includes('define can_view:')) {
+        if (line.includes('define viewer:')) {
           expect(line).toContain('bsa_officer');
         }
       }

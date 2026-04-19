@@ -30,6 +30,14 @@ function lowerFirst(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }
 
+/** Convert PascalCase to snake_case — must match FGA codegen convention. */
+function toSnakeCase(s: string): string {
+  return s
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+}
+
 function pluralize(s: string): string {
   return lowerFirst(s) + 's';
 }
@@ -126,13 +134,13 @@ function generateObjectRoutes(
   deps: ApiDependencies,
 ): RestRoute[] {
   const plural = pluralize(obj.name);
-  const lower = lowerFirst(obj.name);
+  const fgaType = toSnakeCase(obj.name);
 
   return [
-    generateListRoute(obj, plural, lower, deps),
-    generateGetByIdRoute(obj, plural, lower, deps),
-    generateLinksRoute(plural, lower, deps),
-    generateHistoryRoute(obj, plural, lower, deps),
+    generateListRoute(obj, plural, fgaType, deps),
+    generateGetByIdRoute(obj, plural, fgaType, deps),
+    generateLinksRoute(plural, fgaType, deps),
+    generateHistoryRoute(obj, plural, fgaType, deps),
   ];
 }
 
@@ -142,7 +150,7 @@ function generateObjectRoutes(
 function generateListRoute(
   obj: ObjectType,
   plural: string,
-  lower: string,
+  fgaType: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -157,7 +165,7 @@ function generateListRoute(
         const allowedObjects = await deps.authorizationService.listObjects(
           `user:${user.id}`,
           'viewer',
-          lower,
+          fgaType,
         );
 
         const allowedIds = allowedObjects.map((o: string) => {
@@ -254,7 +262,7 @@ function generateListRoute(
 function generateGetByIdRoute(
   obj: ObjectType,
   plural: string,
-  lower: string,
+  fgaType: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -270,7 +278,7 @@ function generateGetByIdRoute(
         const allowed = await deps.authorizationService.check(
           `user:${user.id}`,
           'viewer',
-          `${lower}:${id}`,
+          `${fgaType}:${id}`,
         );
         if (!allowed) {
           return createRestErrorResponse({
@@ -340,7 +348,7 @@ function generateGetByIdRoute(
  */
 function generateLinksRoute(
   plural: string,
-  lower: string,
+  fgaType: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -356,7 +364,7 @@ function generateLinksRoute(
         const allowed = await deps.authorizationService.check(
           `user:${user.id}`,
           'viewer',
-          `${lower}:${id}`,
+          `${fgaType}:${id}`,
         );
         if (!allowed) {
           return createRestErrorResponse({
@@ -405,7 +413,7 @@ function generateLinksRoute(
 function generateHistoryRoute(
   obj: ObjectType,
   plural: string,
-  lower: string,
+  fgaType: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -421,7 +429,7 @@ function generateHistoryRoute(
         const allowed = await deps.authorizationService.check(
           `user:${user.id}`,
           'viewer',
-          `${lower}:${id}`,
+          `${fgaType}:${id}`,
         );
         if (!allowed) {
           return createRestErrorResponse({

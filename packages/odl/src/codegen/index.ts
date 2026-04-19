@@ -208,14 +208,14 @@ function generateOrderBy(obj: ObjectType): string {
   return lines.join('\n');
 }
 
-function generateMutationInputType(action: ActionType): string {
+function generateMutationInputType(action: ActionType, objectTypeNames: Set<string>): string {
   const lines: string[] = [];
   lines.push(`input ${action.name}Input {`);
 
   const paramFields = action.fields.filter(isParamField);
   for (const field of paramFields) {
     // For action inputs, param fields referencing ObjectTypes use ID
-    const typeName = resolveInputType(field);
+    const typeName = resolveInputType(field, objectTypeNames);
     lines.push(`  ${field.name}: ${typeName}`);
   }
 
@@ -223,14 +223,15 @@ function generateMutationInputType(action: ActionType): string {
   return lines.join('\n');
 }
 
-function resolveInputType(field: FieldDefinition): string {
+function resolveInputType(field: FieldDefinition, objectTypeNames: Set<string>): string {
   const { type } = field;
-  // Keep declared nullability for action inputs (these are write-side, not read-side)
+  // Object references become ID in action inputs — executor resolves by ID
+  const baseName = objectTypeNames.has(type.name) ? 'ID' : type.name;
   if (type.isList) {
-    const elem = type.listElementNonNull ? `${type.name}!` : type.name;
+    const elem = type.listElementNonNull ? `${baseName}!` : baseName;
     return type.nonNull ? `[${elem}]!` : `[${elem}]`;
   }
-  return type.nonNull ? `${type.name}!` : type.name;
+  return type.nonNull ? `${baseName}!` : baseName;
 }
 
 function generateMutationResultType(action: ActionType): string {
@@ -463,6 +464,7 @@ function collectFilterEnumNames(schema: ParsedSchema): Set<string> {
  */
 export function generateGraphQLSchema(schema: ParsedSchema): string {
   const sections: string[] = [];
+  const objectTypeNames = new Set(schema.objectTypes.map(o => o.name));
 
   // 1. Custom scalar declarations
   const scalars = generateCustomScalars(schema);
@@ -511,7 +513,7 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
 
   // 8. Action input/result types
   for (const action of schema.actionTypes) {
-    sections.push(generateMutationInputType(action));
+    sections.push(generateMutationInputType(action, objectTypeNames));
     sections.push(generateMutationResultType(action));
   }
 

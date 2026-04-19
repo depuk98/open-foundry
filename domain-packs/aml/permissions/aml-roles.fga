@@ -8,7 +8,7 @@ type customer
     define compliance_analyst: [user]
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: compliance_analyst or compliance_officer or bsa_officer
+    define viewer: compliance_analyst or compliance_officer or bsa_officer
     define can_edit_risk: compliance_officer
 
 type account
@@ -17,7 +17,7 @@ type account
     define compliance_analyst: [user]
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: compliance_analyst or compliance_officer or bsa_officer
+    define viewer: compliance_analyst or compliance_officer or bsa_officer
     define can_freeze: compliance_officer or bsa_officer
 
 type transaction
@@ -26,7 +26,7 @@ type transaction
     define compliance_analyst: [user]
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: compliance_analyst or compliance_officer or bsa_officer
+    define viewer: compliance_analyst or compliance_officer or bsa_officer
     define can_flag: compliance_analyst or compliance_officer
 
 type alert
@@ -35,7 +35,7 @@ type alert
     define compliance_analyst: [user]
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: compliance_analyst or compliance_officer or assigned_to or bsa_officer
+    define viewer: compliance_analyst or compliance_officer or assigned_to or bsa_officer
     define can_investigate: compliance_analyst or compliance_officer
     define can_escalate: compliance_officer
 
@@ -45,7 +45,7 @@ type case
     define compliance_analyst: [user]
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: assigned_analyst or compliance_analyst or compliance_officer or bsa_officer
+    define viewer: assigned_analyst or compliance_analyst or compliance_officer or bsa_officer
     define can_open: compliance_analyst or compliance_officer
     define can_review: assigned_analyst or compliance_analyst or compliance_officer
     define can_close: compliance_officer or bsa_officer
@@ -55,5 +55,5 @@ type suspicious_activity_report
   relations
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: compliance_officer or bsa_officer
+    define viewer: compliance_officer or bsa_officer
     define can_submit: bsa_officer

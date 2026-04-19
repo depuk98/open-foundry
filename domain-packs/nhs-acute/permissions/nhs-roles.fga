@@ -36,4 +36,4 @@ type discharge_record
   relations
     define clinician: [user]
     define nurse_in_charge: [user]
-    define can_view: clinician or nurse_in_charge
+    define viewer: clinician or nurse_in_charge

@@ -404,10 +404,11 @@ describe('GraphQL schema codegen', () => {
       const sdl = getSchema();
       expect(sdl).toContain('input AdmitPatientInput {');
       const inputBlock = extractTypeBlock(sdl, 'input AdmitPatientInput');
-      expect(inputBlock).toContain('patient: Patient!');
-      expect(inputBlock).toContain('ward: Ward!');
-      expect(inputBlock).toContain('bed: Bed');
-      expect(inputBlock).toContain('consultant: Consultant!');
+      // Object-type params become ID in action inputs (executor resolves by ID)
+      expect(inputBlock).toContain('patient: ID!');
+      expect(inputBlock).toContain('ward: ID!');
+      expect(inputBlock).toContain('bed: ID');
+      expect(inputBlock).toContain('consultant: ID!');
       expect(inputBlock).toContain('reason: String');
     });
 
@@ -424,7 +425,9 @@ describe('GraphQL schema codegen', () => {
     it('generates DischargePatientInput with correct fields', () => {
       const sdl = getSchema();
       const inputBlock = extractTypeBlock(sdl, 'input DischargePatientInput');
-      expect(inputBlock).toContain('patient: Patient!');
+      // Object-type params become ID in action inputs
+      expect(inputBlock).toContain('patient: ID!');
+      // Enum-type params keep their enum type
       expect(inputBlock).toContain('destination: DischargeDestination!');
       expect(inputBlock).toContain('notes: String');
     });
@@ -432,8 +435,9 @@ describe('GraphQL schema codegen', () => {
     it('bed param is nullable in AdmitPatientInput', () => {
       const sdl = getSchema();
       const inputBlock = extractTypeBlock(sdl, 'input AdmitPatientInput');
-      expect(inputBlock).toMatch(/\bbed: Bed\b/);
-      expect(inputBlock).not.toMatch(/\bbed: Bed!/);
+      // Object-type param, nullable → ID (not ID!)
+      expect(inputBlock).toMatch(/\bbed: ID\b/);
+      expect(inputBlock).not.toMatch(/\bbed: ID!/);
     });
   });
 

@@ -188,7 +188,7 @@
         "nurse_in_charge": {
           "this": {}
         },
-        "can_view": {
+        "viewer": {
           "union": {
             "child": [
               { "computedUserset": { "relation": "clinician" } },
