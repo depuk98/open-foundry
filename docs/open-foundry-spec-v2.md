@@ -453,7 +453,7 @@ interface StorageProvider {
   // ─── Objects ───
   createObject(type: string, properties: Record<string, any>): Promise<OntologyObject>;
   getObject(type: string, id: string): Promise<OntologyObject | null>;
-  updateObject(type: string, id: string, properties: Record<string, any>): Promise<OntologyObject>;
+  updateObject(type: string, id: string, properties: Record<string, any>, expectedVersion?: number): Promise<OntologyObject>;
   deleteObject(type: string, id: string, mode: 'soft' | 'hard'): Promise<void>;
   queryObjects(type: string, filter: FilterExpression, options?: QueryOptions): Promise<ObjectPage>;
   bulkMutate(request: BulkMutationRequest): Promise<BulkMutationResult>;
@@ -461,7 +461,7 @@ interface StorageProvider {
   // ─── Links ───
   createLink(type: string, fromId: string, toId: string, properties?: Record<string, any>): Promise<OntologyLink>;
   getLink(type: string, linkId: string): Promise<OntologyLink | null>;
-  updateLink(type: string, linkId: string, properties: Record<string, any>): Promise<OntologyLink>;
+  updateLink(type: string, linkId: string, properties: Record<string, any>, expectedVersion?: number): Promise<OntologyLink>;
   deleteLink(type: string, linkId: string): Promise<void>;
   getLinks(objectId: string, linkType: string, direction: 'inbound' | 'outbound', options?: QueryOptions): Promise<LinkPage>;
   traverse(startId: string, path: TraversalPath, options?: TraversalOptions): Promise<TraversalResult>;
@@ -474,8 +474,10 @@ interface StorageProvider {
   getObjectAtTime(type: string, id: string, timestamp: DateTime): Promise<OntologyObject | null>;
 
   // ─── Indices ───
-  ensureIndex(type: string, field: string, indexType: IndexType): Promise<void>;
-  
+  ensureIndex(type: string, index: IndexDefinition): Promise<void>;
+  dropIndex(type: string, field: string): Promise<void>;
+  listIndexes(type: string): Promise<IndexDefinition[]>;
+
   // ─── Health ───
   healthCheck(): Promise<HealthStatus>;
   capabilities(): StorageCapabilities;
@@ -506,6 +508,7 @@ interface OntologyLink {
   _toId: string;
   _version: number;         // Monotonic version counter for link properties
   _createdAt: DateTime;
+  _updatedAt: DateTime;
   _deletedAt?: DateTime;    // Soft-delete marker (terminated link)
   [key: string]: any;       // Link property values
 }
@@ -588,6 +591,14 @@ interface BulkMutationError {
   code: string;
   message: string;
 }
+
+type IndexType = 'BTREE' | 'HASH' | 'GIN' | 'GIST' | 'FULLTEXT';
+
+interface IndexDefinition {
+  field: string;
+  indexType: IndexType;
+  unique?: boolean;          // When true, enforces uniqueness. Default: false.
+}
 ```
 
 All SPI operations execute in a tenant-scoped `RequestContext`. Signatures omit `ctx: RequestContext` for readability, but provider implementations MUST require it and enforce tenant isolation.
@@ -605,9 +616,10 @@ Soft-deleted objects (those with a non-null `_deletedAt`) follow these rules:
 
 1. `queryObjects` **excludes** soft-deleted objects by default. Set `includeDeleted: true` in `QueryOptions` to include them.
 2. `getObject` returns soft-deleted objects with the `_deletedAt` field populated. Callers MUST check this field if they need to distinguish live from deleted objects.
-3. **Links to/from soft-deleted objects** remain in the store but are excluded from traversal and `getLinks` results by default. Setting `includeDeleted: true` includes them.
-4. **Link cardinality** is evaluated against active (non-deleted) links only. A soft-deleted link does not count against cardinality limits.
-5. **Hard-delete** physically removes the object and all its inbound and outbound links from the store. This is irreversible and SHOULD be restricted to data retention compliance workflows.
+3. **Links to/from soft-deleted objects** remain in the store but are excluded from traversal and `getLinks` results by default. Setting `includeDeleted: true` includes them. Active links to/from a soft-deleted object are NOT automatically soft-deleted — they remain active but unreachable through default queries. This preserves link history for audit and lineage purposes while preventing traversal to deleted nodes.
+4. **Link cardinality** is evaluated against active (non-deleted) links only. A soft-deleted link does not count against cardinality limits. An active link pointing to a soft-deleted object does not count against cardinality limits either, since the target is not a valid endpoint.
+5. **New links to soft-deleted objects** are rejected. The `createLink` operation MUST verify that both `fromId` and `toId` reference non-deleted objects (i.e., `_deletedAt` is null). Attempting to link to or from a soft-deleted object returns a `REFERENTIAL_INTEGRITY` error.
+6. **Hard-delete** physically removes the object and all its inbound and outbound links from the store. This is irreversible and SHOULD be restricted to data retention compliance workflows.
 
 ### 3.4 Transaction Semantics
 
@@ -616,17 +628,29 @@ The SPI requires ACID transactions for all write operations. A single Action exe
 ```typescript
 interface Transaction {
   createObject(type: string, properties: Record<string, any>): Promise<OntologyObject>;
-  updateObject(type: string, id: string, properties: Record<string, any>): Promise<OntologyObject>;
+  updateObject(type: string, id: string, properties: Record<string, any>, expectedVersion?: number): Promise<OntologyObject>;
   deleteObject(type: string, id: string, mode: 'soft' | 'hard'): Promise<void>;
   createLink(type: string, fromId: string, toId: string, properties?: Record<string, any>): Promise<OntologyLink>;
-  updateLink(type: string, linkId: string, properties: Record<string, any>): Promise<OntologyLink>;
+  updateLink(type: string, linkId: string, properties: Record<string, any>, expectedVersion?: number): Promise<OntologyLink>;
   deleteLink(type: string, linkId: string): Promise<void>;
   commit(): Promise<void>;
   rollback(): Promise<void>;
 }
 ```
 
-### 3.5 Replication Requirements
+### 3.5 Optimistic Concurrency
+
+The SPI supports optimistic concurrency control via the `expectedVersion` parameter on `updateObject` and `updateLink`.
+
+1. When `expectedVersion` is provided, the SPI MUST compare it against the object's current `_version`. If they do not match, the operation MUST fail with a `VERSION_CONFLICT` error containing the current version.
+2. When `expectedVersion` is omitted, the update proceeds unconditionally (last-write-wins).
+3. The Ontology Engine SHOULD pass `expectedVersion` for all Action-initiated updates to prevent concurrent action executions from silently overwriting each other's effects.
+4. The API layer exposes optimistic concurrency via:
+   - **GraphQL:** An optional `expectedVersion: Int` field on mutation inputs.
+   - **REST:** The `If-Match` header, where the ETag value is the object's `_version`.
+5. `VERSION_CONFLICT` errors are retryable. The caller SHOULD re-read the object, resolve the conflict, and retry.
+
+### 3.6 Replication Requirements
 
 Storage providers used in production deployments MUST support data replication sufficient to meet the RPO target of < 1 hour defined in Section 13.4. Acceptable replication methods:
 
@@ -635,7 +659,7 @@ Storage providers used in production deployments MUST support data replication s
 
 Providers declare their replication capability via `StorageCapabilities.replicationSupport`. The deployment tooling will warn if a provider reporting `NONE` is used in a production configuration. Either `STREAMING_REPLICATION` or `POINT_IN_TIME_RECOVERY` (or `BOTH`) satisfies the production requirement.
 
-### 3.6 Provider Implementations
+### 3.7 Provider Implementations
 
 The project maintains reference implementations for the following backends. Third parties MAY implement additional providers.
 
@@ -648,7 +672,7 @@ The project maintains reference implementations for the following backends. Thir
 
 Each provider MUST pass the SPI conformance test suite (see Section 11).
 
-### 3.7 Bulk Mutation Contract
+### 3.8 Bulk Mutation Contract
 
 User-initiated bulk operations MUST execute through SPI bulk primitives so that validation, audit, and idempotency are consistent across providers.
 
@@ -721,6 +745,16 @@ Event types:
 | `openfoundry.action.failed` | Action execution failed |
 | `openfoundry.schema.updated` | Schema version applied |
 
+#### 4.2.1 Event Ordering Guarantees
+
+Events are partitioned and ordered as follows:
+
+1. **Partition key:** Events are partitioned by `(tenantId, objectType, objectId)` for object events and `(tenantId, linkType, linkId)` for link events. Action-level events are partitioned by `(tenantId, actionId)`.
+2. **Per-partition ordering:** Within a partition, events are strictly ordered by the object's `_version`. Consumers processing a single partition are guaranteed to see events in causal order.
+3. **Cross-partition ordering:** No global ordering is guaranteed across partitions. Consumers that need cross-object consistency MUST use the `causedBy.actionId` field to correlate events from the same action transaction.
+4. **Action atomicity:** All events produced by a single action execution share the same `causedBy.actionId`. The event bus publishes these events atomically (all or none) when the action's transaction commits. Consumers SHOULD NOT observe partial action event sets.
+5. **Idempotency:** Each event has a unique `id`. Consumers MUST handle duplicate delivery (at-least-once semantics). The `(objectId, version)` pair is a natural deduplication key for object events.
+
 ### 4.3 Validation Pipeline
 
 Every write operation passes through:
@@ -728,7 +762,7 @@ Every write operation passes through:
 1. **Schema validation** — field types, required fields, enum values.
 2. **Constraint evaluation** — `@constraint` expressions evaluated against the proposed state.
 3. **Uniqueness check** — `@unique` fields checked across all instances of the type.
-4. **Cardinality check** — link operations validated against declared cardinality (counting active links only).
+4. **Cardinality check** — link operations validated against declared cardinality (counting active links only). Cardinality enforcement MUST be serializable: when two concurrent transactions attempt to create links that would violate cardinality constraints (e.g., two `MANY_TO_ONE` links from the same object), at most one transaction succeeds. Providers MUST implement this via row-level locking, serializable isolation, or equivalent mechanism to prevent race conditions.
 5. **Referential integrity** — link targets MUST exist (or be created in the same transaction). Soft-deleted targets are not valid link targets.
 
 Validation failures return structured errors with the specific constraint that failed.
@@ -919,6 +953,14 @@ effects:
     target: "patient"
     set:
       status: "DISCHARGED"
+
+  # Reset bed status (effects use immutable snapshot, so patient.currentBed
+  # still resolves to the pre-effect bed)
+  - type: updateObject
+    target: "patient.currentBed"
+    condition: "patient.currentBed != null"
+    set:
+      status: "CLEANING"
 
   - type: deleteLink
     linkType: "AdmittedTo"
@@ -1657,6 +1699,53 @@ interface AuditRecord {
 Audit records are stored in an append-only log, separate from the ontology store. They are not modifiable or deletable. Retention is configurable per deployment.
 
 Audit records MUST include the OpenTelemetry `traceId` so that they can be correlated with distributed traces for debugging.
+
+#### 7.2.1 Audit Query API
+
+The platform MUST expose a query interface for audit records. Audit queries are themselves audited.
+
+```typescript
+interface AuditStore {
+  queryAuditRecords(filter: AuditFilter, options?: AuditQueryOptions): Promise<AuditPage>;
+  getAuditRecord(id: string): Promise<AuditRecord | null>;
+  getAuditTrail(objectType: string, objectId: string, options?: AuditQueryOptions): Promise<AuditPage>;
+}
+
+interface AuditFilter {
+  actorId?: string;
+  actorType?: 'user' | 'system' | 'connector';
+  operationType?: ('read' | 'create' | 'update' | 'delete' | 'action' | 'query' | 'link' | 'unlink')[];
+  objectType?: string;
+  objectId?: string;
+  actionType?: string;
+  result?: 'success' | 'denied' | 'error';
+  timeRange?: { from: DateTime; to: DateTime };
+  traceId?: string;
+}
+
+interface AuditQueryOptions {
+  limit?: number;
+  offset?: number;
+  orderBy?: { field: 'timestamp'; direction: 'asc' | 'desc' };
+}
+
+interface AuditPage {
+  records: AuditRecord[];
+  totalCount: number;
+  hasMore: boolean;
+}
+```
+
+The GraphQL API exposes audit queries as:
+
+```graphql
+type Query {
+  auditRecords(filter: AuditFilterInput, first: Int, after: String): AuditRecordConnection!
+  auditTrail(objectType: String!, objectId: ID!, first: Int, after: String): AuditRecordConnection!
+}
+```
+
+Audit query access MUST be restricted to users with the `audit:read` permission. Field-level redaction applies to the `detail.before` and `detail.after` snapshots — auditors see only the fields they are permitted to view on the underlying object type.
 
 ### 7.3 Consent Management
 
@@ -2534,7 +2623,7 @@ Degraded mode requirements:
 |--------|--------|-------|
 | Uptime | 99.9% per instance | |
 | Deployment | Zero-downtime rolling updates | |
-| RPO | < 1 hour | Requires storage provider with streaming replication and/or point-in-time recovery capability (see Section 3.5) |
+| RPO | < 1 hour | Requires storage provider with streaming replication and/or point-in-time recovery capability (see Section 3.6) |
 | RTO | < 4 hours | |
 
 ---

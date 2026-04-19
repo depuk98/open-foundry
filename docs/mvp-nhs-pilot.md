@@ -30,7 +30,7 @@ The pilot must demonstrate:
 | 1 | **ODL Compiler** | 2 | Full ODL parser + validator + GraphQL API generator. TypeScript. Ships as `@openfoundry/odl` CLI and library. |
 | 2 | **Schema Registry** | 2.5, 4.1 | Git-backed primary (ODL files in repo), database-backed runtime cache in PostgreSQL. Schema lifecycle per Section 2.5; registry is an Ontology Engine responsibility per Section 4.1. No schema workspaces yet. |
 | 3 | **PostgreSQL+AGE Storage Provider** | 3 | Sole provider. Full SPI conformance for REQUIRED categories: Schema, CRUD, Links, Queries, Transactions, Multi-tenancy, Governance, Lineage. Temporal queries via object `_version` history table. |
-| 4 | **In-Memory Storage Provider** | 3.6 | For unit/integration tests only. |
+| 4 | **In-Memory Storage Provider** | 3.7 | For unit/integration tests only. |
 | 5 | **Ontology Engine** | 4 | Object lifecycle, link management, schema validation, constraint evaluation, uniqueness checks, cardinality enforcement, event emission (CloudEvents). Computed fields: LAZY only. |
 | 6 | **Action Framework** | 5 | YAML manifest parsing, CEL preconditions + effects, full execution pipeline (validate → authorise → consent → preconditions → execute → audit → emit). Side-effects: inline webhook calls with retry (Temporal deferred). |
 | 7 | **CEL Evaluator** | 5.2.4 | Go sidecar with gRPC interface. Ships as a container image. TypeScript CEL used only in ODL compiler for static type-checking. |
@@ -343,7 +343,7 @@ version: 1
 reversible: false
 
 preconditions:
-  - expr: "patient.status != 'ACTIVE' || patient.currentWard == null"
+  - expr: "patient.currentWard == null"
     error: "Patient is already admitted to a ward"
   - expr: "bed == null || bed.status == 'AVAILABLE'"
     error: "Selected bed is not available"
@@ -430,6 +430,14 @@ effects:
     set:
       status: "DISCHARGED"
 
+  # Reset bed status before deleting the link (effects use immutable snapshot,
+  # so patient.currentBed still resolves to the pre-effect bed)
+  - type: updateObject
+    target: "patient.currentBed"
+    condition: "patient.currentBed != null"
+    set:
+      status: "CLEANING"
+
   - type: deleteLink
     linkType: "AdmittedTo"
     filter:
@@ -504,6 +512,14 @@ preconditions:
     error: "Insufficient role for ward transfer"
 
 effects:
+  # Reset old bed status (uses immutable snapshot, so patient.currentBed
+  # still resolves to the pre-effect bed)
+  - type: updateObject
+    target: "patient.currentBed"
+    condition: "patient.currentBed != null"
+    set:
+      status: "CLEANING"
+
   # Terminate current admission link
   - type: deleteLink
     linkType: "AdmittedTo"
@@ -512,7 +528,7 @@ effects:
       active: true
     expect: ONE
 
-  # Release current bed
+  # Release current bed link
   - type: deleteLink
     linkType: "OccupiesBed"
     filter:
@@ -809,20 +825,23 @@ THEN  Patient.status == ACTIVE
   AND an audit record exists for the action
   AND a CloudEvent nhs.acute.patient.admitted was emitted
 
-GIVEN an admitted patient on Ward-A
+GIVEN an admitted patient on Ward-A with Bed-1
 WHEN  a clinician executes TransferWard with toWard=Ward-B, toBed=Bed-5
 THEN  the old AdmittedTo link to Ward-A is soft-deleted
   AND a new AdmittedTo link to Ward-B is created
   AND the old OccupiesBed link is soft-deleted
   AND a new OccupiesBed link to Bed-5 is created
+  AND Bed-1.status == CLEANING (old bed released)
+  AND Bed-5.status == OCCUPIED (new bed assigned)
   AND querying Patient.admissions with history:true returns both links
 
-GIVEN an admitted patient
+GIVEN an admitted patient with Bed-1
 WHEN  a clinician executes DischargePatient with destination=HOME
 THEN  Patient.status == DISCHARGED
   AND all active AdmittedTo links from Patient are soft-deleted
   AND all active OccupiesBed links from Patient are soft-deleted
   AND all active UnderCareOf links from Patient are soft-deleted
+  AND Bed-1.status == CLEANING (bed released for cleaning)
   AND a DischargeRecord object is created
 ```
 
