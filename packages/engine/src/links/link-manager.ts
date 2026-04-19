@@ -141,6 +141,7 @@ export class LinkManager {
     properties: Record<string, unknown>,
     ctx: RequestContext,
     cause?: EventCause,
+    expectedVersion?: number,
   ): Promise<OntologyLink> {
     return withSpan(tracer, 'updateLink', {
       [SpanAttributes.OBJECT_TYPE]: type,
@@ -161,7 +162,7 @@ export class LinkManager {
       }
 
       // Update via SPI
-      const updated = await this.storage.updateLink(ctx, type, linkId, properties);
+      const updated = await this.storage.updateLink(ctx, type, linkId, properties, expectedVersion);
 
       // Compute changes
       const changes = this.computeChanges(existing, properties);

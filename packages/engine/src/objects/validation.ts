@@ -74,6 +74,7 @@ export async function validateObjectProperties(
   ctx: RequestContext,
   storage: StorageProvider,
   existingId?: string,
+  patchKeys?: Set<string>,
 ): Promise<ValidationResult> {
   const failures: ValidationFailure[] = [];
 
@@ -94,21 +95,23 @@ export async function validateObjectProperties(
     enumMap.set(e.name, new Set(e.values.map((v) => v.name)));
   }
 
-  // Step 1: Schema validation
+  // Step 1: Schema validation (uses merged state for required-field checks)
   const schemaFailures = validateSchema(objectType, properties, enumMap);
   failures.push(...schemaFailures);
 
-  // Step 1b: Immutable field check (updates only)
-  if (existingId !== undefined) {
-    const immutableFailures = checkImmutableFields(objectType, properties);
+  // Step 1b: Immutable field check (updates only, uses patch keys not merged state)
+  if (existingId !== undefined && patchKeys) {
+    const immutableFailures = checkImmutableFields(objectType, patchKeys);
     failures.push(...immutableFailures);
   }
 
-  // Step 2: Constraint evaluation (field-level)
-  const constraintFailures = evaluateConstraints(objectType, properties);
+  // Step 2: Constraint evaluation (field-level).
+  // On updates, only evaluate constraints for fields in the patch.
+  // On creates, evaluate all field constraints.
+  const constraintFailures = evaluateConstraints(objectType, properties, patchKeys);
   failures.push(...constraintFailures);
 
-  // Step 2b: Type-level constraint evaluation (only if no field-level constraint errors)
+  // Step 2b: Type-level constraint evaluation (uses merged state, gated on field-level)
   const fieldConstraintErrors = constraintFailures.filter((f) => f.severity !== 'warning');
   if (fieldConstraintErrors.length === 0) {
     const typeConstraintFailures = evaluateTypeConstraints(objectType, properties);
@@ -256,10 +259,14 @@ function validateSchema(
 function evaluateConstraints(
   objectType: ObjectType,
   properties: Record<string, unknown>,
+  patchKeys?: Set<string>,
 ): ValidationFailure[] {
   const failures: ValidationFailure[] = [];
 
   for (const field of objectType.fields) {
+    // On updates, only evaluate constraints for fields in the patch
+    if (patchKeys && !patchKeys.has(field.name)) continue;
+
     const constraints = field.directives.filter(
       (d): d is { kind: 'constraint'; expr: string } => d.kind === 'constraint',
     );
@@ -379,11 +386,12 @@ function applySizeOp(fieldValue: unknown, op: string, target: number): boolean |
  * Step 1b: Immutable field check (Section 2.3.3).
  *
  * On update operations, any property that has @immutable must not be present
- * in the update payload. The field was set during creation and cannot change.
+ * in the update patch. Checks against the raw patch keys (not merged state)
+ * so that existing immutable field values from creation don't trigger a false positive.
  */
 function checkImmutableFields(
   objectType: ObjectType,
-  properties: Record<string, unknown>,
+  patchKeys: Set<string>,
 ): ValidationFailure[] {
   const failures: ValidationFailure[] = [];
 
@@ -391,7 +399,7 @@ function checkImmutableFields(
     const isImmutable = field.directives.some((d) => d.kind === 'immutable');
     if (!isImmutable) continue;
 
-    if (properties[field.name] !== undefined) {
+    if (patchKeys.has(field.name)) {
       failures.push({
         step: 'immutable',
         field: field.name,

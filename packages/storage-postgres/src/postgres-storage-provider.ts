@@ -464,7 +464,7 @@ export class PostgresStorageProvider implements StorageProvider {
       supportsGraphTraversal: true,
       supportsBulkMutations: true,
       maxTraversalDepth: 10,
-      replicationSupport: 'BOTH',
+      replicationSupport: 'NONE',
     };
   }
 

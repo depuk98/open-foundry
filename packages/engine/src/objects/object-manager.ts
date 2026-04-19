@@ -151,6 +151,7 @@ export class ObjectManager {
     properties: Record<string, unknown>,
     ctx: RequestContext,
     cause?: EventCause,
+    expectedVersion?: number,
   ): Promise<OntologyObject> {
     return withSpan(tracer, 'updateObject', {
       [SpanAttributes.OBJECT_TYPE]: type,
@@ -174,14 +175,16 @@ export class ObjectManager {
       // (so required field checks work on partial updates)
       const merged = this.mergeProperties(existing, properties);
 
-      // Validate the merged state
-      const validation = await this.validate(type, merged, ctx, id);
+      // Validate the merged state, passing patch keys so immutable/field-level
+      // constraint checks only run for fields actually being updated
+      const patchKeys = new Set(Object.keys(properties));
+      const validation = await this.validate(type, merged, ctx, id, patchKeys);
       if (!validation.valid) {
         throw validationError(validation.failures);
       }
 
       // Update via SPI
-      const updated = await this.storage.updateObject(ctx, type, id, properties);
+      const updated = await this.storage.updateObject(ctx, type, id, properties, expectedVersion);
 
       // Compute change set
       const changes = this.computeChanges(existing, properties);
@@ -287,6 +290,7 @@ export class ObjectManager {
     properties: Record<string, unknown>,
     ctx: RequestContext,
     existingId?: string,
+    patchKeys?: Set<string>,
   ): Promise<ValidationResult> {
     return validateObjectProperties(
       this.schema,
@@ -295,6 +299,7 @@ export class ObjectManager {
       ctx,
       this.storage,
       existingId,
+      patchKeys,
     );
   }
 

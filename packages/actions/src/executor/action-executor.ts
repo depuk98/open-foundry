@@ -430,8 +430,8 @@ export class ActionExecutor {
       if (condResult.value !== true) return;
     }
 
-    // Resolve target to an object
-    const target = context[effect.target] as OntologyObject | null;
+    // Resolve target to an object (supports dotted paths like "patient.currentBed")
+    const target = this.resolveTarget(effect.target, context);
     if (!target) {
       throw new Error(`Target "${effect.target}" not found in context`);
     }
@@ -473,8 +473,8 @@ export class ActionExecutor {
       if (condResult.value !== true) return;
     }
 
-    const fromObj = context[effect.from] as OntologyObject | null;
-    const toObj = context[effect.to] as OntologyObject | null;
+    const fromObj = this.resolveTarget(effect.from, context);
+    const toObj = this.resolveTarget(effect.to, context);
     if (!fromObj) throw new Error(`createLink "from" param "${effect.from}" not found in context`);
     if (!toObj) throw new Error(`createLink "to" param "${effect.to}" not found in context`);
 
@@ -573,14 +573,14 @@ export class ActionExecutor {
     let toId: string | undefined;
 
     if (effect.filter.from) {
-      const fromObj = context[effect.filter.from] as OntologyObject | null;
+      const fromObj = this.resolveTarget(effect.filter.from, context);
       if (fromObj) {
         fromId = fromObj._id;
       }
     }
 
     if (effect.filter.to) {
-      const toObj = context[effect.filter.to] as OntologyObject | null;
+      const toObj = this.resolveTarget(effect.filter.to, context);
       if (toObj) {
         toId = toObj._id;
       }
@@ -676,5 +676,38 @@ export class ActionExecutor {
     }
 
     return current ?? null;
+  }
+
+  /**
+   * Resolve a dotted target path to an OntologyObject.
+   *
+   * Unlike resolveExpression (which returns _id for objects), this returns
+   * the full object so the executor can read _type and _id from it.
+   * Supports both flat keys ("patient") and dotted paths ("patient.currentBed").
+   */
+  private resolveTarget(target: string, context: Record<string, unknown>): OntologyObject | null {
+    const parts = target.split('.');
+    let current: unknown = context;
+
+    for (const part of parts) {
+      if (current === null || current === undefined) return null;
+      if (typeof current === 'object') {
+        current = (current as Record<string, unknown>)[part];
+      } else {
+        return null;
+      }
+    }
+
+    if (
+      current !== null &&
+      current !== undefined &&
+      typeof current === 'object' &&
+      '_id' in (current as Record<string, unknown>) &&
+      '_type' in (current as Record<string, unknown>)
+    ) {
+      return current as OntologyObject;
+    }
+
+    return null;
   }
 }
