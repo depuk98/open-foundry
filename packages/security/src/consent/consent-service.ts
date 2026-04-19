@@ -14,6 +14,7 @@ import type {
   ConsentManager,
   ConsentRecord,
   DataPurpose,
+  RevocationResult,
 } from "@openfoundry/spi";
 import { DataPurpose as DataPurposeEnum } from "@openfoundry/spi";
 
@@ -123,6 +124,49 @@ export class ConsentService implements ConsentManager {
         evidence,
       };
       await this.store.put(record);
+    });
+  }
+
+  /**
+   * Batch consent check for multiple subjects (Section 7.3.4).
+   */
+  async checkConsentBatch(
+    subjectIds: string[],
+    purpose: DataPurpose,
+    requestor: string,
+  ): Promise<Map<string, ConsentDecision>> {
+    return withSpan(tracer, "consent.checkBatch", {}, async () => {
+      const results = new Map<string, ConsentDecision>();
+      await Promise.all(
+        subjectIds.map(async (subjectId) => {
+          const decision = await this.checkConsent(subjectId, purpose, requestor);
+          results.set(subjectId, decision);
+        }),
+      );
+      return results;
+    });
+  }
+
+  /**
+   * Revoke consent for a subject and purpose (Section 7.3.4).
+   *
+   * Records a DENY decision and returns a RevocationResult with
+   * metadata about the revocation's impact.
+   */
+  async revokeConsent(
+    subjectId: string,
+    purpose: DataPurpose,
+    reason: string,
+  ): Promise<RevocationResult> {
+    return withSpan(tracer, "consent.revoke", {}, async () => {
+      await this.recordConsent(subjectId, purpose, "DENY", reason);
+      return {
+        subjectId,
+        purpose,
+        revokedAt: new Date().toISOString(),
+        activeSessions: 0,
+        subscriptionsTerminated: 0,
+      };
     });
   }
 

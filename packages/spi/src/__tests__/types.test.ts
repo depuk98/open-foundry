@@ -66,6 +66,7 @@ describe('@openfoundry/spi type exports', () => {
       _toId: 'ward-1',
       _version: 1,
       _createdAt: '2026-01-01T00:00:00Z',
+      _updatedAt: '2026-01-01T00:00:00Z',
     };
     expect(link._fromType).toBe('Patient');
     expect(link._toType).toBe('Ward');

@@ -53,7 +53,16 @@ export type { StorageProvider } from './storage-provider.js';
 export type { CloudEvent, CloudEventType } from './events.js';
 
 // Audit (Section 7.2)
-export type { AuditRecord, AuditActor, AuditOperation, AuditDetail } from './audit.js';
+export type {
+  AuditRecord,
+  AuditActor,
+  AuditOperation,
+  AuditDetail,
+  AuditStore,
+  AuditFilter,
+  AuditQueryOptions,
+  AuditPage,
+} from './audit.js';
 
 // Field provenance (Section 4.6)
 export type { FieldProvenance, ProvenanceSource } from './provenance.js';
@@ -65,4 +74,15 @@ export type {
   ConsentManager,
   ConsentRecord,
   FieldRestriction,
+  RevocationResult,
 } from './consent.js';
+
+// Backup/Restore (Section 3.9)
+export type {
+  BackupCapability,
+  BackupOptions,
+  BackupFilter,
+  BackupHandle,
+  RestoreOptions,
+  RestoreResult,
+} from './backup.js';

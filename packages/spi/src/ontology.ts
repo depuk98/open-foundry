@@ -31,6 +31,7 @@ export interface OntologyLink {
   _toId: string;
   _version: number;
   _createdAt: DateTime;
+  _updatedAt: DateTime;
   _deletedAt?: DateTime;
   [key: string]: unknown;
 }
@@ -179,7 +180,7 @@ export interface LinkTypeDefinition {
   name: string;
   fromType: string;
   toType: string;
-  cardinality: 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_MANY';
+  cardinality: 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_ONE' | 'MANY_TO_MANY';
   properties?: PropertyDefinition[];
 }
 

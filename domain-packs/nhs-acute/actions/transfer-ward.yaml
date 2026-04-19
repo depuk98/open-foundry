@@ -16,6 +16,14 @@ preconditions:
     error: "Insufficient role for ward transfer"
 
 effects:
+  # Reset old bed status (uses immutable snapshot, so patient.currentBed
+  # still resolves to the pre-effect bed)
+  - type: updateObject
+    target: "patient.currentBed"
+    condition: "patient.currentBed != null"
+    set:
+      status: "CLEANING"
+
   # Terminate current admission link
   - type: deleteLink
     linkType: "AdmittedTo"

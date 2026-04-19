@@ -17,6 +17,14 @@ effects:
     set:
       status: "DISCHARGED"
 
+  # Reset bed status before deleting the link (effects use immutable snapshot,
+  # so patient.currentBed still resolves to the pre-effect bed)
+  - type: updateObject
+    target: "patient.currentBed"
+    condition: "patient.currentBed != null"
+    set:
+      status: "CLEANING"
+
   - type: deleteLink
     linkType: "AdmittedTo"
     filter:

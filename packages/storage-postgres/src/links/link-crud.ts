@@ -71,6 +71,7 @@ function rowToLink(row: Record<string, unknown>): OntologyLink {
     _toId: row['_to_id'] as string,
     _version: row['_version'] as number,
     _createdAt: (row['_created_at'] as Date).toISOString() as DateTime,
+    _updatedAt: (row['_updated_at'] as Date).toISOString() as DateTime,
   };
 
   if (row['_deleted_at'] != null) {
@@ -80,7 +81,7 @@ function rowToLink(row: Record<string, unknown>): OntologyLink {
   // Map remaining columns (user-defined link properties)
   const systemCols = new Set([
     '_tenant_id', '_id', '_type', '_from_type', '_from_id',
-    '_to_type', '_to_id', '_version', '_created_at', '_deleted_at',
+    '_to_type', '_to_id', '_version', '_created_at', '_updated_at', '_deleted_at',
   ]);
   for (const [key, value] of Object.entries(row)) {
     if (!systemCols.has(key)) {
@@ -122,6 +123,7 @@ async function ageQuery(q: Queryable, cypher: string): Promise<void> {
  *
  * - ONE_TO_ONE: max 1 active link from source, max 1 active link to target
  * - ONE_TO_MANY: max 1 active link to target (many from source OK)
+ * - MANY_TO_ONE: max 1 active link from source (many to target OK)
  * - MANY_TO_MANY: no constraints
  *
  * Only active (non-deleted) links count toward cardinality.
@@ -165,6 +167,15 @@ async function enforceCardinality(
     );
     if (parseInt(String((toCount.rows[0] as Record<string, unknown>)['cnt']), 10) > 0) {
       throw new Error(`Cardinality violation: ONE_TO_MANY link ${linkType} already exists to ${toType}:${toId}`);
+    }
+  } else if (cardinality === 'MANY_TO_ONE') {
+    // Check: no active link from this source of this type (each source has at most one outbound)
+    const fromCount = await q.query(
+      `SELECT COUNT(*) AS cnt FROM ${table} WHERE "_tenant_id" = $1 AND "_from_type" = $2 AND "_from_id" = $3 AND "_deleted_at" IS NULL`,
+      [tenantId, fromType, fromId],
+    );
+    if (parseInt(String((fromCount.rows[0] as Record<string, unknown>)['cnt']), 10) > 0) {
+      throw new Error(`Cardinality violation: MANY_TO_ONE link ${linkType} already exists from ${fromType}:${fromId}`);
     }
   }
   // MANY_TO_MANY: no cardinality check needed
@@ -250,10 +261,10 @@ export async function createLink(
   // Build column names and values
   const systemCols = [
     '"_tenant_id"', '"_id"', '"_type"', '"_from_type"', '"_from_id"',
-    '"_to_type"', '"_to_id"', '"_version"', '"_created_at"',
+    '"_to_type"', '"_to_id"', '"_version"', '"_created_at"', '"_updated_at"',
   ];
   const systemVals: unknown[] = [
-    ctx.tenantId, id, type, fromType, fromId, toType, toId, 1, timestamp,
+    ctx.tenantId, id, type, fromType, fromId, toType, toId, 1, timestamp, timestamp,
   ];
 
   const propEntries = Object.entries(properties ?? {});
@@ -318,14 +329,19 @@ export async function updateLink(
   properties: Record<string, unknown>,
   schema = 'public',
   tx?: PgTransaction,
+  expectedVersion?: number,
 ): Promise<OntologyLink> {
   const q = resolveQueryable(pool, tx);
   const table = linkTableName(type, schema);
+  const timestamp = now();
 
   const propEntries = Object.entries(properties);
-  const setClauses: string[] = [`"_version" = "_version" + 1`];
-  const params: unknown[] = [];
-  let paramIdx = 1;
+  const setClauses: string[] = [
+    `"_version" = "_version" + 1`,
+    `"_updated_at" = $1`,
+  ];
+  const params: unknown[] = [timestamp];
+  let paramIdx = 2;
 
   for (const [key, value] of propEntries) {
     setClauses.push(`${pgIdent(snakeCase(key))} = $${paramIdx}`);
@@ -336,12 +352,30 @@ export async function updateLink(
   params.push(ctx.tenantId);
   const tenantParam = paramIdx++;
   params.push(linkId);
-  const idParam = paramIdx;
+  const idParam = paramIdx++;
 
-  const sql = `UPDATE ${table} SET ${setClauses.join(', ')} WHERE "_tenant_id" = $${tenantParam} AND "_id" = $${idParam} AND "_deleted_at" IS NULL RETURNING *`;
+  let whereClause = `"_tenant_id" = $${tenantParam} AND "_id" = $${idParam} AND "_deleted_at" IS NULL`;
+  if (expectedVersion !== undefined) {
+    params.push(expectedVersion);
+    whereClause += ` AND "_version" = $${paramIdx}`;
+  }
+
+  const sql = `UPDATE ${table} SET ${setClauses.join(', ')} WHERE ${whereClause} RETURNING *`;
 
   const result = await q.query(sql, params);
   if (result.rows.length === 0) {
+    if (expectedVersion !== undefined) {
+      // Follow-up SELECT to distinguish not-found vs version-mismatch
+      const check = await q.query(
+        `SELECT "_version" FROM ${table} WHERE "_tenant_id" = $1 AND "_id" = $2 AND "_deleted_at" IS NULL`,
+        [ctx.tenantId, linkId],
+      );
+      if (check.rows.length === 0) {
+        throw new Error(`VERSION_CONFLICT: Link ${type}:${linkId} not found or deleted`);
+      }
+      const currentVersion = (check.rows[0] as Record<string, unknown>)['_version'];
+      throw new Error(`VERSION_CONFLICT: Link ${type}:${linkId} version mismatch (expected ${expectedVersion}, current ${currentVersion})`);
+    }
     throw new Error(`Link ${type}:${linkId} not found or is deleted`);
   }
 
@@ -363,7 +397,7 @@ export async function deleteLink(
   const table = linkTableName(type, schema);
   const timestamp = now();
 
-  const sql = `UPDATE ${table} SET "_deleted_at" = $1, "_version" = "_version" + 1 WHERE "_tenant_id" = $2 AND "_id" = $3 AND "_deleted_at" IS NULL RETURNING *`;
+  const sql = `UPDATE ${table} SET "_deleted_at" = $1, "_updated_at" = $1, "_version" = "_version" + 1 WHERE "_tenant_id" = $2 AND "_id" = $3 AND "_deleted_at" IS NULL RETURNING *`;
 
   const result = await q.query(sql, [timestamp, ctx.tenantId, linkId]);
   if (result.rows.length === 0) {

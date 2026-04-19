@@ -23,7 +23,7 @@ import type {
 /** A single validation failure. */
 export interface ValidationFailure {
   /** The pipeline step that failed. */
-  step: 'schema' | 'constraint' | 'uniqueness' | 'cardinality' | 'referential_integrity';
+  step: 'schema' | 'constraint' | 'uniqueness' | 'cardinality' | 'referential_integrity' | 'immutable';
   /** The field that caused the failure (if applicable). */
   field?: string;
   /** Human-readable message. */
@@ -98,9 +98,22 @@ export async function validateObjectProperties(
   const schemaFailures = validateSchema(objectType, properties, enumMap);
   failures.push(...schemaFailures);
 
-  // Step 2: Constraint evaluation
+  // Step 1b: Immutable field check (updates only)
+  if (existingId !== undefined) {
+    const immutableFailures = checkImmutableFields(objectType, properties);
+    failures.push(...immutableFailures);
+  }
+
+  // Step 2: Constraint evaluation (field-level)
   const constraintFailures = evaluateConstraints(objectType, properties);
   failures.push(...constraintFailures);
+
+  // Step 2b: Type-level constraint evaluation (only if no field-level constraint errors)
+  const fieldConstraintErrors = constraintFailures.filter((f) => f.severity !== 'warning');
+  if (fieldConstraintErrors.length === 0) {
+    const typeConstraintFailures = evaluateTypeConstraints(objectType, properties);
+    failures.push(...typeConstraintFailures);
+  }
 
   // Step 3: Uniqueness check (only if no blocking errors so far)
   const errorsSoFar = failures.filter((f) => f.severity !== 'warning');
@@ -281,7 +294,7 @@ function evaluateConstraints(
  */
 function evaluateCelExpr(
   expr: string,
-  _fieldName: string,
+  fieldName: string,
   properties: Record<string, unknown>,
 ): boolean | null {
   // Simple comparison: "this.fieldName > N" or "this.fieldName >= N"
@@ -295,15 +308,21 @@ function evaluateCelExpr(
     const numValue = Number(rawValue!.trim());
     if (isNaN(numValue)) return null;
 
-    switch (op) {
-      case '>': return fieldValue > numValue;
-      case '<': return fieldValue < numValue;
-      case '>=': return fieldValue >= numValue;
-      case '<=': return fieldValue <= numValue;
-      case '==': return fieldValue === numValue;
-      case '!=': return fieldValue !== numValue;
-      default: return null;
-    }
+    return applyNumericOp(fieldValue, op!, numValue);
+  }
+
+  // Bare "value OP N" — for field-level constraints where `value` refers to the field
+  const valueCompMatch = expr.match(
+    /^value\s*(>=|<=|!=|==|>|<)\s*(.+)$/,
+  );
+  if (valueCompMatch) {
+    const [, op, rawValue] = valueCompMatch;
+    const fieldValue = properties[fieldName];
+    if (typeof fieldValue !== 'number') return null;
+    const numValue = Number(rawValue!.trim());
+    if (isNaN(numValue)) return null;
+
+    return applyNumericOp(fieldValue, op!, numValue);
   }
 
   // size() check: "size(this.fieldName) > N"
@@ -313,28 +332,110 @@ function evaluateCelExpr(
   if (sizeMatch) {
     const [, refField, op, rawValue] = sizeMatch;
     const fieldValue = properties[refField!];
-    let size: number;
-    if (typeof fieldValue === 'string') {
-      size = fieldValue.length;
-    } else if (Array.isArray(fieldValue)) {
-      size = fieldValue.length;
-    } else {
-      return null;
-    }
-    const numValue = Number(rawValue);
-    switch (op) {
-      case '>': return size > numValue;
-      case '<': return size < numValue;
-      case '>=': return size >= numValue;
-      case '<=': return size <= numValue;
-      case '==': return size === numValue;
-      case '!=': return size !== numValue;
-      default: return null;
-    }
+    return applySizeOp(fieldValue, op!, Number(rawValue));
+  }
+
+  // size(value) check: "size(value) > N" — for field-level constraints
+  const sizeValueMatch = expr.match(
+    /^size\(value\)\s*(>|<|>=|<=|==|!=)\s*(\d+)$/,
+  );
+  if (sizeValueMatch) {
+    const [, op, rawValue] = sizeValueMatch;
+    const fieldValue = properties[fieldName];
+    return applySizeOp(fieldValue, op!, Number(rawValue));
   }
 
   // Cannot evaluate — delegate to CEL sidecar
   return null;
+}
+
+/** Apply a numeric comparison operator. */
+function applyNumericOp(left: number, op: string, right: number): boolean | null {
+  switch (op) {
+    case '>': return left > right;
+    case '<': return left < right;
+    case '>=': return left >= right;
+    case '<=': return left <= right;
+    case '==': return left === right;
+    case '!=': return left !== right;
+    default: return null;
+  }
+}
+
+/** Apply a size comparison. Returns null if value type is unsupported. */
+function applySizeOp(fieldValue: unknown, op: string, target: number): boolean | null {
+  let size: number;
+  if (typeof fieldValue === 'string') {
+    size = fieldValue.length;
+  } else if (Array.isArray(fieldValue)) {
+    size = fieldValue.length;
+  } else {
+    return null;
+  }
+  return applyNumericOp(size, op, target);
+}
+
+/**
+ * Step 1b: Immutable field check (Section 2.3.3).
+ *
+ * On update operations, any property that has @immutable must not be present
+ * in the update payload. The field was set during creation and cannot change.
+ */
+function checkImmutableFields(
+  objectType: ObjectType,
+  properties: Record<string, unknown>,
+): ValidationFailure[] {
+  const failures: ValidationFailure[] = [];
+
+  for (const field of objectType.fields) {
+    const isImmutable = field.directives.some((d) => d.kind === 'immutable');
+    if (!isImmutable) continue;
+
+    if (properties[field.name] !== undefined) {
+      failures.push({
+        step: 'immutable',
+        field: field.name,
+        message: `Field '${field.name}' is @immutable and cannot be changed after creation`,
+      });
+    }
+  }
+
+  return failures;
+}
+
+/**
+ * Step 2b: Type-level constraint evaluation (Section 2.3.2).
+ *
+ * Evaluates @constraint directives applied to the type itself (not fields).
+ * These use `this` to reference the full object state.
+ */
+function evaluateTypeConstraints(
+  objectType: ObjectType,
+  properties: Record<string, unknown>,
+): ValidationFailure[] {
+  const failures: ValidationFailure[] = [];
+
+  const constraints = objectType.directives.filter(
+    (d): d is { kind: 'constraint'; expr: string } => d.kind === 'constraint',
+  );
+
+  for (const constraint of constraints) {
+    const result = evaluateCelExpr(constraint.expr, '', properties);
+    if (result === false) {
+      failures.push({
+        step: 'constraint',
+        message: `Type constraint violated on '${objectType.name}': ${constraint.expr}`,
+      });
+    } else if (result === null) {
+      failures.push({
+        step: 'constraint',
+        message: `Type constraint on '${objectType.name}' could not be evaluated inline (requires CEL sidecar): ${constraint.expr}`,
+        severity: 'warning',
+      });
+    }
+  }
+
+  return failures;
 }
 
 /**

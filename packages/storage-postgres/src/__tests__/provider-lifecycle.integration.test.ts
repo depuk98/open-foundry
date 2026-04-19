@@ -551,7 +551,7 @@ describeWithPg('PostgresStorageProvider lifecycle (integration)', () => {
   describe('ensureIndex', () => {
     it('creates an index without error', async () => {
       // Should not throw
-      await provider.ensureIndex(ctx, 'Patient', 'familyName', 'BTREE');
+      await provider.ensureIndex(ctx, 'Patient', { field: 'familyName', indexType: 'BTREE' });
 
       // Verify index exists
       const result = await provider.pool.query(

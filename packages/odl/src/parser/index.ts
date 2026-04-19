@@ -322,6 +322,8 @@ function parseFieldDirective(d: DirectiveNode): FieldDirective | null {
         weight: getFloatArg(d, 'weight'),
         analyzer: getStringArg(d, 'analyzer') ?? undefined,
       };
+    case 'immutable':
+      return { kind: 'immutable' };
     default:
       return null;
   }
@@ -358,6 +360,12 @@ function extractTypeDirectives(directives: readonly DirectiveNode[] | undefined)
         result.push({
           kind: 'deprecated',
           reason: getStringArg(d, 'reason') ?? '',
+        });
+        break;
+      case 'constraint':
+        result.push({
+          kind: 'constraint',
+          expr: getStringArg(d, 'expr') ?? '',
         });
         break;
     }

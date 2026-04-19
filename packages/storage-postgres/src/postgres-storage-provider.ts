@@ -27,6 +27,7 @@ import type {
   MigrationResult,
   HealthStatus,
   StorageCapabilities,
+  IndexDefinition,
   IndexType,
   DateTime,
   LinkTypeDefinition,
@@ -94,8 +95,8 @@ class PgSpiTransaction implements Transaction {
     return pgCreateObject(this._pool, this._ctx, type, properties, this._schema, this._tx);
   }
 
-  async updateObject(type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject> {
-    return pgUpdateObject(this._pool, this._ctx, type, id, properties, this._schema, this._tx);
+  async updateObject(type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyObject> {
+    return pgUpdateObject(this._pool, this._ctx, type, id, properties, this._schema, this._tx, expectedVersion);
   }
 
   async deleteObject(type: string, id: string, mode: 'soft' | 'hard'): Promise<void> {
@@ -122,8 +123,8 @@ class PgSpiTransaction implements Transaction {
     );
   }
 
-  async updateLink(type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink> {
-    return pgUpdateLink(this._pool, this._ctx, type, linkId, properties, this._schema, this._tx);
+  async updateLink(type: string, linkId: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyLink> {
+    return pgUpdateLink(this._pool, this._ctx, type, linkId, properties, this._schema, this._tx, expectedVersion);
   }
 
   async deleteLink(type: string, linkId: string): Promise<void> {
@@ -218,8 +219,8 @@ export class PostgresStorageProvider implements StorageProvider {
     return obj;
   }
 
-  async updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject> {
-    return pgUpdateObject(this._pool, ctx, type, id, properties, this._dataSchema);
+  async updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyObject> {
+    return pgUpdateObject(this._pool, ctx, type, id, properties, this._dataSchema, undefined, expectedVersion);
   }
 
   async deleteObject(ctx: RequestContext, type: string, id: string, mode: 'soft' | 'hard'): Promise<void> {
@@ -307,8 +308,8 @@ export class PostgresStorageProvider implements StorageProvider {
     return link;
   }
 
-  async updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink> {
-    return pgUpdateLink(this._pool, ctx, type, linkId, properties, this._dataSchema);
+  async updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyLink> {
+    return pgUpdateLink(this._pool, ctx, type, linkId, properties, this._dataSchema, undefined, expectedVersion);
   }
 
   async deleteLink(ctx: RequestContext, type: string, linkId: string): Promise<void> {
@@ -359,15 +360,60 @@ export class PostgresStorageProvider implements StorageProvider {
 
   // ─── Indices ───
 
-  async ensureIndex(_ctx: RequestContext, type: string, field: string, indexType: IndexType): Promise<void> {
+  async ensureIndex(_ctx: RequestContext, type: string, index: IndexDefinition): Promise<void> {
     const table = `${pgIdent(this._dataSchema)}.${pgIdent(snakeCase(type))}`;
-    const column = pgIdent(snakeCase(field));
-    const method = pgIndexMethod(indexType);
-    const indexName = `"idx_${snakeCase(type)}_${snakeCase(field)}_${method}"`;
+    const column = pgIdent(snakeCase(index.field));
+    const method = pgIndexMethod(index.indexType);
+    const snakeType = snakeCase(type);
+    const snakeField = snakeCase(index.field);
 
-    await this._pool.query(
-      `CREATE INDEX IF NOT EXISTS ${indexName} ON ${table} USING ${method} (${column})`,
+    if (index.unique) {
+      const indexName = `"uq_${snakeType}_${snakeField}"`;
+      await this._pool.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table} (${column})`,
+      );
+    } else {
+      const indexName = `"idx_${snakeType}_${snakeField}_${method}"`;
+      await this._pool.query(
+        `CREATE INDEX IF NOT EXISTS ${indexName} ON ${table} USING ${method} (${column})`,
+      );
+    }
+  }
+
+  async dropIndex(_ctx: RequestContext, type: string, field: string): Promise<void> {
+    const snakeType = snakeCase(type);
+    const snakeField = snakeCase(field);
+    // Try dropping both unique and regular index names
+    await this._pool.query(`DROP INDEX IF EXISTS ${pgIdent(this._dataSchema)}."uq_${snakeType}_${snakeField}"`);
+    await this._pool.query(`DROP INDEX IF EXISTS ${pgIdent(this._dataSchema)}."idx_${snakeType}_${snakeField}_btree"`);
+    await this._pool.query(`DROP INDEX IF EXISTS ${pgIdent(this._dataSchema)}."idx_${snakeType}_${snakeField}_hash"`);
+    await this._pool.query(`DROP INDEX IF EXISTS ${pgIdent(this._dataSchema)}."idx_${snakeType}_${snakeField}_gin"`);
+    await this._pool.query(`DROP INDEX IF EXISTS ${pgIdent(this._dataSchema)}."idx_${snakeType}_${snakeField}_gist"`);
+  }
+
+  async listIndexes(_ctx: RequestContext, type: string): Promise<IndexDefinition[]> {
+    const tableName = snakeCase(type);
+    const result = await this._pool.query(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = $2`,
+      [this._dataSchema, tableName],
     );
+    const indexes: IndexDefinition[] = [];
+    for (const row of result.rows) {
+      const name = row.indexname as string;
+      const def = row.indexdef as string;
+      // Skip primary key indexes
+      if (name.endsWith('_pkey')) continue;
+      // Parse field name from index name convention: idx_type_field_method or uq_type_field
+      const isUnique = name.startsWith('uq_') || def.toUpperCase().includes('UNIQUE');
+      const methodMatch = def.match(/USING\s+(\w+)/i);
+      const method = (methodMatch?.[1]?.toUpperCase() ?? 'BTREE') as IndexType;
+      // Extract column name from parentheses
+      const colMatch = def.match(/\(([^)]+)\)/);
+      const col = colMatch?.[1]?.replace(/"/g, '').trim() ?? '';
+      const field = col.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+      indexes.push({ field, indexType: method, unique: isUnique || undefined });
+    }
+    return indexes;
   }
 
   // ─── Health ───

@@ -53,6 +53,7 @@ function makeLinkRow(overrides: Record<string, unknown> = {}): Record<string, un
     _to_id: 'ward-1',
     _version: 1,
     _created_at: new Date('2025-01-01T00:00:00Z'),
+    _updated_at: new Date('2025-01-01T00:00:00Z'),
     _deleted_at: null,
     ...overrides,
   };

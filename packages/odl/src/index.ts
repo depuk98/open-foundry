@@ -64,6 +64,7 @@ export type {
   UniqueDirective,
   IndexedDirective,
   ReadonlyDirective,
+  ImmutableDirective,
   SensitiveDirective,
   ParamDirective,
   LinkDirective,
@@ -77,6 +78,7 @@ export type {
   LinkTypeDirective,
   ActionTypeDirective,
   FunctionDirective,
+  TypeConstraintDirective,
 } from './parser/types.js';
 
 export type {

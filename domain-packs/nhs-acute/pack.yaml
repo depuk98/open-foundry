@@ -9,7 +9,7 @@ dependencies:
 
 provides:
   objectTypes: 5
-  linkTypes: 4
+  linkTypes: 6
   actionTypes: 3
   functions: 0
   connectors: 1

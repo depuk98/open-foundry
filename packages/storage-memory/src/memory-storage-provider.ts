@@ -26,7 +26,7 @@ import type {
   MigrationResult,
   HealthStatus,
   StorageCapabilities,
-  IndexType,
+  IndexDefinition,
   DateTime,
   LinkTypeDefinition,
 } from '@openfoundry/spi';
@@ -144,11 +144,11 @@ class MemoryTransaction implements Transaction {
     return clone(obj);
   }
 
-  async updateObject(type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject> {
+  async updateObject(type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyObject> {
     this.assertOpen();
     const prev = this._provider._getObjectInternal(this._ctx, type, id);
     if (!prev) throw new Error(`Object ${type}:${id} not found`);
-    const updated = this._provider._doUpdateObject(this._ctx, type, id, properties);
+    const updated = this._provider._doUpdateObject(this._ctx, type, id, properties, expectedVersion);
     this._journal.push({ op: 'updateObject', key: `${type}:${id}`, prev: clone(prev), value: updated });
     return clone(updated);
   }
@@ -173,11 +173,11 @@ class MemoryTransaction implements Transaction {
     return clone(link);
   }
 
-  async updateLink(type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink> {
+  async updateLink(type: string, linkId: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyLink> {
     this.assertOpen();
     const prev = this._provider._getLinkInternal(this._ctx, type, linkId);
     if (!prev) throw new Error(`Link ${type}:${linkId} not found`);
-    const updated = this._provider._doUpdateLink(this._ctx, type, linkId, properties);
+    const updated = this._provider._doUpdateLink(this._ctx, type, linkId, properties, expectedVersion);
     this._journal.push({ op: 'updateLink', key: `${type}:${linkId}`, prev: clone(prev), value: updated });
     return clone(updated);
   }
@@ -324,6 +324,12 @@ export class MemoryStorageProvider implements StorageProvider {
       if (existingToInbound) {
         throw new Error(`Cardinality violation: ONE_TO_MANY link ${linkType} already exists to ${toId}`);
       }
+    } else if (def.cardinality === 'MANY_TO_ONE') {
+      // Each "from" can only have one outbound link of this type
+      const existingFromOutbound = activeLinks.find((l) => l._fromId === fromId);
+      if (existingFromOutbound) {
+        throw new Error(`Cardinality violation: MANY_TO_ONE link ${linkType} already exists from ${fromId}`);
+      }
     }
     // MANY_TO_MANY: no constraint
   }
@@ -348,7 +354,7 @@ export class MemoryStorageProvider implements StorageProvider {
     return obj;
   }
 
-  /** @internal */ _doUpdateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>): OntologyObject {
+  /** @internal */ _doUpdateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): OntologyObject {
     const key = `${type}:${id}`;
     const existing = this._objects.get(key);
     if (!existing || existing._tenantId !== ctx.tenantId) {
@@ -356,6 +362,9 @@ export class MemoryStorageProvider implements StorageProvider {
     }
     if (existing._deletedAt) {
       throw new Error(`Object ${type}:${id} is deleted`);
+    }
+    if (expectedVersion !== undefined && existing._version !== expectedVersion) {
+      throw new Error(`VERSION_CONFLICT: Object ${type}:${id} has version ${existing._version}, expected ${expectedVersion}`);
     }
     const updated: OntologyObject = {
       ...existing,
@@ -417,17 +426,21 @@ export class MemoryStorageProvider implements StorageProvider {
       _toId: toId,
       _version: 1,
       _createdAt: timestamp,
+      _updatedAt: timestamp,
       ...(properties ?? {}),
     };
     this._links.set(`${type}:${id}`, link);
     return link;
   }
 
-  /** @internal */ _doUpdateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>): OntologyLink {
+  /** @internal */ _doUpdateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>, expectedVersion?: number): OntologyLink {
     const key = `${type}:${linkId}`;
     const existing = this._links.get(key);
     if (!existing || existing._tenantId !== ctx.tenantId) {
       throw new Error(`Link ${type}:${linkId} not found`);
+    }
+    if (expectedVersion !== undefined && existing._version !== expectedVersion) {
+      throw new Error(`VERSION_CONFLICT: Link ${type}:${linkId} has version ${existing._version}, expected ${expectedVersion}`);
     }
     const updated: OntologyLink = {
       ...existing,
@@ -441,6 +454,7 @@ export class MemoryStorageProvider implements StorageProvider {
       _toId: existing._toId,
       _version: existing._version + 1,
       _createdAt: existing._createdAt,
+      _updatedAt: now(),
     };
     this._links.set(key, updated);
     return updated;
@@ -491,8 +505,8 @@ export class MemoryStorageProvider implements StorageProvider {
     return clone(obj);
   }
 
-  async updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject> {
-    return clone(this._doUpdateObject(ctx, type, id, properties));
+  async updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyObject> {
+    return clone(this._doUpdateObject(ctx, type, id, properties, expectedVersion));
   }
 
   async deleteObject(ctx: RequestContext, type: string, id: string, mode: 'soft' | 'hard'): Promise<void> {
@@ -602,8 +616,8 @@ export class MemoryStorageProvider implements StorageProvider {
     return clone(link);
   }
 
-  async updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink> {
-    return clone(this._doUpdateLink(ctx, type, linkId, properties));
+  async updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyLink> {
+    return clone(this._doUpdateLink(ctx, type, linkId, properties, expectedVersion));
   }
 
   async deleteLink(ctx: RequestContext, type: string, linkId: string): Promise<void> {
@@ -738,8 +752,16 @@ export class MemoryStorageProvider implements StorageProvider {
 
   // ─── Indices ───
 
-  async ensureIndex(_ctx: RequestContext, _type: string, _field: string, _indexType: IndexType): Promise<void> {
+  async ensureIndex(_ctx: RequestContext, _type: string, _index: IndexDefinition): Promise<void> {
     // No-op for in-memory provider; indices don't affect correctness
+  }
+
+  async dropIndex(_ctx: RequestContext, _type: string, _field: string): Promise<void> {
+    // No-op for in-memory provider
+  }
+
+  async listIndexes(_ctx: RequestContext, _type: string): Promise<IndexDefinition[]> {
+    return [];
   }
 
   // ─── Health ───

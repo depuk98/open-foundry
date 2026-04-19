@@ -3,7 +3,7 @@
  *
  * Each LinkType gets a dedicated table with:
  * - System columns: _tenant_id, _id, _from_type, _from_id, _to_type, _to_id,
- *   _version, _created_at, _deleted_at
+ *   _version, _created_at, _updated_at, _deleted_at
  * - Property columns from the link type definition
  */
 
@@ -33,6 +33,7 @@ export function generateLinkTableDDL(linkType: LinkTypeDefinition, schema = 'pub
   "_to_id" TEXT NOT NULL,
   "_version" INTEGER NOT NULL DEFAULT 1,
   "_created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "_updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "_deleted_at" TIMESTAMPTZ${propertySection},
   PRIMARY KEY ("_tenant_id", "_id")
 );`;
@@ -62,6 +63,10 @@ export function generateLinkTableDDL(linkType: LinkTypeDefinition, schema = 'pub
   } else if (card === 'ONE_TO_MANY') {
     statements.push(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${pgIdent('uq_' + tableName + '_to')} ON ${qualifiedTable} ("_tenant_id", "_to_id") WHERE "_deleted_at" IS NULL;`
+    );
+  } else if (card === 'MANY_TO_ONE') {
+    statements.push(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${pgIdent('uq_' + tableName + '_from')} ON ${qualifiedTable} ("_tenant_id", "_from_id") WHERE "_deleted_at" IS NULL;`
     );
   }
 

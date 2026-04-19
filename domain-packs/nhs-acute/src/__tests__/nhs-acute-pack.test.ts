@@ -237,11 +237,12 @@ describe('NHS Acute Domain Pack — ODL Schema Parsing', () => {
     });
   });
 
-  describe('linkTypes (4)', () => {
-    it('declares all 4 LinkTypes', () => {
+  describe('linkTypes (6)', () => {
+    it('declares all 6 LinkTypes', () => {
       const names = schema.linkTypes.map(t => t.name).sort();
       expect(names).toEqual([
-        'AdmittedTo', 'BedInWard', 'OccupiesBed', 'UnderCareOf',
+        'AdmittedTo', 'BedInWard', 'DischargedFromWard', 'DischargedPatient',
+        'OccupiesBed', 'UnderCareOf',
       ]);
     });
 
@@ -273,6 +274,20 @@ describe('NHS Acute Domain Pack — ODL Schema Parsing', () => {
     it('BedInWard: Bed -> Ward, MANY_TO_ONE', () => {
       const lt = schema.linkTypes.find(t => t.name === 'BedInWard')!;
       expect(lt.from).toBe('Bed');
+      expect(lt.to).toBe('Ward');
+      expect(lt.cardinality).toBe('MANY_TO_ONE');
+    });
+
+    it('DischargedPatient: DischargeRecord -> Patient, MANY_TO_ONE', () => {
+      const lt = schema.linkTypes.find(t => t.name === 'DischargedPatient')!;
+      expect(lt.from).toBe('DischargeRecord');
+      expect(lt.to).toBe('Patient');
+      expect(lt.cardinality).toBe('MANY_TO_ONE');
+    });
+
+    it('DischargedFromWard: DischargeRecord -> Ward, MANY_TO_ONE', () => {
+      const lt = schema.linkTypes.find(t => t.name === 'DischargedFromWard')!;
+      expect(lt.from).toBe('DischargeRecord');
       expect(lt.to).toBe('Ward');
       expect(lt.cardinality).toBe('MANY_TO_ONE');
     });
@@ -360,7 +375,7 @@ describe('NHS Acute Domain Pack — Action Manifests', () => {
       expect(m.action).toBe('DischargePatient');
       expect(m.version).toBe(1);
       expect(m.preconditions).toHaveLength(3);
-      expect(m.effects).toHaveLength(5);
+      expect(m.effects).toHaveLength(6);
     });
 
     it('includes createObject for DischargeRecord', () => {
@@ -380,14 +395,14 @@ describe('NHS Acute Domain Pack — Action Manifests', () => {
       expect(m.action).toBe('TransferWard');
       expect(m.version).toBe(1);
       expect(m.preconditions).toHaveLength(5);
-      expect(m.effects).toHaveLength(5);
+      expect(m.effects).toHaveLength(6);
     });
 
     it('effects are in correct order', () => {
       const result = parseActionManifest(readAction('transfer-ward.yaml'));
       const types = result.manifest!.effects.map(e => e.type);
       expect(types).toEqual([
-        'deleteLink', 'deleteLink', 'createLink', 'updateObject', 'createLink',
+        'updateObject', 'deleteLink', 'deleteLink', 'createLink', 'updateObject', 'createLink',
       ]);
     });
   });
@@ -421,7 +436,7 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
 
     const provides = pack['provides'] as Record<string, number>;
     expect(provides['objectTypes']).toBe(5);
-    expect(provides['linkTypes']).toBe(4);
+    expect(provides['linkTypes']).toBe(6);
     expect(provides['actionTypes']).toBe(3);
     expect(provides['connectors']).toBe(1);
   });

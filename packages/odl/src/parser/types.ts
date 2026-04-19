@@ -84,11 +84,16 @@ export interface SearchableDirective {
   analyzer?: string;
 }
 
+export interface ImmutableDirective {
+  kind: 'immutable';
+}
+
 export type FieldDirective =
   | PrimaryDirective
   | UniqueDirective
   | IndexedDirective
   | ReadonlyDirective
+  | ImmutableDirective
   | SensitiveDirective
   | ParamDirective
   | LinkDirective
@@ -122,12 +127,19 @@ export interface FunctionDirective {
   entry: string;
 }
 
+/** Type-level @constraint directive (Section 2.3.2). Uses `this` to reference the object. */
+export interface TypeConstraintDirective {
+  kind: 'constraint';
+  expr: string;
+}
+
 export type TypeDirective =
   | ObjectTypeDirective
   | LinkTypeDirective
   | ActionTypeDirective
   | FunctionDirective
-  | DeprecatedDirective;
+  | DeprecatedDirective
+  | TypeConstraintDirective;
 
 // ─── Field type reference ───
 

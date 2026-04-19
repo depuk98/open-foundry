@@ -66,6 +66,7 @@ function rowToLink(row: Record<string, unknown>): OntologyLink {
     _toId: row['_to_id'] as string,
     _version: row['_version'] as number,
     _createdAt: (row['_created_at'] as Date).toISOString() as DateTime,
+    _updatedAt: (row['_updated_at'] as Date).toISOString() as DateTime,
   };
 
   if (row['_deleted_at'] != null) {

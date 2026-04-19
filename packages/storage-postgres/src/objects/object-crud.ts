@@ -193,6 +193,7 @@ export async function updateObject(
   properties: Record<string, unknown>,
   schema = 'public',
   tx?: PgTransaction,
+  expectedVersion?: number,
 ): Promise<OntologyObject> {
   const q = resolveQueryable(pool, tx);
   const table = tableName(type, schema);
@@ -217,12 +218,30 @@ export async function updateObject(
   params.push(ctx.tenantId); // $paramIdx
   const tenantParam = paramIdx++;
   params.push(id); // $paramIdx
-  const idParam = paramIdx;
+  const idParam = paramIdx++;
 
-  const sql = `UPDATE ${table} SET ${setClauses.join(', ')} WHERE "_tenant_id" = $${tenantParam} AND "_id" = $${idParam} AND "_deleted_at" IS NULL RETURNING *`;
+  let whereClause = `"_tenant_id" = $${tenantParam} AND "_id" = $${idParam} AND "_deleted_at" IS NULL`;
+  if (expectedVersion !== undefined) {
+    params.push(expectedVersion);
+    whereClause += ` AND "_version" = $${paramIdx}`;
+  }
+
+  const sql = `UPDATE ${table} SET ${setClauses.join(', ')} WHERE ${whereClause} RETURNING *`;
 
   const result = await q.query(sql, params);
   if (result.rows.length === 0) {
+    if (expectedVersion !== undefined) {
+      // Follow-up SELECT to distinguish not-found vs version-mismatch
+      const check = await q.query(
+        `SELECT "_version" FROM ${table} WHERE "_tenant_id" = $1 AND "_id" = $2 AND "_deleted_at" IS NULL`,
+        [ctx.tenantId, id],
+      );
+      if (check.rows.length === 0) {
+        throw new Error(`VERSION_CONFLICT: Object ${type}:${id} not found or deleted`);
+      }
+      const currentVersion = (check.rows[0] as Record<string, unknown>)['_version'];
+      throw new Error(`VERSION_CONFLICT: Object ${type}:${id} version mismatch (expected ${expectedVersion}, current ${currentVersion})`);
+    }
     throw new Error(`Object ${type}:${id} not found or is deleted`);
   }
 

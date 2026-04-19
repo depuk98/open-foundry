@@ -23,7 +23,7 @@ import type {
   TraversalResult,
   MigrationResult,
   HealthStatus,
-  IndexType,
+  IndexDefinition,
   StorageCapabilities,
 } from './ontology.js';
 import type { Transaction } from './transaction.js';
@@ -36,7 +36,7 @@ export interface StorageProvider {
   // ─── Objects ───
   createObject(ctx: RequestContext, type: string, properties: Record<string, unknown>): Promise<OntologyObject>;
   getObject(ctx: RequestContext, type: string, id: string): Promise<OntologyObject | null>;
-  updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>): Promise<OntologyObject>;
+  updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyObject>;
   deleteObject(ctx: RequestContext, type: string, id: string, mode: 'soft' | 'hard'): Promise<void>;
   queryObjects(ctx: RequestContext, type: string, filter: FilterExpression, options?: QueryOptions): Promise<ObjectPage>;
   bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult>;
@@ -44,7 +44,7 @@ export interface StorageProvider {
   // ─── Links ───
   createLink(ctx: RequestContext, type: string, fromId: string, toId: string, properties?: Record<string, unknown>): Promise<OntologyLink>;
   getLink(ctx: RequestContext, type: string, linkId: string): Promise<OntologyLink | null>;
-  updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>): Promise<OntologyLink>;
+  updateLink(ctx: RequestContext, type: string, linkId: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyLink>;
   deleteLink(ctx: RequestContext, type: string, linkId: string): Promise<void>;
   getLinks(ctx: RequestContext, objectId: string, linkType: string, direction: 'inbound' | 'outbound', options?: QueryOptions): Promise<LinkPage>;
   traverse(ctx: RequestContext, startId: string, path: TraversalPath, options?: TraversalOptions): Promise<TraversalResult>;
@@ -57,7 +57,9 @@ export interface StorageProvider {
   getObjectAtTime(ctx: RequestContext, type: string, id: string, timestamp: DateTime): Promise<OntologyObject | null>;
 
   // ─── Indices ───
-  ensureIndex(ctx: RequestContext, type: string, field: string, indexType: IndexType): Promise<void>;
+  ensureIndex(ctx: RequestContext, type: string, index: IndexDefinition): Promise<void>;
+  dropIndex(ctx: RequestContext, type: string, field: string): Promise<void>;
+  listIndexes(ctx: RequestContext, type: string): Promise<IndexDefinition[]>;
 
   // ─── Health ───
   healthCheck(): Promise<HealthStatus>;
