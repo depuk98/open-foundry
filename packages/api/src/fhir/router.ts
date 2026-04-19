@@ -278,8 +278,28 @@ async function handleEncounterSearch(
     ctx,
   );
 
-  const entries = page.items.map((obj) => {
-    const encounter = mapEncounterToFhir(obj, patientId);
+  // Field-level redaction
+  const redacted = deps.authorizationService.redactFieldsBatch(
+    req.user.id,
+    req.user.roles,
+    'Encounter',
+    page.items as unknown as Record<string, unknown>[],
+  );
+
+  // Consent filtering
+  let filteredItems = redacted;
+  if (deps.consentService) {
+    const consentResult = await deps.consentService.filterList(
+      redacted.map((r: { data: Record<string, unknown> }) => r.data),
+      (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
+      DataPurpose.DIRECT_CARE,
+      req.user.id,
+    );
+    filteredItems = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
+  }
+
+  const entries = filteredItems.map((r: { data: Record<string, unknown> }) => {
+    const encounter = mapEncounterToFhir(r.data as unknown as OntologyObject, patientId);
     return {
       fullUrl: baseUrl ? `${baseUrl}/fhir/Encounter/${encounter.id}` : undefined,
       resource: encounter,

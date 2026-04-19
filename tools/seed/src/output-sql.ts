@@ -80,7 +80,7 @@ export function writeSql(data: SeedData, outputDir: string): string {
   // Discharge records
   sections.push(sqlBatches(
     'discharge_records',
-    ['id', 'patient_id', 'ward_id', 'destination', 'discharge_date', 'notes'],
+    ['id', 'patient', 'ward', 'destination', 'discharge_date', 'notes'],
     data.dischargeRecords.map(d => [
       esc(d.id), esc(d.patientId), esc(d.wardId), esc(d.destination),
       esc(d.dischargeDate), esc(d.notes),

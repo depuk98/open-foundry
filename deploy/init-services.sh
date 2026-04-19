@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS _audit_log (
 
 -- Register NHS Acute domain pack
 INSERT INTO _domain_packs (name, version, namespace)
-VALUES ('nhs-acute', '0.1.0', 'nhs.acute')
+VALUES ('nhs-acute', '0.2.0', 'nhs.acute')
 ON CONFLICT (name) DO UPDATE SET version = EXCLUDED.version;
 SQL
 

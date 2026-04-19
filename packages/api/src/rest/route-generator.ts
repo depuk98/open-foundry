@@ -460,10 +460,43 @@ function generateHistoryRoute(
           }
         }
 
+        // Field-level redaction on each version, preserving version metadata
+        const redacted = deps.authorizationService.redactFieldsBatch(
+          user.id,
+          user.roles,
+          typeName,
+          versions.map((item: OntologyObject) => objectToRest(item, obj)),
+        );
+
+        let items = redacted.map((r: RedactionResult<Record<string, unknown>>, i: number) => {
+          const data = r.data as Record<string, unknown>;
+          // Preserve version metadata for history entries
+          data._version = versions[i]?._version;
+          data._updatedAt = versions[i]?._updatedAt;
+          data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+          data._consentRestricted = false;
+          return data;
+        });
+
+        // Consent filtering
+        if (deps.consentService) {
+          const getPrimaryId = (item: Record<string, unknown>) => {
+            const primaryField = obj.fields.find(f => isPrimaryField(f));
+            return String(item[primaryField?.name ?? 'id'] ?? '');
+          };
+          const consentResult = await deps.consentService.filterList(
+            items,
+            getPrimaryId,
+            DEFAULT_CONSENT_PURPOSE as DataPurpose,
+            user.id,
+          );
+          items = consentResult.edges;
+        }
+
         return {
           status: 200,
           body: {
-            data: versions,
+            data: items,
           },
         };
       } catch (err) {
