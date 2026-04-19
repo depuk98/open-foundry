@@ -17,7 +17,7 @@
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
 import type { OntologyObject, FilterExpression, DataPurpose } from '@openfoundry/spi';
-import type { ActionManifest, ActionActor, ActionContext } from '@openfoundry/actions';
+import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import { PubSub } from 'graphql-subscriptions';
 import type { ApiDependencies, ResolverContext, PaginationArgs } from './types.js';
@@ -188,7 +188,12 @@ export function generateResolvers(
     generateSubscriptionResolvers(obj, resolvers, pubsub);
   }
 
-  // Generate mutation resolvers for each ActionType
+  // Generate mutation resolvers for each ActionType.
+  // NOTE: Domain pack YAML action manifests are loaded at runtime via
+  // ManifestRegistry but are NOT reflected in schema.actionTypes unless
+  // the ODL schema includes @actionType directives. Until the schema
+  // registry integrates pack manifest discovery, pack actions won't
+  // appear as GraphQL/REST mutations automatically.
   for (const action of schema.actionTypes) {
     generateMutationResolver(action, schema, resolvers, deps, pubsub);
   }
@@ -411,15 +416,16 @@ function generateMutationResolver(
         requestContext,
       };
 
-      // Resolve manifest from registry; fall back to stub if not registered
-      const manifest: ActionManifest = deps.manifestRegistry?.get(action.name) ?? {
-        action: action.name,
-        version: 1,
-        reversible: false,
-        preconditions: [],
-        effects: [],
-        sideEffects: [],
-      };
+      // Resolve manifest from registry — fail closed if not found
+      const manifest = deps.manifestRegistry?.get(action.name);
+      if (!manifest) {
+        return {
+          success: false,
+          actionId: `err_${Date.now().toString(36)}`,
+          errors: [{ code: 'MANIFEST_NOT_FOUND', message: `No manifest registered for action "${action.name}"` }],
+          affectedObjects: [],
+        };
+      }
 
       // Execute via ActionExecutor
       const result = await deps.actionExecutor.execute(

@@ -112,6 +112,11 @@ export async function getObjectAtTime(
   const q = resolveQueryable(pool, tx);
   const table = historyTableName(type, schema);
 
+  // NOTE: _history_created_at is set at history insertion time, which may be
+  // slightly after the _createdAt/_updatedAt timestamps on the object itself.
+  // For exact-timestamp queries using object timestamps, there may be a
+  // sub-millisecond mismatch. In practice this is safe because callers
+  // typically query with "a moment after" semantics (>= object timestamp).
   const sql = `SELECT * FROM ${table} WHERE "_tenant_id" = $1 AND "_id" = $2 AND "_history_created_at" <= $3 ORDER BY "_version" DESC LIMIT 1`;
   const result = await q.query(sql, [ctx.tenantId, id, timestamp]);
 

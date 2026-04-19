@@ -131,6 +131,12 @@ export class ObjectManager {
       const obj = await this.storage.getObject(ctx, type, id);
       if (!obj) return null;
 
+      // TODO: Link/reference fields (e.g. Patient.currentWard) are stored as
+      // raw IDs. They are not hydrated to full objects here. Action manifests
+      // and GraphQL resolvers that dereference link fields will see string IDs,
+      // not resolved objects. Hydration requires schema-aware traversal and
+      // should be added when the reference resolver is implemented.
+
       // Evaluate LAZY computed fields and merge into the result
       if (this.computedFieldEvaluator) {
         const computed = await this.computedFieldEvaluator.evaluateAll(type, id, ctx);

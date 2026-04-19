@@ -394,10 +394,10 @@ describe('GraphQL schema codegen', () => {
       expect(mutationBlock).toContain('transferWard(input: TransferWardInput!): TransferWardResult!');
     });
 
-    it('generates submitBulkAction mutation', () => {
+    it('does not expose submitBulkAction (deferred — no resolver)', () => {
       const sdl = getSchema();
       const mutationBlock = extractTypeBlock(sdl, 'type Mutation');
-      expect(mutationBlock).toContain('submitBulkAction(input: BulkActionInput!): BulkActionJob!');
+      expect(mutationBlock).not.toContain('submitBulkAction');
     });
 
     it('generates AdmitPatientInput with correct param fields', () => {

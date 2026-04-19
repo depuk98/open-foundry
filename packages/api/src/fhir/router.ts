@@ -219,7 +219,7 @@ async function handlePatientSearch(
   const entries = consentFiltered.map((r: { data: Record<string, unknown> }) => {
     const patient = mapPatientToFhir(r.data as unknown as OntologyObject);
     return {
-      fullUrl: baseUrl ? `${baseUrl}/fhir/Patient/${patient.id}` : undefined,
+      fullUrl: baseUrl ? `${baseUrl}/Patient/${patient.id}` : undefined,
       resource: patient,
     };
   });
@@ -311,7 +311,7 @@ async function handleEncounterSearch(
   const entries = filteredItems.map((r: { data: Record<string, unknown> }) => {
     const encounter = mapEncounterToFhir(r.data as unknown as OntologyObject, patientId);
     return {
-      fullUrl: baseUrl ? `${baseUrl}/fhir/Encounter/${encounter.id}` : undefined,
+      fullUrl: baseUrl ? `${baseUrl}/Encounter/${encounter.id}` : undefined,
       resource: encounter,
     };
   });

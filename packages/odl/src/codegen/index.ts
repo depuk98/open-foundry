@@ -535,8 +535,11 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
     const fieldName = lowerFirst(action.name);
     mutationFields.push(`  ${fieldName}(input: ${action.name}Input!): ${action.name}Result!`);
   }
-  mutationFields.push('  submitBulkAction(input: BulkActionInput!): BulkActionJob!');
-  sections.push(['type Mutation {', ...mutationFields, '}'].join('\n'));
+  // TODO: submitBulkAction mutation deferred — requires BulkActionJob resolver
+  // and async job tracking infrastructure. Re-add when bulk action pipeline is built.
+  if (mutationFields.length > 0) {
+    sections.push(['type Mutation {', ...mutationFields, '}'].join('\n'));
+  }
 
   // 11. Subscription type
   const subFields: string[] = [];
@@ -544,7 +547,9 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
     const lower = lowerFirst(obj.name);
     subFields.push(`  ${lower}Changed(id: ID!): ${obj.name}ChangeEvent!`);
   }
-  sections.push(['type Subscription {', ...subFields, '}'].join('\n'));
+  if (subFields.length > 0) {
+    sections.push(['type Subscription {', ...subFields, '}'].join('\n'));
+  }
 
   return sections.join('\n\n') + '\n';
 }

@@ -17,7 +17,7 @@
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
 import type { OntologyObject, FilterExpression, DataPurpose } from '@openfoundry/spi';
-import type { ActionManifest, ActionActor, ActionContext } from '@openfoundry/actions';
+import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import type { ApiDependencies, ResolverContext } from '../graphql/types.js';
 import { DEFAULT_CONSENT_PURPOSE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../graphql/types.js';
@@ -387,10 +387,19 @@ function generateLinksRoute(
           requestContext,
         );
 
+        // Field-level redaction on link properties
+        const redacted = deps.authorizationService.redactFieldsBatch(
+          user.id,
+          user.roles,
+          linkType,
+          linkPage.items as unknown as Record<string, unknown>[],
+        );
+        const data = redacted.map((r: { data: Record<string, unknown> }) => r.data);
+
         return {
           status: 200,
           body: {
-            data: linkPage.items,
+            data,
             pagination: {
               totalCount: linkPage.totalCount,
               limit,
@@ -542,15 +551,19 @@ function generateActionRoute(
           requestContext,
         };
 
-        // Resolve manifest from registry; fall back to stub if not registered
-        const manifest: ActionManifest = deps.manifestRegistry?.get(action.name) ?? {
-          action: action.name,
-          version: 1,
-          reversible: false,
-          preconditions: [],
-          effects: [],
-          sideEffects: [],
-        };
+        // Resolve manifest from registry — fail closed if not found
+        const manifest = deps.manifestRegistry?.get(action.name);
+        if (!manifest) {
+          return {
+            status: 400,
+            body: {
+              error: {
+                code: 'MANIFEST_NOT_FOUND',
+                message: `No manifest registered for action "${action.name}"`,
+              },
+            },
+          };
+        }
 
         const result = await deps.actionExecutor.execute(
           manifest,

@@ -236,8 +236,9 @@ export class PostgresStorageProvider implements StorageProvider {
   }
 
   async bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult> {
-    // Idempotency check
-    const cached = this._idempotencyCache.get(request.idempotencyKey);
+    // Idempotency check — scoped by tenant to prevent cross-tenant cache hits
+    const cacheKey = `${ctx.tenantId}:${request.idempotencyKey}`;
+    const cached = this._idempotencyCache.get(cacheKey);
     if (cached) return cached;
 
     let accepted = 0;
@@ -274,7 +275,7 @@ export class PostgresStorageProvider implements StorageProvider {
     }
 
     const result: BulkMutationResult = { accepted, failed, errors };
-    this._idempotencyCache.set(request.idempotencyKey, result);
+    this._idempotencyCache.set(cacheKey, result);
     return result;
   }
 

@@ -50,6 +50,23 @@ function devUser() {
 }
 
 async function main(): Promise<void> {
+  // ── Dev-mode guard ──
+  // This entrypoint uses allow-all stubs for auth, FGA, and CEL.
+  // In production, these MUST be replaced with real service clients.
+  const isDev = process.env['NODE_ENV'] !== 'production';
+  if (isDev) {
+    console.warn('⚠ Running in DEVELOPMENT mode — auth/authz/CEL are stubbed (allow-all)');
+    console.warn('⚠ Set NODE_ENV=production and configure OIDC/FGA/CEL for deployment');
+  }
+  if (!isDev) {
+    const missing = ['OIDC_ISSUER_URL', 'OPENFGA_API_URL', 'OPENFGA_STORE_ID']
+      .filter((k) => !process.env[k]);
+    if (missing.length > 0) {
+      console.error(`FATAL: Production mode requires env vars: ${missing.join(', ')}`);
+      process.exit(1);
+    }
+  }
+
   // Schema must be loaded from domain packs at startup.
   // TODO: Load ParsedSchema from domain pack registry once SchemaRegistry is implemented.
   const schema: ParsedSchema = {
@@ -121,6 +138,14 @@ async function main(): Promise<void> {
   app.use(cors());
   app.use(express.json());
 
+  // Health check endpoints — used by Docker/Helm probes
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok', service: 'api-gateway' });
+  });
+  app.get('/.well-known/apollo/server-health', (_req, res) => {
+    res.json({ status: 'pass' });
+  });
+
   // Mount GraphQL at /graphql
   app.use(
     '/graphql',
@@ -136,36 +161,46 @@ async function main(): Promise<void> {
   for (const route of restRoutes) {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     app[method](route.pattern, async (req, res) => {
-      const restReq: RestRequest = {
-        method: req.method,
-        path: req.path,
-        params: req.params as Record<string, string>,
-        query: req.query as Record<string, string>,
-        body: req.body as Record<string, unknown>,
-        user: devUser(),
-      };
-      const ctx: ResolverContext = buildResolverContext(devUser(), deps);
-      const result = await route.handler(restReq, ctx);
-      res.status(result.status).json(result.body);
+      try {
+        const restReq: RestRequest = {
+          method: req.method,
+          path: req.path,
+          params: req.params as Record<string, string>,
+          query: req.query as Record<string, string>,
+          body: req.body as Record<string, unknown>,
+          user: devUser(),
+        };
+        const ctx: ResolverContext = buildResolverContext(devUser(), deps);
+        const result = await route.handler(restReq, ctx);
+        res.status(result.status).json(result.body);
+      } catch (err) {
+        console.error('REST handler error:', err);
+        res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
+      }
     });
   }
 
   // Mount FHIR routes at /fhir/*
   const fhirHandler = createFhirRouter({ deps, baseUrl: `http://localhost:${PORT}/fhir` });
   app.all('/fhir/*', async (req, res) => {
-    const fhirReq = {
-      method: req.method,
-      path: req.path.replace(/^\/fhir/, ''),
-      query: req.query as Record<string, string>,
-      user: devUser(),
-    };
-    const result = await fhirHandler(fhirReq);
-    if (result.headers) {
-      for (const [key, value] of Object.entries(result.headers)) {
-        res.setHeader(key, value);
+    try {
+      const fhirReq = {
+        method: req.method,
+        path: req.path.replace(/^\/fhir/, ''),
+        query: req.query as Record<string, string>,
+        user: devUser(),
+      };
+      const result = await fhirHandler(fhirReq);
+      if (result.headers) {
+        for (const [key, value] of Object.entries(result.headers)) {
+          res.setHeader(key, value);
+        }
       }
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      console.error('FHIR handler error:', err);
+      res.status(500).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'fatal', code: 'exception', diagnostics: 'Internal server error' }] });
     }
-    res.status(result.status).json(result.body);
   });
 
   // Start listening

@@ -308,17 +308,16 @@ export async function hardDeleteObject(
     [ctx.tenantId, id],
   );
 
-  // Delete from main table
+  // Delete from main table — idempotent (no-throw if missing, per SPI contract)
   const result = await q.query(
     `DELETE FROM ${table} WHERE "_tenant_id" = $1 AND "_id" = $2`,
     [ctx.tenantId, id],
   );
-  if (result.rowCount === 0) {
-    throw new Error(`Object ${type}:${id} not found`);
-  }
 
-  // Delete AGE vertex (and all connected edges)
-  await deleteAgeVertex(q, type, ctx.tenantId, id);
+  // If object existed, also clean up AGE vertex (and all connected edges)
+  if (result.rowCount && result.rowCount > 0) {
+    await deleteAgeVertex(q, type, ctx.tenantId, id);
+  }
 }
 
 /**

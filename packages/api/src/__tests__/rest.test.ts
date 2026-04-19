@@ -168,6 +168,16 @@ function createMockDeps(schema: ParsedSchema): ApiDependencies {
       clearFieldCache: vi.fn(),
     } as unknown as ApiDependencies['authorizationService'],
     authenticator: {} as unknown as ApiDependencies['authenticator'],
+    manifestRegistry: {
+      get: (name: string) => ({
+        action: name,
+        version: 1,
+        reversible: false,
+        preconditions: [],
+        effects: [],
+        sideEffects: [],
+      }),
+    },
     consentService: undefined,
     auditWriter: undefined,
     storage: {
