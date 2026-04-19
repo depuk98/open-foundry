@@ -100,6 +100,12 @@ export function mapLinkEvent(
   // and the data carries fromId and toId.  We produce generic notifications
   // for each end.  The consuming subscription resolvers will refetch the
   // objects to build the full ChangeEvent payloads.
+  //
+  // TODO: Topics are keyed by object ID (e.g. "patient-123") rather than
+  // type-level topics (e.g. "Patient"). Clients subscribing to "all Patient
+  // changes" won't receive link events unless they subscribe to every patient
+  // ID individually. Consider adding type-level topic publishing alongside
+  // the per-ID topics.
   return [
     { topic: data.fromId, objectId: data.fromId },
     { topic: data.toId, objectId: data.toId },

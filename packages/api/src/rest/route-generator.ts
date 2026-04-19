@@ -96,11 +96,11 @@ function parsePagination(query: Record<string, string | string[] | undefined>): 
   const limitStr = typeof query['limit'] === 'string' ? query['limit'] : undefined;
   const offsetStr = typeof query['offset'] === 'string' ? query['offset'] : undefined;
 
-  const limit = Math.min(
+  const limit = Math.max(0, Math.min(
     limitStr ? parseInt(limitStr, 10) || DEFAULT_PAGE_SIZE : DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
-  );
-  const offset = offsetStr ? parseInt(offsetStr, 10) || 0 : 0;
+  ));
+  const offset = Math.max(0, offsetStr ? parseInt(offsetStr, 10) || 0 : 0);
 
   return { offset, limit };
 }

@@ -2,7 +2,7 @@
 #
 # Per MVP Section 4.2. Defines the 6 link types for the NHS acute pilot.
 
-extend schema @namespace(name: "nhs.acute", version: "0.1.0")
+extend schema @namespace(name: "nhs.acute", version: "0.2.0")
 
 type AdmittedTo @linkType(from: "Patient", to: "Ward", cardinality: MANY_TO_ONE) {
   id: ID! @primary

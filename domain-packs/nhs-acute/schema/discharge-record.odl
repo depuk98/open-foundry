@@ -7,7 +7,7 @@
 # but do not need separate @linkType declarations since DischargeRecord
 # stores the foreign keys directly."
 
-extend schema @namespace(name: "nhs.acute", version: "0.1.0")
+extend schema @namespace(name: "nhs.acute", version: "0.2.0")
 
 type DischargeRecord @objectType {
   id: ID! @primary

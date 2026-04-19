@@ -225,6 +225,12 @@ export class ActionExecutor {
           if (policy === 'ROLLBACK_ALL') {
             // CQ-24: Attempt compensating transaction to undo committed effects.
             // Execute reverse effects to restore prior state from beforeStates.
+            // TODO: Compensation only handles object effects (create/update/delete).
+            // Link-creating actions will not have their links rolled back because
+            // the compensation loop calls deleteObject/updateObject but never
+            // deleteLink. Link entries in affectedObjects use the `link:` key
+            // prefix and have type set to the linkType, so compensatingTxn would
+            // attempt deleteObject on a link type (wrong). Add link compensation.
             try {
               const compensatingTxn = await this.config.storage.beginTransaction(reqCtx);
               try {
@@ -289,6 +295,12 @@ export class ActionExecutor {
     // ------------------------------------------------------------------
     // Step 8: EMIT — publish CloudEvents for affected objects/links
     // ------------------------------------------------------------------
+    // TODO: Link effects (createLink/deleteLink) are published via publishObjectChange()
+    // but the ActionEventPublisher interface defines a separate publishLinkChange() method.
+    // Link-created/deleted entries in affectedObjects use `link:${type}:${id}` keys in
+    // beforeStates/afterStates but the lookup below uses `${type}:${id}` (no prefix),
+    // so before/after payloads for links will always be undefined. Route link events
+    // through publishLinkChange() with fromId/toId to fix both issues.
     if (this.config.eventPublisher) {
       const cause = { actionType, actionId, actor: actor.id };
       for (const affected of affectedObjects) {

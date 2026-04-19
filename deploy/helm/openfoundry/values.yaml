@@ -47,7 +47,7 @@ authz:
 # -- Domain packs to load at startup
 domainPacks:
   - name: nhs-acute
-    version: "0.1.0"
+    version: "0.2.0"
 
 # -- Observability (OpenTelemetry)
 observability:

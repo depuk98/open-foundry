@@ -74,7 +74,7 @@ describe('NHS Acute Domain Pack — ODL Schema Parsing', () => {
     it('declares nhs.acute namespace', () => {
       expect(schema.namespace).toBeDefined();
       expect(schema.namespace!.name).toBe('nhs.acute');
-      expect(schema.namespace!.version).toBe('0.1.0');
+      expect(schema.namespace!.version).toBe('0.2.0');
     });
   });
 

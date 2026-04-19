@@ -6,9 +6,9 @@
  *
  * Configuration via environment variables:
  *   PORT                 — HTTP port (default: 4000)
- *   OIDC_ISSUER_URL      — OIDC provider issuer URL
+ *   OIDC_ISSUER          — OIDC provider issuer URL (matches Helm configmap)
  *   OIDC_CLIENT_ID       — OIDC client ID
- *   OPENFGA_API_URL      — OpenFGA API URL
+ *   OPENFGA_URL          — OpenFGA API URL (matches Helm configmap / docker-compose)
  *   OPENFGA_STORE_ID     — OpenFGA store ID
  *   DATABASE_URL         — PostgreSQL connection string (optional; uses memory storage if absent)
  */
@@ -59,12 +59,16 @@ async function main(): Promise<void> {
     console.warn('⚠ Set NODE_ENV=production and configure OIDC/FGA/CEL for deployment');
   }
   if (!isDev) {
-    const missing = ['OIDC_ISSUER_URL', 'OPENFGA_API_URL', 'OPENFGA_STORE_ID']
+    const missing = ['OIDC_ISSUER', 'OPENFGA_URL', 'OPENFGA_STORE_ID']
       .filter((k) => !process.env[k]);
     if (missing.length > 0) {
       console.error(`FATAL: Production mode requires env vars: ${missing.join(', ')}`);
       process.exit(1);
     }
+    // TODO: Production mode still uses dev stubs (allow-all FGA, allow-all
+    // security/CEL, in-memory storage, devUser identity). Replace with real
+    // service clients wired from env vars before deploying to production.
+    console.warn('⚠ WARNING: Production wiring not yet implemented — auth/FGA/CEL stubs still active');
   }
 
   // Schema must be loaded from domain packs at startup.
@@ -102,9 +106,9 @@ async function main(): Promise<void> {
   // Authentication
   const authenticator = new OidcAuthenticator();
   authenticator.configure({
-    issuer: process.env['OIDC_ISSUER_URL'] ?? 'http://localhost:8180/realms/openfoundry',
+    issuer: process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry',
     clientId: process.env['OIDC_CLIENT_ID'] ?? 'openfoundry',
-    jwksUri: `${process.env['OIDC_ISSUER_URL'] ?? 'http://localhost:8180/realms/openfoundry'}/protocol/openid-connect/certs`,
+    jwksUri: `${process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry'}/protocol/openid-connect/certs`,
   });
 
   // Action executor — stub security and CEL for development

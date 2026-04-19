@@ -33,7 +33,7 @@ export function resolvePagination(args: PaginationArgs): { offset: number; limit
   }
 
   if (args.first != null) {
-    limit = Math.min(args.first, MAX_PAGE_SIZE);
+    limit = Math.max(0, Math.min(args.first, MAX_PAGE_SIZE));
   }
 
   // `last`/`before` are less common but supported for spec compliance

@@ -475,6 +475,10 @@ export class MemoryStorageProvider implements StorageProvider {
     return updated;
   }
 
+  // TODO: Memory provider hard-deletes links (removes from map) while Postgres
+  // provider soft-deletes (sets _deleted_at). This means traverse() with
+  // includeDeleted:true will find soft-deleted links in Postgres but not in
+  // memory. Align by implementing soft-delete semantics here if needed.
   /** @internal */ _doDeleteLink(ctx: RequestContext, type: string, linkId: string): void {
     const key = `${type}:${linkId}`;
     const existing = this._links.get(key);
@@ -673,6 +677,12 @@ export class MemoryStorageProvider implements StorageProvider {
     path: TraversalPath,
     options?: TraversalOptions,
   ): Promise<TraversalResult> {
+    // TODO: Traversal inconsistencies with Postgres provider:
+    // 1. No max depth enforcement (Postgres caps at 10 steps)
+    // 2. No MAX_TRAVERSAL_NODES guard (Postgres caps at 10,000)
+    // 3. Neither provider uses TraversalStep.maxDepth (SPI field is ignored)
+    // 4. Postgres collects allNodes across all steps; memory only keeps final step
+    //    (memory behavior is correct per spec, Postgres should be aligned)
     const includeDeleted = options?.includeDeleted ?? false;
     const collectedEdges = new Map<string, OntologyLink>();
 

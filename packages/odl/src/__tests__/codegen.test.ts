@@ -312,7 +312,8 @@ describe('GraphQL schema codegen', () => {
       expect(filterBlock).toContain('eq: ID');
       expect(filterBlock).toContain('ne: ID');
       expect(filterBlock).toContain('in: [ID!]');
-      expect(filterBlock).toContain('notIn: [ID!]');
+      // notIn not supported by SPI — removed from codegen
+      expect(filterBlock).not.toContain('notIn');
     });
 
     it('generates StringFilter with correct operators', () => {
@@ -321,10 +322,11 @@ describe('GraphQL schema codegen', () => {
       expect(filterBlock).toContain('eq: String');
       expect(filterBlock).toContain('ne: String');
       expect(filterBlock).toContain('in: [String!]');
-      expect(filterBlock).toContain('notIn: [String!]');
       expect(filterBlock).toContain('contains: String');
       expect(filterBlock).toContain('startsWith: String');
-      expect(filterBlock).toContain('endsWith: String');
+      // notIn and endsWith not supported by SPI — removed from codegen
+      expect(filterBlock).not.toContain('notIn');
+      expect(filterBlock).not.toContain('endsWith');
     });
 
     it('generates IntFilter with numeric operators', () => {
@@ -344,7 +346,8 @@ describe('GraphQL schema codegen', () => {
       expect(filterBlock).toContain('eq: PatientStatus');
       expect(filterBlock).toContain('ne: PatientStatus');
       expect(filterBlock).toContain('in: [PatientStatus!]');
-      expect(filterBlock).toContain('notIn: [PatientStatus!]');
+      // notIn not supported by SPI — removed from codegen
+      expect(filterBlock).not.toContain('notIn');
     });
 
     it('does not include link fields in filters', () => {

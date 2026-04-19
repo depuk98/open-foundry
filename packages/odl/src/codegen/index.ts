@@ -36,10 +36,12 @@ const CUSTOM_SCALARS = ['Date', 'DateTime', 'Duration', 'GeoPoint', 'JSON', 'URI
 
 // ─── Filter operator types by scalar category ───
 
-const STRING_FILTER_OPS = ['eq', 'ne', 'in', 'notIn', 'contains', 'startsWith', 'endsWith'];
-const NUMERIC_FILTER_OPS = ['eq', 'ne', 'in', 'notIn', 'gt', 'gte', 'lt', 'lte'];
+// Only expose operators that the SPI and both storage providers support.
+// notIn and endsWith are NOT supported — see SPI FieldPredicate.operator.
+const STRING_FILTER_OPS = ['eq', 'ne', 'in', 'contains', 'startsWith'];
+const NUMERIC_FILTER_OPS = ['eq', 'ne', 'in', 'gt', 'gte', 'lt', 'lte'];
 const BOOLEAN_FILTER_OPS = ['eq', 'ne'];
-const ID_FILTER_OPS = ['eq', 'ne', 'in', 'notIn'];
+const ID_FILTER_OPS = ['eq', 'ne', 'in'];
 
 const NUMERIC_TYPES = new Set(['Int', 'Float']);
 const ORDERABLE_TYPES = new Set(['ID', 'String', 'Int', 'Float', 'Date', 'DateTime', 'Duration', 'URI']);
@@ -265,7 +267,6 @@ function generateEnumFilter(enumName: string): string {
     `  eq: ${enumName}`,
     `  ne: ${enumName}`,
     `  in: [${enumName}!]`,
-    `  notIn: [${enumName}!]`,
     `}`,
   ].join('\n');
 }

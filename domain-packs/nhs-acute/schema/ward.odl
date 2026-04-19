@@ -2,7 +2,7 @@
 #
 # Per MVP Section 4.1.
 
-extend schema @namespace(name: "nhs.acute", version: "0.1.0")
+extend schema @namespace(name: "nhs.acute", version: "0.2.0")
 
 type Ward @objectType {
   id: ID! @primary
