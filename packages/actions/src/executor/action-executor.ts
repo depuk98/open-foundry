@@ -247,11 +247,12 @@ export class ActionExecutor {
                   // requires the full prior state which may not be available
                 }
                 await compensatingTxn.commit();
-              } catch {
+              } catch (innerErr) {
+                console.error(`[ActionExecutor] Compensating transaction rollback for action ${actionId}:`, innerErr);
                 await compensatingTxn.rollback();
               }
-            } catch {
-              // Compensating transaction failed — log and continue with failure response
+            } catch (outerErr) {
+              console.error(`[ActionExecutor] Failed to begin compensating transaction for action ${actionId}:`, outerErr);
             }
             return failResult(actionId, [
               {
@@ -267,53 +268,58 @@ export class ActionExecutor {
 
     // ------------------------------------------------------------------
     // Step 7: AUDIT — write AuditRecord with before/after, actor, traceId
-    // ------------------------------------------------------------------
-    if (this.config.auditWriter) {
-      await this.config.auditWriter.write({
-        id: `audit_${actionId}`,
-        timestamp: now(),
-        traceId: reqCtx.traceId ?? actionId,
-        actor: {
-          type: actor.type,
-          id: actor.id,
-          roles: actor.roles,
-          ip: actor.ip,
-        },
-        operation: {
-          type: 'action',
-          actionType,
-          actionId,
-        },
-        detail: {
-          before: Object.fromEntries(beforeStates),
-          after: Object.fromEntries(afterStates),
-          result: 'success',
-        },
-      });
-    }
-
-    // ------------------------------------------------------------------
     // Step 8: EMIT — publish CloudEvents for affected objects/links
     // ------------------------------------------------------------------
-    // TODO: Link effects (createLink/deleteLink) are published via publishObjectChange()
-    // but the ActionEventPublisher interface defines a separate publishLinkChange() method.
-    // Link-created/deleted entries in affectedObjects use `link:${type}:${id}` keys in
-    // beforeStates/afterStates but the lookup below uses `${type}:${id}` (no prefix),
-    // so before/after payloads for links will always be undefined. Route link events
-    // through publishLinkChange() with fromId/toId to fix both issues.
-    if (this.config.eventPublisher) {
-      const cause = { actionType, actionId, actor: actor.id };
-      for (const affected of affectedObjects) {
-        await this.config.eventPublisher.publishObjectChange(
-          affected.changeType,
-          affected.type,
-          affected.id,
-          beforeStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
-          afterStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
-          cause,
-          reqCtx,
-        );
+    // These run AFTER the transaction has committed. Failures here must not
+    // cause the action to appear failed — the data is already persisted.
+    try {
+      if (this.config.auditWriter) {
+        await this.config.auditWriter.write({
+          id: `audit_${actionId}`,
+          timestamp: now(),
+          traceId: reqCtx.traceId ?? actionId,
+          actor: {
+            type: actor.type,
+            id: actor.id,
+            roles: actor.roles,
+            ip: actor.ip,
+          },
+          operation: {
+            type: 'action',
+            actionType,
+            actionId,
+          },
+          detail: {
+            before: Object.fromEntries(beforeStates),
+            after: Object.fromEntries(afterStates),
+            result: 'success',
+          },
+        });
       }
+
+      // TODO: Link effects (createLink/deleteLink) are published via publishObjectChange()
+      // but the ActionEventPublisher interface defines a separate publishLinkChange() method.
+      // Link-created/deleted entries in affectedObjects use `link:${type}:${id}` keys in
+      // beforeStates/afterStates but the lookup below uses `${type}:${id}` (no prefix),
+      // so before/after payloads for links will always be undefined. Route link events
+      // through publishLinkChange() with fromId/toId to fix both issues.
+      if (this.config.eventPublisher) {
+        const cause = { actionType, actionId, actor: actor.id };
+        for (const affected of affectedObjects) {
+          await this.config.eventPublisher.publishObjectChange(
+            affected.changeType,
+            affected.type,
+            affected.id,
+            beforeStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
+            afterStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
+            cause,
+            reqCtx,
+          );
+        }
+      }
+    } catch (postCommitErr) {
+      console.error(`[ActionExecutor] Post-commit audit/event publishing failed for action ${actionId}:`, postCommitErr);
+      // Do not return failure — the transaction already committed successfully.
     }
 
     return {

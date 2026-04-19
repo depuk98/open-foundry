@@ -56,8 +56,7 @@ function getFilterOps(typeName: string): string[] {
 }
 
 function getFilterGqlType(typeName: string, op: string): string {
-  if (op === 'in' || op === 'notIn') return `[${typeName}!]`;
-  if (op === 'eq' || op === 'ne') return typeName;
+  if (op === 'in') return `[${typeName}!]`;
   return typeName;
 }
 

@@ -180,7 +180,10 @@ async function handlePatientSearch(
     'patient',
   );
 
-  const allowedIds = allowedObjects.map((o: string) => o.replace('patient:', ''));
+  const allowedIds = allowedObjects.map((o: string) => {
+    const parts = o.split(':');
+    return parts[parts.length - 1];
+  }).filter((id): id is string => id !== undefined && id !== '');
 
   // Combine authorization filter with search filter
   const idFilter: FieldPredicate = { field: '_id', operator: 'in', value: allowedIds };

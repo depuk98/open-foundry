@@ -5,6 +5,7 @@
  * from the ODL ParsedSchema.
  */
 
+import crypto from 'node:crypto';
 import { ApolloServer } from '@apollo/server';
 import { buildSchema } from 'graphql';
 import { generateGraphQLSchema } from '@openfoundry/odl';
@@ -58,7 +59,7 @@ export function buildResolverContext(
     requestContext: {
       tenantId: user.tenantId,
       actorId: user.id,
-      traceId: undefined,
+      traceId: crypto.randomUUID(),
     },
     user,
     deps,

@@ -42,6 +42,8 @@ spec:
               containerPort: {{ .Values.apiGateway.port }}
               protocol: TCP
           env:
+            - name: NODE_ENV
+              value: production
             - name: PORT
               value: {{ .Values.apiGateway.port | quote }}
             - name: OTEL_SERVICE_NAME

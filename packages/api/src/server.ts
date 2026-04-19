@@ -10,7 +10,7 @@
  *   OIDC_CLIENT_ID       — OIDC client ID
  *   OPENFGA_URL          — OpenFGA API URL (matches Helm configmap / docker-compose)
  *   OPENFGA_STORE_ID     — OpenFGA store ID
- *   DATABASE_URL         — PostgreSQL connection string (optional; uses memory storage if absent)
+ *   POSTGRES_URL         — PostgreSQL connection string (optional; uses memory storage if absent)
  */
 
 import http from 'node:http';

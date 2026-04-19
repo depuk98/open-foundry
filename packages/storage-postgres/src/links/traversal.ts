@@ -75,7 +75,7 @@ function rowToLink(row: Record<string, unknown>): OntologyLink {
 
   const systemCols = new Set([
     '_tenant_id', '_id', '_type', '_from_type', '_from_id',
-    '_to_type', '_to_id', '_version', '_created_at', '_deleted_at',
+    '_to_type', '_to_id', '_version', '_created_at', '_updated_at', '_deleted_at',
   ]);
   for (const [key, value] of Object.entries(row)) {
     if (!systemCols.has(key)) {

@@ -70,6 +70,12 @@ export class AuthorizationService {
    * Value: set of visible field names.
    *
    * Call clearFieldCache() at the start of each request.
+   *
+   * TODO: clearFieldCache() is not currently called in the API request
+   * pipeline. The cache is instance-scoped and grows unboundedly across
+   * requests. Wire clearFieldCache() into the GraphQL/REST/FHIR request
+   * lifecycle (e.g., Express middleware or Apollo plugin) so that stale
+   * permissions don't leak across requests after role changes.
    */
   private fieldCache = new Map<string, Set<string>>();
 

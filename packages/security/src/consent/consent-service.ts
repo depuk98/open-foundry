@@ -81,8 +81,11 @@ export class ConsentService implements ConsentManager {
 
       // 2. Look up explicit consent record
       // Records are stored in insertion order; the last matching record is the
-      // most recent. We reverse before sorting by timestamp so that records
-      // with identical timestamps preserve insertion order (newest first).
+      // most recent. We reverse so that records with identical timestamps
+      // preserve insertion order (newest first).
+      // TODO: This relies on insertion order from the store. For Postgres-backed
+      // stores, add an explicit ORDER BY on a timestamp/sequence column to
+      // guarantee newest-first ordering regardless of store implementation.
       const records = await this.store.getBySubject(subjectId);
       const matching = records
         .filter(r => r.purpose === purpose)
