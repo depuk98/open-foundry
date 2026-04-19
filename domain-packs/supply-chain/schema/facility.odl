@@ -11,5 +11,5 @@ type Facility @objectType {
   address: String
   country: String! @indexed
   capacity: Int! @constraint(expr: "value > 0")
-  currentUtilization: Int @computed(fn: "sumInventory", args: { type: "InventoryAt" }, cache: LAZY)
+  currentUtilization: Int @computed(fn: "countLinks", args: { type: "InventoryAt" }, cache: LAZY)
 }

@@ -117,6 +117,24 @@ export function toLower(): TransformFn {
   };
 }
 
+/** Parse the source value as an integer (radix 10). */
+export function parseInt_(): TransformFn {
+  return (value) => {
+    if (value == null) return null;
+    const n = Number.parseInt(String(value), 10);
+    return Number.isNaN(n) ? null : n;
+  };
+}
+
+/** Parse the source value as a floating-point number. */
+export function parseFloat_(): TransformFn {
+  return (value) => {
+    if (value == null) return null;
+    const n = Number.parseFloat(String(value));
+    return Number.isNaN(n) ? null : n;
+  };
+}
+
 /** Strip leading and trailing whitespace. */
 export function trim(): TransformFn {
   return (value) => {
@@ -194,6 +212,10 @@ export function parseTransformExpression(
       return parseDate(args[0] ?? "");
     case "parseDateTime":
       return parseDateTime(args[0] ?? "");
+    case "parseInt":
+      return parseInt_();
+    case "parseFloat":
+      return parseFloat_();
     case "toUpper":
       return toUpper();
     case "toLower":

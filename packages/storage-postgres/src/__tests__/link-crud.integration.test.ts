@@ -152,6 +152,7 @@ describeWithPg('Link CRUD, Traversal, Temporal (PostgreSQL integration)', () => 
         "_to_id" TEXT NOT NULL,
         "_version" INTEGER NOT NULL DEFAULT 1,
         "_created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        "_updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         "_deleted_at" TIMESTAMPTZ,
         "reason" TEXT,
         PRIMARY KEY ("_tenant_id", "_id")
@@ -172,6 +173,7 @@ describeWithPg('Link CRUD, Traversal, Temporal (PostgreSQL integration)', () => 
         "_to_id" TEXT NOT NULL,
         "_version" INTEGER NOT NULL DEFAULT 1,
         "_created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        "_updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         "_deleted_at" TIMESTAMPTZ,
         PRIMARY KEY ("_tenant_id", "_id")
       );
@@ -191,6 +193,7 @@ describeWithPg('Link CRUD, Traversal, Temporal (PostgreSQL integration)', () => 
         "_to_id" TEXT NOT NULL,
         "_version" INTEGER NOT NULL DEFAULT 1,
         "_created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        "_updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         "_deleted_at" TIMESTAMPTZ,
         PRIMARY KEY ("_tenant_id", "_id")
       );

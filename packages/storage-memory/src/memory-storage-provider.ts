@@ -364,7 +364,9 @@ export class MemoryStorageProvider implements StorageProvider {
       throw new Error(`Object ${type}:${id} is deleted`);
     }
     if (expectedVersion !== undefined && existing._version !== expectedVersion) {
-      throw new Error(`VERSION_CONFLICT: Object ${type}:${id} has version ${existing._version}, expected ${expectedVersion}`);
+      const err = new Error(`Object ${type}:${id} has version ${existing._version}, expected ${expectedVersion}`) as Error & { code: string };
+      err.code = 'VERSION_CONFLICT';
+      throw err;
     }
     const updated: OntologyObject = {
       ...existing,
@@ -440,7 +442,9 @@ export class MemoryStorageProvider implements StorageProvider {
       throw new Error(`Link ${type}:${linkId} not found`);
     }
     if (expectedVersion !== undefined && existing._version !== expectedVersion) {
-      throw new Error(`VERSION_CONFLICT: Link ${type}:${linkId} has version ${existing._version}, expected ${expectedVersion}`);
+      const err = new Error(`Link ${type}:${linkId} has version ${existing._version}, expected ${expectedVersion}`) as Error & { code: string };
+      err.code = 'VERSION_CONFLICT';
+      throw err;
     }
     const updated: OntologyLink = {
       ...existing,

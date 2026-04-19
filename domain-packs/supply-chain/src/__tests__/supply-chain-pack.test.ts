@@ -207,7 +207,7 @@ describe('Supply Chain Domain Pack — ODL Schema Parsing', () => {
         const util = facility.fields.find(f => f.name === 'currentUtilization')!;
         const computed = findDirective(util.directives, 'computed');
         expect(computed).toBeDefined();
-        expect(computed!.fn).toBe('sumInventory');
+        expect(computed!.fn).toBe('countLinks');
         expect(computed!.cache).toBe('LAZY');
       });
 

@@ -227,6 +227,7 @@ describe('generateLinkTableDDL', () => {
     expect(createTable).toContain('"_to_id" TEXT NOT NULL');
     expect(createTable).toContain('"_version" INTEGER NOT NULL DEFAULT 1');
     expect(createTable).toContain('"_created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()');
+    expect(createTable).toContain('"_updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()');
     expect(createTable).toContain('"_deleted_at" TIMESTAMPTZ');
     expect(createTable).toContain('PRIMARY KEY ("_tenant_id", "_id")');
   });

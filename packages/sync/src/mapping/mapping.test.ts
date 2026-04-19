@@ -366,6 +366,22 @@ describe("parseTransformExpression", () => {
     clearCustomTransforms();
   });
 
+  it("parses parseInt()", () => {
+    const fn = parseTransformExpression("parseInt()");
+    expect(fn("42", {})).toBe(42);
+    expect(fn("3.7", {})).toBe(3);
+    expect(fn(null, {})).toBe(null);
+    expect(fn("abc", {})).toBe(null);
+  });
+
+  it("parses parseFloat()", () => {
+    const fn = parseTransformExpression("parseFloat()");
+    expect(fn("3.14", {})).toBe(3.14);
+    expect(fn("42", {})).toBe(42);
+    expect(fn(null, {})).toBe(null);
+    expect(fn("abc", {})).toBe(null);
+  });
+
   it("throws for unknown function", () => {
     expect(() => parseTransformExpression("unknown()")).toThrow("Unknown transform function");
   });

@@ -237,10 +237,14 @@ export async function updateObject(
         [ctx.tenantId, id],
       );
       if (check.rows.length === 0) {
-        throw new Error(`VERSION_CONFLICT: Object ${type}:${id} not found or deleted`);
+        const err = new Error(`Object ${type}:${id} not found or deleted`) as Error & { code: string };
+        err.code = 'VERSION_CONFLICT';
+        throw err;
       }
       const currentVersion = (check.rows[0] as Record<string, unknown>)['_version'];
-      throw new Error(`VERSION_CONFLICT: Object ${type}:${id} version mismatch (expected ${expectedVersion}, current ${currentVersion})`);
+      const err = new Error(`Object ${type}:${id} version mismatch (expected ${expectedVersion}, current ${currentVersion})`) as Error & { code: string };
+      err.code = 'VERSION_CONFLICT';
+      throw err;
     }
     throw new Error(`Object ${type}:${id} not found or is deleted`);
   }
