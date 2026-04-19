@@ -1,0 +1,17 @@
+{
+  "name": "@openfoundry/domain-pack-supply-chain",
+  "version": "0.1.0",
+  "description": "Supply chain control tower domain pack",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@openfoundry/odl": "workspace:*",
+    "@openfoundry/actions": "workspace:*",
+    "vitest": "^3.0.0",
+    "yaml": "^2.8.0"
+  }
+}
