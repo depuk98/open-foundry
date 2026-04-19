@@ -18,7 +18,7 @@ type account
     define compliance_officer: [user]
     define bsa_officer: [user]
     define can_view: compliance_analyst or compliance_officer or bsa_officer
-    define can_freeze: compliance_officer
+    define can_freeze: compliance_officer or bsa_officer
 
 type transaction
   relations
@@ -42,10 +42,12 @@ type alert
 type case
   relations
     define assigned_analyst: [user]
+    define compliance_analyst: [user]
     define compliance_officer: [user]
     define bsa_officer: [user]
-    define can_view: assigned_analyst or compliance_officer or bsa_officer
-    define can_review: assigned_analyst or compliance_officer
+    define can_view: assigned_analyst or compliance_analyst or compliance_officer or bsa_officer
+    define can_open: compliance_analyst or compliance_officer
+    define can_review: assigned_analyst or compliance_analyst or compliance_officer
     define can_close: compliance_officer or bsa_officer
     define can_file_report: compliance_officer or bsa_officer
 

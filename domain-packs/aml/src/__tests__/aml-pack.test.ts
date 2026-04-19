@@ -700,12 +700,21 @@ describe('AML Domain Pack — OpenFGA permissions', () => {
     expect(content).toContain('define can_investigate: compliance_analyst or compliance_officer');
   });
 
-  it('case type has filing permissions', () => {
+  it('case type has open, review, and filing permissions', () => {
     const fgaPath = resolve(PACK_ROOT, 'permissions', 'aml-roles.fga');
     const content = readFileSync(fgaPath, 'utf-8');
 
     expect(content).toContain('define bsa_officer: [user]');
+    expect(content).toContain('define can_open: compliance_analyst or compliance_officer');
+    expect(content).toContain('define can_review: assigned_analyst or compliance_analyst or compliance_officer');
     expect(content).toContain('define can_file_report: compliance_officer or bsa_officer');
+  });
+
+  it('account can_freeze aligns with FreezeAccount action roles', () => {
+    const fgaPath = resolve(PACK_ROOT, 'permissions', 'aml-roles.fga');
+    const content = readFileSync(fgaPath, 'utf-8');
+
+    expect(content).toContain('define can_freeze: compliance_officer or bsa_officer');
   });
 
   it('bsa_officer has view access to evidence types', () => {
