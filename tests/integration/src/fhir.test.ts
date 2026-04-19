@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fhirGet, fhirGetRaw, graphql } from './client.js';
-import { ensureStack } from './setup.js';
+import { ensureStack, dockerAvailable } from './setup.js';
 import type { SeededData } from './seed.js';
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ interface FhirBundle {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('FHIR R4 Endpoint', () => {
+describe.skipIf(!dockerAvailable)('FHIR R4 Endpoint', () => {
   let data: SeededData;
 
   beforeAll(async () => {

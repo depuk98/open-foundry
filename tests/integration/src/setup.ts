@@ -16,8 +16,8 @@ import { isDockerAvailable, isStackHealthy, dockerComposeUp, waitForEndpoint } f
 import { seedTestData, type SeededData } from './seed.js';
 import { CONFIG } from './config.js';
 
-/** Whether Docker is available on this machine. */
-export let dockerAvailable = false;
+/** Whether Docker is available on this machine (checked at import time). */
+export const dockerAvailable = isDockerAvailable();
 
 /** Whether the stack was started by this test run (vs. already running). */
 export let stackManagedByTests = false;
@@ -33,7 +33,6 @@ export async function ensureStack(): Promise<SeededData> {
   if (seededData) return seededData;
 
   // 1. Check Docker availability
-  dockerAvailable = isDockerAvailable();
   if (!dockerAvailable) {
     throw new Error(
       'Docker is not available. Integration tests require a running Docker daemon.',

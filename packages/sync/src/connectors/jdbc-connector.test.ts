@@ -18,14 +18,12 @@ const mockEnd = vi.fn().mockResolvedValue(undefined);
 const mockConnect = vi.fn();
 
 vi.mock("pg", () => {
-  return {
-    default: {
-      Pool: vi.fn().mockImplementation(() => ({
-        connect: mockConnect,
-        end: mockEnd,
-      })),
-    },
-  };
+  // Must use a regular function (not arrow) so it is constructable with `new`.
+  const MockPool = vi.fn().mockImplementation(function (this: Record<string, unknown>) {
+    this.connect = mockConnect;
+    this.end = mockEnd;
+  });
+  return { default: { Pool: MockPool } };
 });
 
 // ---------------------------------------------------------------------------

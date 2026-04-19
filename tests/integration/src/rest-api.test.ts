@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { restGet, restPost, restRaw } from './client.js';
-import { ensureStack } from './setup.js';
+import { ensureStack, dockerAvailable } from './setup.js';
 import type { SeededData } from './seed.js';
 import type { RestListResponse, RestItemResponse, ActionResponse } from './client.js';
 
@@ -19,7 +19,7 @@ import type { RestListResponse, RestItemResponse, ActionResponse } from './clien
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('REST API', () => {
+describe.skipIf(!dockerAvailable)('REST API', () => {
   let data: SeededData;
 
   beforeAll(async () => {

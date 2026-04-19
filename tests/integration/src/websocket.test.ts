@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { graphql } from './client.js';
-import { ensureStack } from './setup.js';
+import { ensureStack, dockerAvailable } from './setup.js';
 import { CONFIG } from './config.js';
 import type { SeededData } from './seed.js';
 
@@ -140,7 +140,7 @@ const ADMIT_PATIENT = `
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('WebSocket Subscriptions', () => {
+describe.skipIf(!dockerAvailable)('WebSocket Subscriptions', () => {
   let data: SeededData;
 
   beforeAll(async () => {

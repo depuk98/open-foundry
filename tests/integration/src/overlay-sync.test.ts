@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { restGet, graphql } from './client.js';
-import { ensureStack } from './setup.js';
+import { ensureStack, dockerAvailable } from './setup.js';
 import { CONFIG } from './config.js';
 import type { SeededData } from './seed.js';
 import type { RestListResponse, RestItemResponse } from './client.js';
@@ -21,7 +21,7 @@ import type { RestListResponse, RestItemResponse } from './client.js';
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Overlay Mode & CDC Sync', () => {
+describe.skipIf(!dockerAvailable)('Overlay Mode & CDC Sync', () => {
   let data: SeededData;
 
   beforeAll(async () => {

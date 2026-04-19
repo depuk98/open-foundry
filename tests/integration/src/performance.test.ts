@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { restGet, restPost, graphql, timed } from './client.js';
-import { ensureStack } from './setup.js';
+import { ensureStack, dockerAvailable } from './setup.js';
 import { CONFIG } from './config.js';
 import type { SeededData } from './seed.js';
 import type { RestItemResponse, RestListResponse, ActionResponse } from './client.js';
@@ -21,7 +21,7 @@ import type { RestItemResponse, RestListResponse, ActionResponse } from './clien
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Performance Smoke Tests (MVP Section 8)', () => {
+describe.skipIf(!dockerAvailable)('Performance Smoke Tests (MVP Section 8)', () => {
   let data: SeededData;
 
   beforeAll(async () => {

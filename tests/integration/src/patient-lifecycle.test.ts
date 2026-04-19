@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { graphql } from './client.js';
-import { ensureStack } from './setup.js';
+import { ensureStack, dockerAvailable } from './setup.js';
 import type { SeededData } from './seed.js';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ const GET_PATIENT_LINKS = `
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Patient Lifecycle E2E', () => {
+describe.skipIf(!dockerAvailable)('Patient Lifecycle E2E', () => {
   let data: SeededData;
 
   beforeAll(async () => {

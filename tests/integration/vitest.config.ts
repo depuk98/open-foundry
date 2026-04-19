@@ -5,6 +5,7 @@ export default defineConfig({
     globals: false,
     environment: "node",
     include: ["src/**/*.test.ts"],
+    exclude: ["dist/**", "node_modules/**"],
     testTimeout: 30_000,
     hookTimeout: 120_000,
     // Integration tests may need longer for Docker startup
