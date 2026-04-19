@@ -79,7 +79,7 @@ The first vertical slice targets **NHS acute healthcare** — modelling patient 
 | Type | Contents |
 |------|----------|
 | **Object Types** | Patient, Ward, Bed, Consultant, DischargeRecord |
-| **Link Types** | AdmittedTo, OccupiesBed, UnderCareOf, ReferredBy |
+| **Link Types** | AdmittedTo, OccupiesBed, UnderCareOf, BedInWard, DischargedPatient, DischargedFromWard |
 | **Action Types** | AdmitPatient, DischargePatient, TransferWard |
 | **Connectors** | PAS JDBC connector with CDC via Debezium |
 | **Permissions** | OpenFGA role model for NHS clinical roles |
@@ -118,7 +118,7 @@ The monorepo contains 20 packages across four workspace roots:
 | `@openfoundry/domain-pack-core` | `openfoundry.core` | Base interfaces, 6 custom scalars |
 | `@openfoundry/domain-pack-nhs-acute` | `nhs.acute` | 7 ODL schemas, 3 actions, 1 connector, permissions |
 | `@openfoundry/domain-pack-aml` | `aml` | 8 ODL schemas, 6 actions, 1 connector, permissions |
-| `@openfoundry/domain-pack-supply-chain` | `supply_chain` | 8 ODL schemas, 4 actions, 1 connector, permissions |
+| `@openfoundry/domain-pack-supply-chain` | `supply.chain` | 8 ODL schemas, 4 actions, 1 connector, permissions |
 
 ### Tests (`tests/`)
 
@@ -255,12 +255,12 @@ These items are specified in the full technical spec but intentionally deferred 
 
 ## How This Was Built
 
-This codebase was authored entirely by **Claude Opus 4.6** (Anthropic) running inside the **Avril** harness — a session-based agent framework for quality-assured code generation at scale. The work was orchestrated by **Cardinal**, a task planning and execution system that decomposed the technical specification into implementable work units, managed dependencies between tasks, and tracked progress across the 48-commit build.
+This codebase was authored entirely by **Claude Opus 4.6** (Anthropic) running inside the **Avril** harness — a session-based agent framework for quality-assured code generation at scale. The work was orchestrated by **Cardinal**, a task planning and execution system that decomposed the technical specification into implementable work units, managed dependencies between tasks, and tracked progress across the build.
 
 The process:
 
 1. **Specification** — The Open Foundry spec (3,104 lines) and MVP plan (1,061 lines) were written via human-agent collaboration.
-2. **Task decomposition** — Cardinal broke the spec into ~120 discrete tasks across 17 packages, ordered by dependency graph.
+2. **Task decomposition** — Cardinal broke the spec into ~120 discrete tasks across 20 packages, ordered by dependency graph.
 3. **Implementation** — Opus 4.6, operating in parallel Avril sessions, implemented each task: writing source code, tests, deployment configuration, and documentation.
 4. **Review** — 8 iterative review passes (including cross-model Codex reviews) surfaced and resolved 200+ findings across consistency, security, type safety, and architecture.
 
