@@ -10,7 +10,7 @@ dependencies:
 provides:
   objectTypes: 6
   linkTypes: 7
-  actionTypes: 5
+  actionTypes: 6
   functions: 0
   connectors: 1
   widgets: 0
@@ -31,6 +31,7 @@ actions:
   - actions/open-case.yaml
   - actions/assign-alert-to-case.yaml
   - actions/file-report.yaml
+  - actions/submit-report.yaml
   - actions/freeze-account.yaml
 
 connectors:

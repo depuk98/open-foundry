@@ -21,7 +21,7 @@ sideEffects:
     config:
       type: "aml.account.frozen"
       data:
-        accountNumber: "account.accountNumber"
+        accountId: "account.id"
         customer: "account.customer"
         reason: "params.reason"
 

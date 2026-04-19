@@ -7,7 +7,8 @@ type customer
   relations
     define compliance_analyst: [user]
     define compliance_officer: [user]
-    define can_view: compliance_analyst or compliance_officer
+    define bsa_officer: [user]
+    define can_view: compliance_analyst or compliance_officer or bsa_officer
     define can_edit_risk: compliance_officer
 
 type account
@@ -15,7 +16,8 @@ type account
     define owner: [customer]
     define compliance_analyst: [user]
     define compliance_officer: [user]
-    define can_view: compliance_analyst or compliance_officer
+    define bsa_officer: [user]
+    define can_view: compliance_analyst or compliance_officer or bsa_officer
     define can_freeze: compliance_officer
 
 type transaction
@@ -23,7 +25,8 @@ type transaction
     define source_account: [account]
     define compliance_analyst: [user]
     define compliance_officer: [user]
-    define can_view: compliance_analyst or compliance_officer
+    define bsa_officer: [user]
+    define can_view: compliance_analyst or compliance_officer or bsa_officer
     define can_flag: compliance_analyst or compliance_officer
 
 type alert
@@ -31,11 +34,12 @@ type alert
     define assigned_to: [user]
     define compliance_analyst: [user]
     define compliance_officer: [user]
-    define can_view: compliance_analyst or compliance_officer or assigned_to
+    define bsa_officer: [user]
+    define can_view: compliance_analyst or compliance_officer or assigned_to or bsa_officer
     define can_investigate: compliance_analyst or compliance_officer
     define can_escalate: compliance_officer
 
-type investigation_case
+type case
   relations
     define assigned_analyst: [user]
     define compliance_officer: [user]

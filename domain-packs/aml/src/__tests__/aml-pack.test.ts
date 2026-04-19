@@ -224,12 +224,13 @@ describe('AML Domain Pack — ODL Schema Parsing', () => {
     });
 
     describe('Account', () => {
-      it('accountNumber is @unique @indexed @immutable', () => {
+      it('accountNumber is @unique @indexed @immutable @sensitive', () => {
         const account = schema.objectTypes.find(t => t.name === 'Account')!;
         const field = account.fields.find(f => f.name === 'accountNumber')!;
         expect(findDirective(field.directives, 'unique')).toBeDefined();
         expect(findDirective(field.directives, 'indexed')).toBeDefined();
         expect(findDirective(field.directives, 'immutable')).toBeDefined();
+        expect(findDirective(field.directives, 'sensitive')).toBeDefined();
       });
 
       it('has customer FK reference', () => {
@@ -454,6 +455,7 @@ describe('AML Domain Pack — Action Manifests', () => {
     'open-case.yaml',
     'assign-alert-to-case.yaml',
     'file-report.yaml',
+    'submit-report.yaml',
     'freeze-account.yaml',
   ];
 
@@ -532,18 +534,49 @@ describe('AML Domain Pack — Action Manifests', () => {
       expect(m.action).toBe('FileReport');
       expect(m.version).toBe(1);
       expect(m.preconditions).toHaveLength(2);
+      expect(m.effects).toHaveLength(1);
+      expect(m.sideEffects).toHaveLength(1);
+    });
+
+    it('creates SAR in DRAFT status only (no case closure)', () => {
+      const result = parseActionManifest(readAction('file-report.yaml'));
+      const types = result.manifest!.effects.map(e => e.type);
+      expect(types).toEqual(['createObject']);
+    });
+
+    it('emits event but no webhook (submission is separate)', () => {
+      const result = parseActionManifest(readAction('file-report.yaml'));
+      const types = result.manifest!.sideEffects.map(se => se.type);
+      expect(types).toEqual(['event']);
+    });
+  });
+
+  describe('submit-report.yaml', () => {
+    it('has correct action name and structure', () => {
+      const result = parseActionManifest(readAction('submit-report.yaml'));
+      const m = result.manifest!;
+      expect(m.action).toBe('SubmitReport');
+      expect(m.version).toBe(1);
+      expect(m.preconditions).toHaveLength(2);
       expect(m.effects).toHaveLength(2);
       expect(m.sideEffects).toHaveLength(2);
     });
 
-    it('effects have correct types', () => {
-      const result = parseActionManifest(readAction('file-report.yaml'));
-      const types = result.manifest!.effects.map(e => e.type);
-      expect(types).toEqual(['createObject', 'updateObject']);
+    it('requires bsa_officer role only', () => {
+      const result = parseActionManifest(readAction('submit-report.yaml'));
+      const rolePrecondition = result.manifest!.preconditions[1]!;
+      expect(rolePrecondition.expr).toContain('bsa_officer');
+      expect(rolePrecondition.expr).not.toContain('compliance_officer');
     });
 
-    it('includes webhook side effect with retries', () => {
-      const result = parseActionManifest(readAction('file-report.yaml'));
+    it('effects update SAR status and close case', () => {
+      const result = parseActionManifest(readAction('submit-report.yaml'));
+      const types = result.manifest!.effects.map(e => e.type);
+      expect(types).toEqual(['updateObject', 'updateObject']);
+    });
+
+    it('includes webhook side effect with retries for regulator', () => {
+      const result = parseActionManifest(readAction('submit-report.yaml'));
       const webhook = result.manifest!.sideEffects.find(se => se.type === 'webhook');
       expect(webhook).toBeDefined();
       expect(webhook!.retries).toBe(5);
@@ -604,7 +637,7 @@ describe('AML Domain Pack — pack.yaml manifest', () => {
     const provides = pack['provides'] as Record<string, number>;
     expect(provides['objectTypes']).toBe(6);
     expect(provides['linkTypes']).toBe(7);
-    expect(provides['actionTypes']).toBe(5);
+    expect(provides['actionTypes']).toBe(6);
     expect(provides['connectors']).toBe(1);
   });
 
@@ -626,11 +659,12 @@ describe('AML Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     const actionFiles = pack['actions'] as string[];
-    expect(actionFiles).toHaveLength(5);
+    expect(actionFiles).toHaveLength(6);
     expect(actionFiles).toContain('actions/flag-transaction.yaml');
     expect(actionFiles).toContain('actions/open-case.yaml');
     expect(actionFiles).toContain('actions/assign-alert-to-case.yaml');
     expect(actionFiles).toContain('actions/file-report.yaml');
+    expect(actionFiles).toContain('actions/submit-report.yaml');
     expect(actionFiles).toContain('actions/freeze-account.yaml');
   });
 });
@@ -645,8 +679,17 @@ describe('AML Domain Pack — OpenFGA permissions', () => {
     expect(content).toContain('type account');
     expect(content).toContain('type transaction');
     expect(content).toContain('type alert');
-    expect(content).toContain('type investigation_case');
+    expect(content).toContain('type case');
     expect(content).toContain('type suspicious_activity_report');
+  });
+
+  it('FGA type names match snake_cased ODL ObjectType names', () => {
+    const fgaPath = resolve(PACK_ROOT, 'permissions', 'aml-roles.fga');
+    const content = readFileSync(fgaPath, 'utf-8');
+
+    // Case → case (not investigation_case)
+    expect(content).toContain('\ntype case\n');
+    expect(content).not.toContain('investigation_case');
   });
 
   it('alert type has role-based access', () => {
@@ -657,12 +700,30 @@ describe('AML Domain Pack — OpenFGA permissions', () => {
     expect(content).toContain('define can_investigate: compliance_analyst or compliance_officer');
   });
 
-  it('investigation_case type has filing permissions', () => {
+  it('case type has filing permissions', () => {
     const fgaPath = resolve(PACK_ROOT, 'permissions', 'aml-roles.fga');
     const content = readFileSync(fgaPath, 'utf-8');
 
     expect(content).toContain('define bsa_officer: [user]');
     expect(content).toContain('define can_file_report: compliance_officer or bsa_officer');
+  });
+
+  it('bsa_officer has view access to evidence types', () => {
+    const fgaPath = resolve(PACK_ROOT, 'permissions', 'aml-roles.fga');
+    const content = readFileSync(fgaPath, 'utf-8');
+
+    // bsa_officer should appear in can_view for customer, account, transaction, alert
+    const lines = content.split('\n');
+    let currentType = '';
+    for (const line of lines) {
+      const typeMatch = line.match(/^type (\w+)$/);
+      if (typeMatch) currentType = typeMatch[1]!;
+      if (['customer', 'account', 'transaction', 'alert'].includes(currentType)) {
+        if (line.includes('define can_view:')) {
+          expect(line).toContain('bsa_officer');
+        }
+      }
+    }
   });
 
   it('schema version is 1.1', () => {
