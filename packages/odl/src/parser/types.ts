@@ -11,10 +11,6 @@ export type DirectiveArgValue = string | number | boolean | null | DirectiveArgV
 
 // ─── Cardinality & Direction enums ───
 
-// NOTE: SPI defines cardinality as ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY.
-// MANY_TO_ONE is used by domain packs (nhs-acute, aml) but not listed in the
-// SPI type. The engine enforces MANY_TO_ONE constraints manually. Consider
-// adding MANY_TO_ONE to the SPI type or documenting the mapping convention.
 export type Cardinality = 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_ONE' | 'MANY_TO_MANY';
 
 export type Direction = 'INBOUND' | 'OUTBOUND';

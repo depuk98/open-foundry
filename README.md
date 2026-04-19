@@ -92,7 +92,7 @@ The first vertical slice targets **NHS acute healthcare** — modelling patient 
 
 ## Packages
 
-The monorepo contains 17 packages across four workspace roots:
+The monorepo contains 20 packages across four workspace roots:
 
 ### Core Platform (`packages/`)
 
@@ -117,6 +117,8 @@ The monorepo contains 17 packages across four workspace roots:
 |------|-----------|----------|
 | `@openfoundry/domain-pack-core` | `openfoundry.core` | Base interfaces, 6 custom scalars |
 | `@openfoundry/domain-pack-nhs-acute` | `nhs.acute` | 7 ODL schemas, 3 actions, 1 connector, permissions |
+| `@openfoundry/domain-pack-aml` | `aml` | 8 ODL schemas, 6 actions, 1 connector, permissions |
+| `@openfoundry/domain-pack-supply-chain` | `supply_chain` | 8 ODL schemas, 4 actions, 1 connector, permissions |
 
 ### Tests (`tests/`)
 
@@ -192,19 +194,21 @@ helm install openfoundry deploy/helm/openfoundry \
 | SPI Conformance | 253 |
 | ODL Compiler | 270 |
 | API Layer | 135 |
-| Sync Engine | 131 |
+| Sync Engine | 133 |
 | Actions Framework | 123 |
 | Security | 99 |
 | Postgres Storage | 97 |
+| AML Pack | 88 |
 | Engine | 73 |
+| Supply Chain Pack | 72 |
 | Memory Storage | 56 |
+| NHS Acute Pack | 53 |
 | Seed Tool | 52 |
-| NHS Acute Pack | 51 |
 | Pilot Scenarios | 41 |
 | SPI Types | 16 |
 | Observability | 16 |
 | Core Pack | 14 |
-| **Total** | **1,372+** |
+| **Total** | **1,591** |
 
 91 Postgres integration tests are skipped when no database is available. This is expected.
 
@@ -243,8 +247,8 @@ These items are specified in the full technical spec but intentionally deferred 
 
 | Document | Description |
 |----------|-------------|
-| [`docs/open-foundry-spec-v2.md`](docs/open-foundry-spec-v2.md) | Full technical specification (2,744 lines) |
-| [`docs/mvp-nhs-pilot.md`](docs/mvp-nhs-pilot.md) | MVP design document (1,036 lines) |
+| [`docs/open-foundry-spec-v2.md`](docs/open-foundry-spec-v2.md) | Full technical specification (3,104 lines) |
+| [`docs/mvp-nhs-pilot.md`](docs/mvp-nhs-pilot.md) | MVP design document (1,061 lines) |
 | [`deploy/README.md`](deploy/README.md) | Development deployment quickstart |
 
 ---
@@ -255,24 +259,24 @@ This codebase was authored entirely by **Claude Opus 4.6** (Anthropic) running i
 
 The process:
 
-1. **Specification** — The Open Foundry spec (2,744 lines) and MVP plan (1,036 lines) were written via human-agent collaboration.
+1. **Specification** — The Open Foundry spec (3,104 lines) and MVP plan (1,061 lines) were written via human-agent collaboration.
 2. **Task decomposition** — Cardinal broke the spec into ~120 discrete tasks across 17 packages, ordered by dependency graph.
 3. **Implementation** — Opus 4.6, operating in parallel Avril sessions, implemented each task: writing source code, tests, deployment configuration, and documentation.
-4. **Review** — A comprehensive code review (168+ findings) was conducted and all CRITICAL and HIGH severity issues were resolved.
+4. **Review** — 8 iterative review passes (including cross-model Codex reviews) surfaced and resolved 200+ findings across consistency, security, type safety, and architecture.
 
 ### By the Numbers
 
 | Metric | Value |
 |--------|-------|
-| TypeScript source | ~26,000 lines |
-| Test code | ~26,000 lines |
+| TypeScript source | ~23,000 lines |
+| Test code | ~28,000 lines |
 | Go source (CEL evaluator) | ~1,900 lines |
-| Domain pack config (ODL, YAML, FGA) | ~500 lines |
+| Domain pack config (ODL, YAML, FGA) | ~1,700 lines |
 | Deployment config | ~1,600 lines |
-| Specification + MVP docs | ~3,800 lines |
-| Commits | 48 |
-| Packages | 17 |
-| Unit tests | 1,372+ |
+| Specification + MVP docs | ~4,200 lines |
+| Commits | 70 |
+| Packages | 20 |
+| Unit tests | 1,591 |
 | Human-written lines of code | 0 |
 
 ---
