@@ -30,4 +30,4 @@ RUN pnpm install --frozen-lockfile --prod
 
 EXPOSE 4000
 
-CMD ["node", "packages/api/dist/index.js"]
+CMD ["node", "packages/api/dist/server.js"]

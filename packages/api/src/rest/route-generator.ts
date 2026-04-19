@@ -131,8 +131,8 @@ function generateObjectRoutes(
   return [
     generateListRoute(obj, plural, lower, deps),
     generateGetByIdRoute(obj, plural, lower, deps),
-    generateLinksRoute(plural, deps),
-    generateHistoryRoute(obj, plural, deps),
+    generateLinksRoute(plural, lower, deps),
+    generateHistoryRoute(obj, plural, lower, deps),
   ];
 }
 
@@ -340,6 +340,7 @@ function generateGetByIdRoute(
  */
 function generateLinksRoute(
   plural: string,
+  lower: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -347,9 +348,25 @@ function generateLinksRoute(
     pattern: `/api/v1/${plural}/:id/links/:linkType`,
     handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
       try {
-        const { requestContext } = ctx;
+        const { user, requestContext } = ctx;
         const id = req.params['id']!;
         const linkType = req.params['linkType']!;
+
+        // Authorize — user must have view access to the parent object
+        const allowed = await deps.authorizationService.check(
+          `user:${user.id}`,
+          'viewer',
+          `${lower}:${id}`,
+        );
+        if (!allowed) {
+          return createRestErrorResponse({
+            code: 'FORBIDDEN',
+            category: 'authorization',
+            message: `Access denied to ${plural} ${id}`,
+            retryable: false,
+            traceId: requestContext.traceId,
+          });
+        }
 
         const { offset, limit } = parsePagination(req.query);
         const direction = (req.query['direction'] as string) || 'outbound';
@@ -388,6 +405,7 @@ function generateLinksRoute(
 function generateHistoryRoute(
   obj: ObjectType,
   plural: string,
+  lower: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -395,9 +413,25 @@ function generateHistoryRoute(
     pattern: `/api/v1/${plural}/:id/history`,
     handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
       try {
-        const { requestContext } = ctx;
+        const { user, requestContext } = ctx;
         const typeName = obj.name;
         const id = req.params['id']!;
+
+        // Authorize — user must have view access to the object
+        const allowed = await deps.authorizationService.check(
+          `user:${user.id}`,
+          'viewer',
+          `${lower}:${id}`,
+        );
+        if (!allowed) {
+          return createRestErrorResponse({
+            code: 'FORBIDDEN',
+            category: 'authorization',
+            message: `Access denied to ${typeName} ${id}`,
+            retryable: false,
+            traceId: requestContext.traceId,
+          });
+        }
 
         // Get current object to determine version count
         const current = await deps.objectManager.get(typeName, id, requestContext);
@@ -467,7 +501,8 @@ function generateActionRoute(
           requestContext,
         };
 
-        const manifest: ActionManifest = {
+        // Resolve manifest from registry; fall back to stub if not registered
+        const manifest: ActionManifest = deps.manifestRegistry?.get(action.name) ?? {
           action: action.name,
           version: 1,
           reversible: false,

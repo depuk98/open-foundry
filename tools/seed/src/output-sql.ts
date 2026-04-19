@@ -89,14 +89,14 @@ export function writeSql(data: SeedData, outputDir: string): string {
 
   // Links: BedInWard
   sections.push(sqlBatches(
-    'links_bed_in_ward',
+    'bed_in_ward',
     ['id', 'from_id', 'to_id'],
     data.links.bedInWard.map(l => [esc(l.id), esc(l.fromId), esc(l.toId)]),
   ));
 
   // Links: AdmittedTo
   sections.push(sqlBatches(
-    'links_admitted_to',
+    'admitted_to',
     ['id', 'from_id', 'to_id', 'admission_date', 'expected_discharge', 'reason'],
     data.links.admittedTo.map(l => [
       esc(l.id), esc(l.fromId), esc(l.toId), esc(l.admissionDate),
@@ -106,14 +106,14 @@ export function writeSql(data: SeedData, outputDir: string): string {
 
   // Links: OccupiesBed
   sections.push(sqlBatches(
-    'links_occupies_bed',
+    'occupies_bed',
     ['id', 'from_id', 'to_id', 'assigned_at'],
     data.links.occupiesBed.map(l => [esc(l.id), esc(l.fromId), esc(l.toId), esc(l.assignedAt)]),
   ));
 
   // Links: UnderCareOf
   sections.push(sqlBatches(
-    'links_under_care_of',
+    'under_care_of',
     ['id', 'from_id', 'to_id', 'assigned_date', 'role'],
     data.links.underCareOf.map(l => [
       esc(l.id), esc(l.fromId), esc(l.toId), esc(l.assignedDate), esc(l.role),

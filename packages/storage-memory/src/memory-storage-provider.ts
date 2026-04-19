@@ -414,10 +414,14 @@ export class MemoryStorageProvider implements StorageProvider {
     properties?: Record<string, unknown>,
   ): OntologyLink {
     this._enforceCardinality(ctx, type, fromId, toId);
-    const id = genId();
+    // Honour engine-provided ID (UUIDv7) per SPI contract, fall back to genId
+    const engineId = properties?._engineLinkId;
+    const id = typeof engineId === 'string' ? engineId : genId();
     const timestamp = now();
     // Resolve fromType/toType from link type definition or default to 'unknown'
     const def = this._getLinkTypeDef(type);
+    // Strip _engineLinkId from user-facing properties
+    const { _engineLinkId: _, ...userProps } = properties ?? {};
     const link: OntologyLink = {
       _tenantId: ctx.tenantId,
       _type: type,
@@ -429,7 +433,7 @@ export class MemoryStorageProvider implements StorageProvider {
       _version: 1,
       _createdAt: timestamp,
       _updatedAt: timestamp,
-      ...(properties ?? {}),
+      ...userProps,
     };
     this._links.set(`${type}:${id}`, link);
     return link;

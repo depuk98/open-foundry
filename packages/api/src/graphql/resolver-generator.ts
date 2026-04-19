@@ -402,10 +402,8 @@ function generateMutationResolver(
         requestContext,
       };
 
-      // Build a minimal manifest from the ActionType
-      // In production, manifests are loaded from a registry. Here we build
-      // a stub so the executor can validate and run.
-      const manifest: ActionManifest = {
+      // Resolve manifest from registry; fall back to stub if not registered
+      const manifest: ActionManifest = deps.manifestRegistry?.get(action.name) ?? {
         action: action.name,
         version: 1,
         reversible: false,

@@ -32,10 +32,10 @@
     "@openfoundry/security": "workspace:*",
     "@openfoundry/odl": "workspace:*",
     "@openfoundry/observability": "workspace:*",
-    "@openfoundry/spi": "workspace:*"
+    "@openfoundry/spi": "workspace:*",
+    "@openfoundry/storage-memory": "workspace:*"
   },
   "devDependencies": {
-    "@openfoundry/storage-memory": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
     "vitest": "^3.0.0",

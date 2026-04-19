@@ -108,12 +108,9 @@ load_openfga_model() {
     exit 1
   fi
 
-  local model_payload
-  model_payload=$(cat "${model_file}")
-
   curl -sf -X POST "http://${OPENFGA_HOST}:${OPENFGA_PORT}/stores/${store_id}/authorization-models" \
     -H "Content-Type: application/json" \
-    -d "{\"type_definitions\": $(echo "${model_payload}" | grep -o '"type_definitions":\s*\[.*\]' | sed 's/"type_definitions":\s*//')  , \"schema_version\": \"1.1\"}" >/dev/null
+    -d @"${model_file}" >/dev/null
 
   log "OpenFGA model loaded. Store ID: ${store_id}"
   log "Set OPENFGA_STORE_ID=${store_id} in your .env file."

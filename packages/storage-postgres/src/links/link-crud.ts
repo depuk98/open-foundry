@@ -249,7 +249,9 @@ export async function createLink(
   tx?: PgTransaction,
 ): Promise<OntologyLink> {
   const q = resolveQueryable(pool, tx);
-  const id = genId();
+  // Honour engine-provided ID (UUIDv7) per SPI contract, fall back to genId
+  const engineId = properties?._engineLinkId;
+  const id = typeof engineId === 'string' ? engineId : genId();
   const timestamp = now();
 
   // Referential integrity
@@ -267,7 +269,9 @@ export async function createLink(
     ctx.tenantId, id, type, fromType, fromId, toType, toId, 1, timestamp, timestamp,
   ];
 
-  const propEntries = Object.entries(properties ?? {});
+  // Strip _engineLinkId from user-facing properties before persisting
+  const { _engineLinkId: _, ...userProps } = properties ?? {};
+  const propEntries = Object.entries(userProps);
   const propCols = propEntries.map(([k]) => pgIdent(snakeCase(k)));
   const propVals = propEntries.map(([, v]) => v);
 

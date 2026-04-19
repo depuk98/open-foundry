@@ -203,7 +203,19 @@ async function handlePatientSearch(
     page.items as unknown as Record<string, unknown>[],
   );
 
-  const entries = redacted.map((r: { data: Record<string, unknown> }) => {
+  // Consent filtering — exclude patients that the user lacks consent for
+  let consentFiltered = redacted;
+  if (deps.consentService) {
+    const consentResult = await deps.consentService.filterList(
+      redacted.map((r: { data: Record<string, unknown> }) => r.data),
+      (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
+      DataPurpose.DIRECT_CARE,
+      req.user.id,
+    );
+    consentFiltered = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
+  }
+
+  const entries = consentFiltered.map((r: { data: Record<string, unknown> }) => {
     const patient = mapPatientToFhir(r.data as unknown as OntologyObject);
     return {
       fullUrl: baseUrl ? `${baseUrl}/fhir/Patient/${patient.id}` : undefined,

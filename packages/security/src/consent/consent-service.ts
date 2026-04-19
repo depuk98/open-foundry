@@ -301,12 +301,17 @@ export class ConsentService implements ConsentManager {
     requestor: string,
   ): Promise<ConsentDecision | null> {
     const relation = this.config.careRelation ?? "viewer";
+    const subjectType = this.config.subjectType ?? "patient";
+
+    // Format IDs for OpenFGA (bare IDs → "type:id")
+    const fgaUser = requestor.includes(':') ? requestor : `user:${requestor}`;
+    const fgaSubject = subjectId.includes(':') ? subjectId : `${subjectType}:${subjectId}`;
 
     // Check ReBAC for legitimate care relationship
     const hasRelationship = await this.authz.check(
-      requestor,
+      fgaUser,
       relation,
-      subjectId,
+      fgaSubject,
     );
 
     if (!hasRelationship) {

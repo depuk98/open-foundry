@@ -92,10 +92,10 @@ describe('SQL output', () => {
     expect(sql).toContain('INSERT INTO consultants');
     expect(sql).toContain('INSERT INTO patients');
     expect(sql).toContain('INSERT INTO discharge_records');
-    expect(sql).toContain('INSERT INTO links_bed_in_ward');
-    expect(sql).toContain('INSERT INTO links_admitted_to');
-    expect(sql).toContain('INSERT INTO links_occupies_bed');
-    expect(sql).toContain('INSERT INTO links_under_care_of');
+    expect(sql).toContain('INSERT INTO bed_in_ward');
+    expect(sql).toContain('INSERT INTO admitted_to');
+    expect(sql).toContain('INSERT INTO occupies_bed');
+    expect(sql).toContain('INSERT INTO under_care_of');
   });
 
   it('SQL file wraps in transaction', () => {

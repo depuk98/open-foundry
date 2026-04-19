@@ -422,6 +422,9 @@ function hasBalancedParens(expr: string): boolean {
   return depth === 0;
 }
 
+/** Built-in compute functions available at runtime. */
+const BUILTIN_COMPUTE_FNS = new Set(['countLinks']);
+
 /**
  * Rule 7: @computed fields reference valid functions and args.
  */
@@ -438,6 +441,14 @@ function validateComputedFields(
         severity: 'error',
         code: 'COMPUTED_MISSING_FN',
         message: `Field "${typeName}.${field.name}" has @computed with empty "fn" argument.`,
+        typeName,
+        fieldName: field.name,
+      });
+    } else if (!BUILTIN_COMPUTE_FNS.has(c.fn)) {
+      errors.push({
+        severity: 'error',
+        code: 'COMPUTED_UNKNOWN_FN',
+        message: `Field "${typeName}.${field.name}" references unknown compute function "${c.fn}". Available: ${[...BUILTIN_COMPUTE_FNS].join(', ')}`,
         typeName,
         fieldName: field.name,
       });

@@ -1,5 +1,5 @@
 import type { ObjectManager, LinkManager } from '@openfoundry/engine';
-import type { ActionExecutor } from '@openfoundry/actions';
+import type { ActionExecutor, ActionManifest } from '@openfoundry/actions';
 import type {
   AuthorizationService,
   OidcAuthenticator,
@@ -8,6 +8,14 @@ import type {
 } from '@openfoundry/security';
 import type { ParsedSchema } from '@openfoundry/odl';
 import type { RequestContext, StorageProvider, DataPurpose } from '@openfoundry/spi';
+
+/**
+ * Registry that resolves action names to parsed YAML manifests.
+ * Loaded at startup from domain-pack action files.
+ */
+export interface ManifestRegistry {
+  get(actionName: string): ActionManifest | undefined;
+}
 
 /**
  * Dependencies injected into the GraphQL API layer.
@@ -22,6 +30,7 @@ export interface ApiDependencies {
   consentService?: ConsentService;
   auditWriter?: AuditWriter;
   storage: StorageProvider;
+  manifestRegistry?: ManifestRegistry;
 }
 
 /**

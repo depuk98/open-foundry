@@ -24,6 +24,13 @@ export interface ConsentManagerConfig {
    * Default: "viewer"
    */
   careRelation?: string;
+
+  /**
+   * The OpenFGA resource type for consent subjects.
+   * Used to format IDs for AuthorizationService.check() calls.
+   * Default: "patient"
+   */
+  subjectType?: string;
 }
 
 /**
