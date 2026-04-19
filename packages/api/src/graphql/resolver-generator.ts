@@ -355,7 +355,7 @@ function generateQueryResolvers(
         return data;
       });
 
-      // f. Consent filtering
+      // f. Consent filtering (applied after pagination — see FHIR router for details)
       let totalCount = page.totalCount;
       if (deps.consentService) {
         const getPrimaryId = (item: Record<string, unknown>) => {

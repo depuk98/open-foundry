@@ -203,7 +203,8 @@ async function handlePatientSearch(
     page.items as unknown as Record<string, unknown>[],
   );
 
-  // Consent filtering — exclude patients that the user lacks consent for
+  // Consent filtering — exclude patients that the user lacks consent for.
+  // NOTE: Applied after pagination — see Encounter handler for details.
   let consentFiltered = redacted;
   if (deps.consentService) {
     const consentResult = await deps.consentService.filterList(
@@ -268,7 +269,11 @@ async function handleEncounterSearch(
     return operationOutcome(403, 'forbidden', `Access denied to Patient ${patientId}`);
   }
 
-  // Query encounters linked to this patient
+  // Query encounters linked to this patient.
+  // TODO: NHS acute schema has no 'Encounter' ODL type — admissions are modeled
+  // as AdmittedTo links (Patient→Ward). This query will return empty until either
+  // an Encounter object type is added to the domain pack, or this handler is
+  // remapped to query AdmittedTo links and synthesize Encounter resources.
   const filter: FieldPredicate = { field: 'patientId', operator: 'eq', value: patientId };
 
   const page = await deps.objectManager.query(
@@ -286,7 +291,12 @@ async function handleEncounterSearch(
     page.items as unknown as Record<string, unknown>[],
   );
 
-  // Consent filtering
+  // Consent filtering.
+  // NOTE: Consent is applied after storage pagination. If the storage layer
+  // returns a full page and consent removes items, the response may contain
+  // fewer entries than the requested limit. This is a known architectural
+  // limitation — addressing it requires push-down filtering into the storage
+  // layer (deferred post-MVP).
   let filteredItems = redacted;
   if (deps.consentService) {
     const consentResult = await deps.consentService.filterList(

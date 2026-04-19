@@ -400,8 +400,15 @@ export class MemoryStorageProvider implements StorageProvider {
     return updated;
   }
 
-  /** @internal */ _doHardDeleteObject(_ctx: RequestContext, type: string, id: string): void {
+  /** @internal */ _doHardDeleteObject(ctx: RequestContext, type: string, id: string): void {
     const key = `${type}:${id}`;
+    const existing = this._objects.get(key);
+    // Tenant isolation: deny access if object belongs to a different tenant
+    if (existing && existing._tenantId !== ctx.tenantId) {
+      throw new Error(`Object ${type}:${id} not found`);
+    }
+    // Idempotent: no-op if object doesn't exist
+    if (!existing) return;
     this._objects.delete(key);
     this._versionHistory.delete(key);
   }

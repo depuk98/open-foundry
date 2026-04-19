@@ -7,6 +7,7 @@
  */
 
 import type { SideEffect, RollbackPolicy } from '../parser/types.js';
+import type { SideEffectHandler, SideEffectResult } from '../executor/types.js';
 import type {
   SideEffectExecutorConfig,
   SideEffectExecutionResult,
@@ -35,11 +36,29 @@ const RETRY_INDEFINITELY_MAX = 100;
 // SideEffectExecutor
 // ---------------------------------------------------------------------------
 
-export class SideEffectExecutor {
+export class SideEffectExecutor implements SideEffectHandler {
   private readonly config: SideEffectExecutorConfig;
 
   constructor(config: SideEffectExecutorConfig) {
     this.config = config;
+  }
+
+  /**
+   * Execute a single side-effect (implements SideEffectHandler).
+   *
+   * Delegates to the internal retry/backoff logic used by executeAll().
+   */
+  async execute(
+    name: string,
+    type: string,
+    config: Record<string, unknown>,
+    context: Record<string, unknown>,
+    retries?: number,
+  ): Promise<SideEffectResult> {
+    const sideEffect: SideEffect = { name, type, config, retries };
+    const policy = this.config.defaultPolicy ?? 'LOG_AND_CONTINUE';
+    const result = await this.executeSingle(sideEffect, context, policy);
+    return { success: result.success, error: result.error };
   }
 
   /**
