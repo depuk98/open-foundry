@@ -298,7 +298,7 @@ type Diagnosis @objectType {
 | `@computed(fn, args?, cache?, ttl?)` | field | Field value derived from a function or aggregation. See Section 4.4. |
 | `@deprecated(reason)` | any | Marks schema element as deprecated |
 | `@param` | field (on @actionType or @function) | Marks a field as an input parameter |
-| `@constraint(expr)` | field | Validation expression (e.g., `@constraint(expr: "value >= 0")`) |
+| `@constraint(expr)` | field, type | Validation expression. Field-level: `value` refers to the field (e.g., `"value >= 0"`). Type-level: `this` refers to the object (e.g., `"this.endDate > this.startDate"`). See Section 2.3.2. |
 | `@default(value)` | field | Default value for optional fields |
 | `@sensitive` | field | Marks field as containing sensitive data (affects logging, access) |
 | `@terminology(system)` | field | Binds a CodeableConcept field to a terminology system |
@@ -325,6 +325,53 @@ Behaviour:
 3. `analyzer` (default `"standard"`) selects the text analysis pipeline (tokenisation, stemming, stop words). Common values: `"standard"`, `"english"`, `"keyword"` (no analysis).
 4. `@searchable` is only effective when the storage provider reports `supportsFullTextSearch: true`. When `false`, the directive is accepted by the compiler but has no runtime effect.
 5. A field MAY have both `@indexed` and `@searchable` — they create independent indices for different query paths.
+
+#### 2.3.2 `@constraint` Directive Semantics
+
+The `@constraint` directive validates values using CEL expressions. It can be applied at two levels:
+
+**Field-level constraints** validate a single field's value. The implicit variable `value` refers to the proposed field value:
+
+```graphql
+type Ward @objectType {
+  id: ID! @primary
+  capacity: Int! @constraint(expr: "value > 0")
+  name: String! @constraint(expr: "value.size() >= 2 && value.size() <= 100")
+}
+```
+
+**Type-level constraints** validate cross-field invariants. The implicit variable `this` refers to the full proposed object state:
+
+```graphql
+type TheatreSlot @objectType @constraint(expr: "this.endTime > this.startTime") {
+  id: ID! @primary
+  startTime: DateTime!
+  endTime: DateTime!
+  procedure: String
+}
+```
+
+Multiple constraints can be stacked. Each is evaluated independently; all must pass.
+
+```graphql
+type WaitingListEntry @objectType
+  @constraint(expr: "this.targetDate > this.referralDate")
+  @constraint(expr: "this.priority >= 1 && this.priority <= 4")
+{
+  id: ID! @primary
+  referralDate: DateTime!
+  targetDate: DateTime!
+  priority: Int!
+}
+```
+
+Constraint evaluation rules:
+
+1. Field-level constraints are evaluated first, then type-level constraints. If a field-level constraint fails, type-level constraints are skipped (the object state may be invalid).
+2. `value` (field-level) and `this` (type-level) are the only implicit variables. Constraints cannot reference other objects or links — use data quality rules (Section 4.7) for cross-object validation.
+3. On `updateObject`, field-level constraints evaluate only for fields included in the update. Type-level constraints always evaluate against the full merged state (existing values + proposed changes).
+4. Constraint expressions use CEL and are type-checked at schema compilation time against the ODL type system (Section 5.2.3).
+5. Constraint failures produce `CONSTRAINT_VIOLATION` errors with the failing expression and the field(s) involved.
 
 ### 2.4 Namespaces
 
@@ -407,6 +454,7 @@ Migration execution contract:
 2. Transform steps are idempotent and resumable.
 3. Verification checks are REQUIRED; failed verification aborts activation.
 4. Every migration run emits an immutable run record with status, duration, and failed-object sample.
+5. The ODL toolchain MUST ship a **JSON Schema** (`migration-manifest.schema.json`) that validates migration YAML structure. The `odl validate` command MUST validate migration manifests against this schema before execution. CI pipelines SHOULD include schema validation as a pre-merge gate.
 
 ### 2.6 Schema Workspaces
 
@@ -683,6 +731,64 @@ Bulk mutation requirements:
 3. Per-item failures are reported without dropping successful items unless the caller requests `allOrNothing`.
 4. Bulk execution MUST emit structured progress events and final result summaries.
 5. Bulk operations remain tenant-scoped and MUST never cross tenant boundaries inside a single request.
+
+### 3.9 Backup and Restore Contract
+
+Storage providers used in production MUST expose backup and restore capabilities to meet the RPO/RTO targets in Section 13.4.
+
+```typescript
+interface BackupCapability {
+  // Initiate a backup. Returns a handle for tracking.
+  createBackup(options: BackupOptions): Promise<BackupHandle>;
+
+  // List available backups.
+  listBackups(filter?: BackupFilter): Promise<BackupHandle[]>;
+
+  // Restore from a backup. The provider enters read-only mode during restore.
+  restoreFromBackup(backupId: string, options?: RestoreOptions): Promise<RestoreResult>;
+
+  // Point-in-time restore (when replicationSupport includes POINT_IN_TIME_RECOVERY).
+  restoreToPointInTime(timestamp: DateTime, options?: RestoreOptions): Promise<RestoreResult>;
+}
+
+interface BackupOptions {
+  label?: string;              // Human-readable label
+  includeAuditLog?: boolean;   // Default: true. Audit log is in a separate schema.
+  tenantScope?: string;        // Tenant-scoped backup (when supported). Null = all tenants.
+}
+
+interface BackupHandle {
+  id: string;
+  label?: string;
+  createdAt: DateTime;
+  sizeBytes: number;
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
+  tenantScope?: string;
+  includesAuditLog: boolean;
+}
+
+interface RestoreOptions {
+  dryRun?: boolean;            // Validate backup integrity without restoring
+  targetTenant?: string;       // Restore into a specific tenant (cross-tenant restore)
+}
+
+interface RestoreResult {
+  backupId: string;
+  restoredAt: DateTime;
+  objectsRestored: number;
+  linksRestored: number;
+  auditRecordsRestored: number;
+  warnings: string[];
+}
+```
+
+Backup/restore requirements:
+
+1. Providers MUST support `createBackup` and `restoreFromBackup` at minimum. PITR restore is capability-gated by `POINT_IN_TIME_RECOVERY`.
+2. `restoreFromBackup` MUST place the provider in read-only mode during the restore operation. The Ontology Engine returns `SERVICE_DEGRADED` for write requests during this window.
+3. `dryRun: true` validates the backup's integrity (checksums, schema compatibility) without modifying state.
+4. Backup handles are retained until explicitly deleted. Operators configure retention policies externally (e.g., S3 lifecycle rules).
+5. The `BackupCapability` interface is optional on `StorageProvider`. Providers that do not implement it MUST declare `replicationSupport: 'NONE'` and the deployment tooling will warn when used in production.
 
 ---
 
@@ -1007,6 +1113,16 @@ rollback:
   onSideEffectFailure: LOG_AND_CONTINUE
   # Options: LOG_AND_CONTINUE | RETRY_INDEFINITELY | ROLLBACK_ALL
 ```
+
+#### 5.1.1 Action Versioning
+
+Each action manifest declares a `version` (integer). Versioning rules:
+
+1. **Single active version:** At any point in time, exactly one version of an ActionType is active per tenant. The Action Framework resolves the active version when an action is submitted.
+2. **Deployment:** When a new manifest version is deployed (via `odl apply` or Domain Pack update), it replaces the previous version. The previous manifest is archived but not deleted — it is retained for audit trail interpretation and undo operations.
+3. **In-flight actions:** Actions that are already executing when a new version is deployed continue with the version they started. Version resolution is captured in the action's audit record.
+4. **API stability:** The ActionType's GraphQL/REST signature is derived from the `@actionType` ODL declaration, not the YAML manifest. Manifest version changes that only modify preconditions, effects, or side-effects do not change the API surface. Changes that require new `@param` fields require an ODL schema migration (Section 2.5).
+5. **Version history:** The Action Framework MUST retain all deployed manifest versions. The `ToolDescriptor` (Section 5.7) always reflects the currently active version.
 
 ### 5.2 Expression Language
 
@@ -1753,9 +1869,14 @@ The consent layer is **integrated into the Action and Query execution pipelines*
 
 ```typescript
 interface ConsentManager {
+  // Single-subject operations
   checkConsent(subjectId: string, purpose: DataPurpose, requestor: string): Promise<ConsentDecision>;
   recordConsent(subjectId: string, purpose: DataPurpose, decision: 'GRANT' | 'DENY', evidence?: string): Promise<void>;
+  revokeConsent(subjectId: string, purpose: DataPurpose, reason: string): Promise<RevocationResult>;
   getConsentRecord(subjectId: string): Promise<ConsentRecord[]>;
+
+  // Batch operations (for list query pre-filtering)
+  checkConsentBatch(subjectIds: string[], purpose: DataPurpose, requestor: string): Promise<Map<string, ConsentDecision>>;
 }
 
 interface ConsentDecision {
@@ -1789,6 +1910,29 @@ For write operations, the consent check is a dedicated step in the execution pip
 #### 7.3.3 Direct Care Exemption
 
 For NHS deployments, the Healthcare Domain Pack configures the consent manager with a **direct care exemption**: when the stated purpose is `DIRECT_CARE` and the actor has a legitimate relationship with the patient (verified via ReBAC), consent is presumed under Section 251 of the NHS Act 2006. This exemption MUST be configurable and MAY be overridden by patient-level opt-outs registered via the National Data Opt-Out service.
+
+#### 7.3.4 Consent Revocation
+
+When consent is revoked via `revokeConsent`, the system MUST ensure the revocation takes effect promptly and consistently:
+
+```typescript
+interface RevocationResult {
+  subjectId: string;
+  purpose: DataPurpose;
+  revokedAt: DateTime;
+  activeSessions: number;    // Count of in-flight requests that may still use prior consent
+  subscriptionsTerminated: number;  // Active subscriptions closed due to revocation
+}
+```
+
+Revocation semantics:
+
+1. **Cache invalidation:** `revokeConsent` MUST immediately invalidate any cached consent decisions for the subject and purpose. The consent manager's internal cache (if any) and the Security Layer's request-scoped cache (Section 7.1.5) MUST both be purged.
+2. **In-flight requests:** Requests that have already passed the consent check but are still assembling a response are NOT retroactively aborted. Revocation takes effect on the next request boundary.
+3. **Active subscriptions:** Any WebSocket subscriptions delivering data about the revoked subject for the revoked purpose MUST be terminated with a `CONSENT_REVOKED` close reason. The subscriber receives a final message indicating the subscription was closed due to consent change.
+4. **Audit:** Revocation produces an audit record with `operation.type: 'consent_revoked'`, including the previous consent state, the revocation reason, and a count of affected subscriptions.
+5. **Event emission:** A `openfoundry.consent.revoked` event is published, enabling downstream consumers to react (e.g., purging cached query results).
+6. **Idempotency:** Revoking consent that was not previously granted is a no-op and returns a `RevocationResult` with `activeSessions: 0`.
 
 ### 7.4 Authentication
 
@@ -2088,6 +2232,7 @@ Webhook requirements:
 2. Payloads are signed; receivers verify signature and timestamp.
 3. Failures use retry + dead-letter routing.
 4. Registrations are tenant-scoped and permission-controlled.
+5. **Signing key rotation:** The platform MUST support zero-downtime signing key rotation. During rotation, both the old and new keys are valid for a configurable overlap window (default: 24 hours). The webhook payload includes a `X-OpenFoundry-Key-Id` header identifying which key was used to sign, allowing receivers to select the correct verification key. After the overlap window expires, the old key is deactivated and deliveries use only the new key. Key rotation events are audited.
 
 ### 8.7 API Governance and Quotas
 
@@ -2723,7 +2868,7 @@ Degraded mode requirements:
 | `@computed` | field | `@computed(fn: String!, args: JSON, cache: CacheStrategy, ttl: Duration)` |
 | `@deprecated` | any | `@deprecated(reason: String!)` |
 | `@param` | field | `@param` |
-| `@constraint` | field | `@constraint(expr: String!)` |
+| `@constraint` | field, type | `@constraint(expr: String!)` |
 | `@default` | field | `@default(value: Any!)` |
 | `@sensitive` | field | `@sensitive` |
 | `@terminology` | field | `@terminology(system: String!)` |

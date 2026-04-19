@@ -288,7 +288,7 @@ enum DischargeDestination {
 }
 ```
 
-### 4.2 LinkTypes (4)
+### 4.2 LinkTypes (6)
 
 ```graphql
 type AdmittedTo @linkType(from: "Patient", to: "Ward", cardinality: MANY_TO_ONE) {
@@ -318,9 +318,15 @@ enum CareRole {
 type BedInWard @linkType(from: "Bed", to: "Ward", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
-```
 
-Note: `DischargedPatient` and `DischargedFromWard` are implicit reference links on `DischargeRecord` — they use `@link` on fields but do not need separate `@linkType` declarations since `DischargeRecord` stores the foreign keys directly.
+type DischargedPatient @linkType(from: "DischargeRecord", to: "Patient", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+}
+
+type DischargedFromWard @linkType(from: "DischargeRecord", to: "Ward", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+}
+```
 
 ### 4.3 ActionTypes (3)
 
@@ -701,7 +707,7 @@ dependencies:
 
 provides:
   objectTypes: 5
-  linkTypes: 4
+  linkTypes: 6
   actionTypes: 3
   functions: 0
   connectors: 1
