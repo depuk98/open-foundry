@@ -20,6 +20,7 @@ import type {
   SourceTableSchema,
   SourceColumnSchema,
 } from "./connector.js";
+import type { ConnectorPlugin } from "./connector-registry.js";
 
 const { Pool } = pg;
 type PgPool = InstanceType<typeof Pool>;
@@ -311,3 +312,13 @@ export class JdbcConnector implements Connector {
     return parts.map(p => `"${p}"`).join('.');
   }
 }
+
+/** JDBC connector plugin for use with ConnectorRegistry. */
+export const jdbcPlugin: ConnectorPlugin = {
+  metadata: {
+    name: "jdbc",
+    version: "0.1.0",
+    description: "JDBC connector for PostgreSQL source systems",
+  },
+  factory: () => new JdbcConnector(),
+};

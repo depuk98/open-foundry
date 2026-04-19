@@ -13,6 +13,10 @@ import type {
   QueryOptions,
   ObjectPage,
   PlatformError,
+  AggregateQuery,
+  AggregateResult,
+  SearchQuery,
+  SearchResult,
 } from '@openfoundry/spi';
 import type { ParsedSchema } from '@openfoundry/odl';
 import { getTracer, withSpan, SpanAttributes } from '@openfoundry/observability';
@@ -285,6 +289,42 @@ export class ObjectManager {
       [SpanAttributes.OPERATION]: 'query',
     }, async () => {
       return this.storage.queryObjects(ctx, type, filter, options);
+    });
+  }
+
+  /**
+   * Aggregate objects by type with grouping and aggregate functions.
+   * Pass-through to SPI — no validation needed for reads.
+   */
+  async aggregate(
+    type: string,
+    query: AggregateQuery,
+    ctx: RequestContext,
+  ): Promise<AggregateResult> {
+    return withSpan(tracer, 'aggregateObjects', {
+      [SpanAttributes.OBJECT_TYPE]: type,
+      [SpanAttributes.TENANT_ID]: ctx.tenantId,
+      [SpanAttributes.OPERATION]: 'aggregate',
+    }, async () => {
+      return this.storage.aggregateObjects(ctx, type, query);
+    });
+  }
+
+  /**
+   * Search objects by type with full-text query.
+   * Pass-through to SPI — no validation needed for reads.
+   */
+  async search(
+    type: string,
+    query: SearchQuery,
+    ctx: RequestContext,
+  ): Promise<SearchResult> {
+    return withSpan(tracer, 'searchObjects', {
+      [SpanAttributes.OBJECT_TYPE]: type,
+      [SpanAttributes.TENANT_ID]: ctx.tenantId,
+      [SpanAttributes.OPERATION]: 'search',
+    }, async () => {
+      return this.storage.searchObjects(ctx, type, query);
     });
   }
 

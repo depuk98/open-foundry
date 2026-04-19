@@ -1,4 +1,4 @@
-import type { ObjectManager, LinkManager } from '@openfoundry/engine';
+import type { ObjectManager, LinkManager, ObjectSetManager } from '@openfoundry/engine';
 import type { ActionExecutor, ActionManifest } from '@openfoundry/actions';
 import type {
   AuthorizationService,
@@ -31,6 +31,7 @@ export interface ApiDependencies {
   auditWriter?: AuditWriter;
   storage: StorageProvider;
   manifestRegistry?: ManifestRegistry;
+  objectSetManager?: ObjectSetManager;
 }
 
 /**

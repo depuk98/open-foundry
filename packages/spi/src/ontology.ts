@@ -236,3 +236,58 @@ export interface StorageCapabilities {
   maxTraversalDepth: number;
   replicationSupport: ReplicationCapability;
 }
+
+// ---------------------------------------------------------------------------
+// Aggregation
+// ---------------------------------------------------------------------------
+
+export type AggregateFunction = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+export interface AggregateField {
+  field: string;          // Property name ('*' for count)
+  fn: AggregateFunction;
+  alias?: string;         // Optional result key alias
+}
+
+export interface AggregateQuery {
+  fields: AggregateField[];
+  groupBy?: string[];
+  filter?: FilterExpression;
+  orderBy?: { field: string; direction: 'asc' | 'desc' }[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface AggregateGroup {
+  keys: Record<string, unknown>;
+  values: Record<string, number | null>;
+}
+
+export interface AggregateResult {
+  groups: AggregateGroup[];
+  totalGroups: number;
+}
+
+// ---------------------------------------------------------------------------
+// Full-text search
+// ---------------------------------------------------------------------------
+
+export interface SearchQuery {
+  query: string;
+  fields?: string[];
+  filter?: FilterExpression;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SearchHit {
+  object: OntologyObject;
+  score: number;
+  highlights?: Record<string, string[]>;
+}
+
+export interface SearchResult {
+  hits: SearchHit[];
+  totalCount: number;
+  hasNextPage: boolean;
+}

@@ -531,6 +531,80 @@ describe('REST API', () => {
     });
   });
 
+  describe('POST /api/v1/patients/aggregate (aggregate)', () => {
+    it('generates aggregate route for each object type', () => {
+      const deps = createMockDeps(parsed);
+      const routes = generateRestRoutes(parsed, deps);
+
+      expect(findRoute(routes, 'POST', '/api/v1/patients/aggregate')).toBeDefined();
+      expect(findRoute(routes, 'POST', '/api/v1/wards/aggregate')).toBeDefined();
+      expect(findRoute(routes, 'POST', '/api/v1/beds/aggregate')).toBeDefined();
+      expect(findRoute(routes, 'POST', '/api/v1/consultants/aggregate')).toBeDefined();
+    });
+
+    it('calls objectManager.aggregate and returns result', async () => {
+      const deps = createMockDeps(parsed);
+      const aggregateMock = vi.fn().mockResolvedValue({
+        groups: [{ keys: {}, values: { count: 5 } }],
+        totalGroups: 1,
+      });
+      (deps.objectManager as unknown as Record<string, unknown>).aggregate = aggregateMock;
+
+      const routes = generateRestRoutes(parsed, deps);
+      const route = findRoute(routes, 'POST', '/api/v1/patients/aggregate')!;
+
+      const req = createMockRequest({
+        method: 'POST',
+        body: {
+          fields: [{ field: '*', fn: 'count', alias: 'count' }],
+          groupBy: ['status'],
+        },
+      });
+      const ctx = createResolverContext(deps);
+      const res = await route.handler(req, ctx);
+      const body = res.body as AnyBody;
+
+      expect(res.status).toBe(200);
+      expect(body.data.groups).toHaveLength(1);
+      expect(body.data.totalGroups).toBe(1);
+      expect(aggregateMock).toHaveBeenCalledTimes(1);
+
+      const callArgs = aggregateMock.mock.calls[0]!;
+      expect(callArgs[0]).toBe('Patient');
+      expect(callArgs[1].fields).toEqual([{ field: '*', fn: 'count', alias: 'count' }]);
+      expect(callArgs[1].groupBy).toEqual(['status']);
+    });
+
+    it('passes filter and pagination to aggregate query', async () => {
+      const deps = createMockDeps(parsed);
+      const aggregateMock = vi.fn().mockResolvedValue({
+        groups: [],
+        totalGroups: 0,
+      });
+      (deps.objectManager as unknown as Record<string, unknown>).aggregate = aggregateMock;
+
+      const routes = generateRestRoutes(parsed, deps);
+      const route = findRoute(routes, 'POST', '/api/v1/patients/aggregate')!;
+
+      const req = createMockRequest({
+        method: 'POST',
+        body: {
+          fields: [{ field: '*', fn: 'count', alias: 'count' }],
+          filter: { field: 'status', operator: 'eq', value: 'ACTIVE' },
+          limit: 10,
+          offset: 5,
+        },
+      });
+      const ctx = createResolverContext(deps);
+      await route.handler(req, ctx);
+
+      const callArgs = aggregateMock.mock.calls[0]!;
+      expect(callArgs[1].filter).toEqual({ field: 'status', operator: 'eq', value: 'ACTIVE' });
+      expect(callArgs[1].limit).toBe(10);
+      expect(callArgs[1].offset).toBe(5);
+    });
+  });
+
   describe('error responses', () => {
     it('maps error categories to correct HTTP status codes', () => {
       expect(mapErrorToHttpStatus('validation')).toBe(400);

@@ -16,7 +16,7 @@
  */
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
-import type { OntologyObject, FilterExpression, DataPurpose } from '@openfoundry/spi';
+import type { OntologyObject, FilterExpression, DataPurpose, AggregateQuery, AggregateField, AggregateFunction, SearchQuery } from '@openfoundry/spi';
 import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import { PubSub } from 'graphql-subscriptions';
@@ -185,6 +185,8 @@ export function generateResolvers(
   // Generate query resolvers for each ObjectType
   for (const obj of schema.objectTypes) {
     generateQueryResolvers(obj, resolvers, deps);
+    generateAggregateResolver(obj, resolvers, deps);
+    generateSearchResolver(obj, resolvers, deps);
     generateSubscriptionResolvers(obj, resolvers, pubsub);
   }
 
@@ -200,6 +202,9 @@ export function generateResolvers(
 
   // availableTools query (Section 5.7)
   resolvers['Query']!['availableTools'] = generateAvailableToolsResolver(schema);
+
+  // Object Set resolvers
+  generateObjectSetResolvers(resolvers, deps);
 
   return { resolvers, pubsub };
 }
@@ -385,6 +390,115 @@ function generateQueryResolvers(
   };
 }
 
+// ─── Aggregate resolvers ───
+
+function generateAggregateResolver(
+  obj: ObjectType,
+  resolvers: ResolverMap,
+  deps: ApiDependencies,
+): void {
+  const typeName = obj.name;
+  const lower = lowerFirst(typeName);
+
+  // fooAggregate(filter, groupBy, fields): AggregateResult!
+  resolvers['Query']![`${lower}Aggregate`] = async (
+    _parent: unknown,
+    args: {
+      filter?: Record<string, unknown>;
+      groupBy?: string[];
+      fields: Array<{ field: string; fn: string; alias?: string }>;
+    },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      const { requestContext } = ctx;
+
+      // Convert GraphQL filter to SPI filter
+      const filter = convertFilter(args.filter);
+
+      // Convert GraphQL aggregate fields to SPI AggregateField[]
+      const fields: AggregateField[] = args.fields.map((f) => ({
+        field: f.field,
+        fn: f.fn.toLowerCase() as AggregateFunction,
+        alias: f.alias,
+      }));
+
+      const query: AggregateQuery = {
+        fields,
+        groupBy: args.groupBy,
+        filter: filter ?? undefined,
+      };
+
+      return deps.objectManager.aggregate(typeName, query, requestContext);
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+}
+
+// ─── Search resolvers ───
+
+function generateSearchResolver(
+  obj: ObjectType,
+  resolvers: ResolverMap,
+  deps: ApiDependencies,
+): void {
+  const typeName = obj.name;
+
+  // searchFoos(query, fields, filter, first, after): SearchResult_Foo!
+  resolvers['Query']![`search${typeName}s`] = async (
+    _parent: unknown,
+    args: {
+      query: string;
+      fields?: string[];
+      filter?: Record<string, unknown>;
+      first?: number;
+      after?: string;
+    },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      const { requestContext } = ctx;
+
+      // Convert GraphQL filter to SPI filter
+      const filter = convertFilter(args.filter);
+
+      // Resolve pagination: 'after' is an opaque cursor encoding an offset
+      let offset = 0;
+      if (args.after) {
+        const decoded = parseInt(Buffer.from(args.after, 'base64').toString('utf8'), 10);
+        if (!isNaN(decoded)) {
+          offset = decoded;
+        }
+      }
+
+      const searchQuery: SearchQuery = {
+        query: args.query,
+        fields: args.fields,
+        filter: filter ?? undefined,
+        limit: args.first ?? 20,
+        offset,
+      };
+
+      const result = await deps.objectManager.search(typeName, searchQuery, requestContext);
+
+      // Map hits to GraphQL shape
+      const hits = result.hits.map((hit) => ({
+        node: objectToGraphQL(hit.object, obj),
+        score: hit.score,
+      }));
+
+      return {
+        hits,
+        totalCount: result.totalCount,
+        hasNextPage: result.hasNextPage,
+      };
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+}
+
 // ─── Mutation resolvers ───
 
 function generateMutationResolver(
@@ -549,6 +663,159 @@ function generateAvailableToolsResolver(
     }
 
     return filtered;
+  };
+}
+
+// ─── Object Set resolvers ───
+
+function generateObjectSetResolvers(
+  resolvers: ResolverMap,
+  deps: ApiDependencies,
+): void {
+  // Query: objectSet(id: ID!): ObjectSet
+  resolvers['Query']!['objectSet'] = async (
+    _parent: unknown,
+    args: { id: string },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      if (!deps.objectSetManager) return null;
+      const def = await deps.objectSetManager.get(args.id, ctx.requestContext);
+      return def ? objectSetToGraphQL(def) : null;
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+
+  // Query: objectSets(objectType: String): [ObjectSet!]!
+  resolvers['Query']!['objectSets'] = async (
+    _parent: unknown,
+    args: { objectType?: string },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      if (!deps.objectSetManager) return [];
+      const defs = await deps.objectSetManager.list(args.objectType, ctx.requestContext);
+      return defs.map(objectSetToGraphQL);
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+
+  // Mutation: createObjectSet(input: CreateObjectSetInput!): ObjectSet!
+  resolvers['Mutation']!['createObjectSet'] = async (
+    _parent: unknown,
+    args: { input: Record<string, unknown> },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      if (!deps.objectSetManager) {
+        throw createOpenFoundryError({
+          code: 'NOT_CONFIGURED',
+          category: 'system',
+          message: 'Object set manager is not configured',
+          retryable: false,
+          traceId: ctx.requestContext.traceId,
+        });
+      }
+      const def = await deps.objectSetManager.create(
+        {
+          name: args.input['name'] as string,
+          description: args.input['description'] as string | undefined,
+          objectType: args.input['objectType'] as string,
+          filter: args.input['filter'] as undefined,
+          orderBy: args.input['orderBy'] as undefined,
+          limit: args.input['limit'] as number | undefined,
+          isPublic: (args.input['isPublic'] as boolean) ?? false,
+          createdBy: ctx.user.id,
+          tenantId: ctx.requestContext.tenantId,
+        },
+        ctx.requestContext,
+      );
+      return objectSetToGraphQL(def);
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+
+  // Mutation: updateObjectSet(id: ID!, input: UpdateObjectSetInput!): ObjectSet!
+  resolvers['Mutation']!['updateObjectSet'] = async (
+    _parent: unknown,
+    args: { id: string; input: Record<string, unknown> },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      if (!deps.objectSetManager) {
+        throw createOpenFoundryError({
+          code: 'NOT_CONFIGURED',
+          category: 'system',
+          message: 'Object set manager is not configured',
+          retryable: false,
+          traceId: ctx.requestContext.traceId,
+        });
+      }
+      const updates: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(args.input)) {
+        if (value !== undefined) {
+          updates[key] = value;
+        }
+      }
+      const def = await deps.objectSetManager.update(args.id, updates, ctx.requestContext);
+      return objectSetToGraphQL(def);
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+
+  // Mutation: deleteObjectSet(id: ID!): Boolean!
+  resolvers['Mutation']!['deleteObjectSet'] = async (
+    _parent: unknown,
+    args: { id: string },
+    ctx: ResolverContext,
+  ) => {
+    try {
+      if (!deps.objectSetManager) {
+        throw createOpenFoundryError({
+          code: 'NOT_CONFIGURED',
+          category: 'system',
+          message: 'Object set manager is not configured',
+          retryable: false,
+          traceId: ctx.requestContext.traceId,
+        });
+      }
+      await deps.objectSetManager.delete(args.id, ctx.requestContext);
+      return true;
+    } catch (err) {
+      throw wrapError(err, ctx.requestContext.traceId);
+    }
+  };
+}
+
+function objectSetToGraphQL(def: {
+  id: string;
+  name: string;
+  description?: string;
+  objectType: string;
+  filter?: unknown;
+  orderBy?: unknown;
+  limit?: number;
+  isPublic: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}): Record<string, unknown> {
+  return {
+    id: def.id,
+    name: def.name,
+    description: def.description ?? null,
+    objectType: def.objectType,
+    filter: def.filter ?? null,
+    orderBy: def.orderBy ?? null,
+    limit: def.limit ?? null,
+    isPublic: def.isPublic,
+    createdBy: def.createdBy,
+    createdAt: def.createdAt,
+    updatedAt: def.updatedAt,
   };
 }
 

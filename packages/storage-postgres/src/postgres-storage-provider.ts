@@ -31,6 +31,10 @@ import type {
   IndexType,
   DateTime,
   LinkTypeDefinition,
+  AggregateQuery,
+  AggregateResult,
+  SearchQuery,
+  SearchResult,
 } from '@openfoundry/spi';
 
 // ─── Module imports ───
@@ -43,6 +47,8 @@ import {
   softDeleteObject as pgSoftDeleteObject,
   hardDeleteObject as pgHardDeleteObject,
   queryObjects as pgQueryObjects,
+  aggregateObjects as pgAggregateObjects,
+  searchObjects as pgSearchObjects,
 } from './objects/index.js';
 import {
   createLink as pgCreateLink,
@@ -233,6 +239,14 @@ export class PostgresStorageProvider implements StorageProvider {
 
   async queryObjects(ctx: RequestContext, type: string, filter: FilterExpression, options?: QueryOptions): Promise<ObjectPage> {
     return pgQueryObjects(this._pool, ctx, type, filter, options, this._dataSchema);
+  }
+
+  async aggregateObjects(ctx: RequestContext, type: string, query: AggregateQuery): Promise<AggregateResult> {
+    return pgAggregateObjects(this._pool, ctx, type, query, this._dataSchema);
+  }
+
+  async searchObjects(ctx: RequestContext, type: string, query: SearchQuery): Promise<SearchResult> {
+    return pgSearchObjects(this._pool, ctx, type, query, this._dataSchema);
   }
 
   async bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult> {
@@ -460,7 +474,7 @@ export class PostgresStorageProvider implements StorageProvider {
     return {
       supportsTransactions: true,
       supportsTemporalQueries: true,
-      supportsFullTextSearch: false,
+      supportsFullTextSearch: true,
       supportsGeoQueries: false,
       supportsGraphTraversal: true,
       supportsBulkMutations: true,

@@ -16,7 +16,7 @@
  */
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
-import type { OntologyObject, FilterExpression, DataPurpose } from '@openfoundry/spi';
+import type { OntologyObject, FilterExpression, DataPurpose, AggregateQuery, AggregateField, AggregateFunction, SearchQuery, ObjectSetDefinition } from '@openfoundry/spi';
 import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import type { ApiDependencies, ResolverContext } from '../graphql/types.js';
@@ -124,6 +124,9 @@ export function generateRestRoutes(
     routes.push(generateActionRoute(action, schema, deps));
   }
 
+  // Object Set routes
+  routes.push(...generateObjectSetRoutes(deps));
+
   return routes;
 }
 
@@ -141,6 +144,8 @@ function generateObjectRoutes(
     generateGetByIdRoute(obj, plural, fgaType, deps),
     generateLinksRoute(plural, fgaType, deps),
     generateHistoryRoute(obj, plural, fgaType, deps),
+    generateAggregateRoute(obj, plural, deps),
+    generateSearchRoute(obj, plural, deps),
   ];
 }
 
@@ -523,6 +528,122 @@ function generateHistoryRoute(
   };
 }
 
+/**
+ * POST /api/v1/{plural}/aggregate — aggregate query.
+ */
+function generateAggregateRoute(
+  obj: ObjectType,
+  plural: string,
+  deps: ApiDependencies,
+): RestRoute {
+  return {
+    method: 'POST',
+    pattern: `/api/v1/${plural}/aggregate`,
+    handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+      try {
+        const { requestContext } = ctx;
+        const typeName = obj.name;
+        const body = (req.body ?? {}) as Record<string, unknown>;
+
+        // Build AggregateQuery from body
+        const rawFields = (body['fields'] ?? []) as Array<{ field: string; fn: string; alias?: string }>;
+        const fields: AggregateField[] = rawFields.map((f) => ({
+          field: f.field,
+          fn: f.fn.toLowerCase() as AggregateFunction,
+          alias: f.alias,
+        }));
+
+        const query: AggregateQuery = {
+          fields,
+          groupBy: body['groupBy'] as string[] | undefined,
+          filter: body['filter'] as FilterExpression | undefined,
+          orderBy: body['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined,
+          limit: body['limit'] as number | undefined,
+          offset: body['offset'] as number | undefined,
+        };
+
+        const result = await deps.objectManager.aggregate(typeName, query, requestContext);
+
+        return {
+          status: 200,
+          body: { data: result },
+        };
+      } catch (err) {
+        return wrapErrorToRest(err, ctx.requestContext.traceId);
+      }
+    },
+  };
+}
+
+/**
+ * GET /api/v1/{plural}/search?q=term&fields=f1,f2&limit=20&offset=0 — full-text search.
+ */
+function generateSearchRoute(
+  obj: ObjectType,
+  plural: string,
+  deps: ApiDependencies,
+): RestRoute {
+  return {
+    method: 'GET',
+    pattern: `/api/v1/${plural}/search`,
+    handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+      try {
+        const { requestContext } = ctx;
+        const typeName = obj.name;
+
+        const q = typeof req.query['q'] === 'string' ? req.query['q'] : '';
+        if (!q) {
+          return {
+            status: 400,
+            body: {
+              error: {
+                code: 'MISSING_QUERY',
+                message: 'The "q" query parameter is required for search',
+              },
+            },
+          };
+        }
+
+        // Parse fields from comma-separated string
+        const fieldsRaw = typeof req.query['fields'] === 'string' ? req.query['fields'] : undefined;
+        const fields = fieldsRaw ? fieldsRaw.split(',').map((f) => f.trim()).filter((f) => f.length > 0) : undefined;
+
+        const { offset, limit } = parsePagination(req.query);
+
+        const searchQuery: SearchQuery = {
+          query: q,
+          fields,
+          limit,
+          offset,
+        };
+
+        const result = await deps.objectManager.search(typeName, searchQuery, requestContext);
+
+        const hits = result.hits.map((hit) => ({
+          node: objectToRest(hit.object, obj),
+          score: hit.score,
+        }));
+
+        return {
+          status: 200,
+          body: {
+            data: hits,
+            pagination: {
+              totalCount: result.totalCount,
+              limit,
+              offset,
+              hasNextPage: result.hasNextPage,
+              hasPreviousPage: offset > 0,
+            },
+          },
+        };
+      } catch (err) {
+        return wrapErrorToRest(err, ctx.requestContext.traceId);
+      }
+    },
+  };
+}
+
 // ─── Action routes ───
 
 /**
@@ -593,4 +714,224 @@ function generateActionRoute(
       }
     },
   };
+}
+
+// ─── Object Set routes ───
+
+function objectSetToRest(def: ObjectSetDefinition): Record<string, unknown> {
+  return {
+    id: def.id,
+    name: def.name,
+    description: def.description ?? null,
+    objectType: def.objectType,
+    filter: def.filter ?? null,
+    orderBy: def.orderBy ?? null,
+    limit: def.limit ?? null,
+    isPublic: def.isPublic,
+    createdBy: def.createdBy,
+    createdAt: def.createdAt,
+    updatedAt: def.updatedAt,
+  };
+}
+
+function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
+  return [
+    // GET /api/v1/object-sets — list
+    {
+      method: 'GET',
+      pattern: '/api/v1/object-sets',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return { status: 200, body: { data: [] } };
+          }
+          const objectType = typeof req.query['objectType'] === 'string' ? req.query['objectType'] : undefined;
+          const defs = await deps.objectSetManager.list(objectType, ctx.requestContext);
+          return { status: 200, body: { data: defs.map(objectSetToRest) } };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+    // GET /api/v1/object-sets/:id — get
+    {
+      method: 'GET',
+      pattern: '/api/v1/object-sets/:id',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return createRestErrorResponse({
+              code: 'NOT_CONFIGURED',
+              category: 'system',
+              message: 'Object set manager is not configured',
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          const id = req.params['id']!;
+          const def = await deps.objectSetManager.get(id, ctx.requestContext);
+          if (!def) {
+            return createRestErrorResponse({
+              code: 'OBJECT_SET_NOT_FOUND',
+              category: 'not_found',
+              message: `Object set ${id} not found`,
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          return { status: 200, body: { data: objectSetToRest(def) } };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+    // POST /api/v1/object-sets — create
+    {
+      method: 'POST',
+      pattern: '/api/v1/object-sets',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return createRestErrorResponse({
+              code: 'NOT_CONFIGURED',
+              category: 'system',
+              message: 'Object set manager is not configured',
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          const body = (req.body ?? {}) as Record<string, unknown>;
+          const def = await deps.objectSetManager.create(
+            {
+              name: body['name'] as string,
+              description: body['description'] as string | undefined,
+              objectType: body['objectType'] as string,
+              filter: body['filter'] as undefined,
+              orderBy: body['orderBy'] as undefined,
+              limit: body['limit'] as number | undefined,
+              isPublic: (body['isPublic'] as boolean) ?? false,
+              createdBy: ctx.user.id,
+              tenantId: ctx.requestContext.tenantId,
+            },
+            ctx.requestContext,
+          );
+          return { status: 201, body: { data: objectSetToRest(def) } };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+    // PUT /api/v1/object-sets/:id — update
+    {
+      method: 'PUT',
+      pattern: '/api/v1/object-sets/:id',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return createRestErrorResponse({
+              code: 'NOT_CONFIGURED',
+              category: 'system',
+              message: 'Object set manager is not configured',
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          const id = req.params['id']!;
+          const body = (req.body ?? {}) as Record<string, unknown>;
+          const updates: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(body)) {
+            if (value !== undefined) {
+              updates[key] = value;
+            }
+          }
+          const def = await deps.objectSetManager.update(id, updates, ctx.requestContext);
+          return { status: 200, body: { data: objectSetToRest(def) } };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+    // DELETE /api/v1/object-sets/:id — delete
+    {
+      method: 'DELETE',
+      pattern: '/api/v1/object-sets/:id',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return createRestErrorResponse({
+              code: 'NOT_CONFIGURED',
+              category: 'system',
+              message: 'Object set manager is not configured',
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          const id = req.params['id']!;
+          await deps.objectSetManager.delete(id, ctx.requestContext);
+          return { status: 200, body: { data: { success: true } } };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+    // GET /api/v1/object-sets/:id/execute?limit=&offset= — run saved query
+    {
+      method: 'GET',
+      pattern: '/api/v1/object-sets/:id/execute',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return createRestErrorResponse({
+              code: 'NOT_CONFIGURED',
+              category: 'system',
+              message: 'Object set manager is not configured',
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          const id = req.params['id']!;
+          const { offset, limit } = parsePagination(req.query);
+          const page = await deps.objectSetManager.execute(id, ctx.requestContext, { limit, offset });
+          return {
+            status: 200,
+            body: {
+              data: page.items,
+              pagination: {
+                totalCount: page.totalCount,
+                limit,
+                offset,
+                hasNextPage: page.hasNextPage,
+                hasPreviousPage: offset > 0,
+              },
+            },
+          };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+    // GET /api/v1/object-sets/:id/aggregate — run saved aggregation
+    {
+      method: 'GET',
+      pattern: '/api/v1/object-sets/:id/aggregate',
+      handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
+        try {
+          if (!deps.objectSetManager) {
+            return createRestErrorResponse({
+              code: 'NOT_CONFIGURED',
+              category: 'system',
+              message: 'Object set manager is not configured',
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          const id = req.params['id']!;
+          const result = await deps.objectSetManager.executeAggregate(id, ctx.requestContext);
+          return { status: 200, body: { data: result } };
+        } catch (err) {
+          return wrapErrorToRest(err, ctx.requestContext.traceId);
+        }
+      },
+    },
+  ];
 }

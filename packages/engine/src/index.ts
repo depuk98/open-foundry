@@ -42,3 +42,9 @@ export {
   type LineageQueryOptions,
   InMemoryLineageStore,
 } from './lineage/index.js';
+
+// Object Sets
+export {
+  InMemoryObjectSetStore,
+  ObjectSetManager,
+} from './object-sets/index.js';

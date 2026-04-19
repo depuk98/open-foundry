@@ -25,6 +25,10 @@ import type {
   HealthStatus,
   IndexDefinition,
   StorageCapabilities,
+  AggregateQuery,
+  AggregateResult,
+  SearchQuery,
+  SearchResult,
 } from './ontology.js';
 import type { Transaction } from './transaction.js';
 
@@ -39,6 +43,8 @@ export interface StorageProvider {
   updateObject(ctx: RequestContext, type: string, id: string, properties: Record<string, unknown>, expectedVersion?: number): Promise<OntologyObject>;
   deleteObject(ctx: RequestContext, type: string, id: string, mode: 'soft' | 'hard'): Promise<void>;
   queryObjects(ctx: RequestContext, type: string, filter: FilterExpression, options?: QueryOptions): Promise<ObjectPage>;
+  aggregateObjects(ctx: RequestContext, type: string, query: AggregateQuery): Promise<AggregateResult>;
+  searchObjects(ctx: RequestContext, type: string, query: SearchQuery): Promise<SearchResult>;
   bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult>;
 
   // ─── Links ───

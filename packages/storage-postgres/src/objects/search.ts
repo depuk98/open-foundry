@@ -1,0 +1,144 @@
+/**
+ * Full-text search query builder for PostgreSQL.
+ *
+ * Uses ILIKE for case-insensitive matching across string-type columns.
+ * Scores each row by summing matches across searchable fields.
+ */
+
+import type { Pool } from 'pg';
+import type {
+  RequestContext,
+  SearchQuery,
+  SearchResult,
+  SearchHit,
+  OntologyObject,
+} from '@openfoundry/spi';
+import { snakeCase, pgIdent } from '../schema/type-mapping.js';
+import { filterToSql } from './filter-to-sql.js';
+import { PgTransaction, resolveQueryable } from '../transactions/index.js';
+
+/** Build a qualified table name. */
+function tableName(type: string, schema = 'public'): string {
+  return `${pgIdent(schema)}.${pgIdent(snakeCase(type))}`;
+}
+
+/**
+ * Map a snake_case row from Postgres back to camelCase OntologyObject.
+ */
+function rowToObject(row: Record<string, unknown>): OntologyObject {
+  const obj: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    // Skip internal scoring column
+    if (key === '_search_score' || key === '_total_count') continue;
+    // Convert snake_case keys back to camelCase
+    const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    obj[camelKey] = value;
+  }
+  return obj as OntologyObject;
+}
+
+/**
+ * Execute a search query against the object table.
+ */
+export async function searchObjects(
+  pool: Pool,
+  ctx: RequestContext,
+  type: string,
+  query: SearchQuery,
+  schema = 'public',
+  tx?: PgTransaction,
+): Promise<SearchResult> {
+  const q = resolveQueryable(pool, tx);
+  const table = tableName(type, schema);
+
+  const params: unknown[] = [ctx.tenantId];
+  const whereClauses = [`"_tenant_id" = $1`, `"_deleted_at" IS NULL`];
+
+  // Build ILIKE matching for search fields
+  const searchPattern = `%${query.query}%`;
+  params.push(searchPattern);
+  const patternIdx = params.length;
+
+  // Determine which fields to search
+  let searchFields: string[];
+  if (query.fields && query.fields.length > 0) {
+    searchFields = query.fields;
+  } else {
+    // Search all non-system columns. We query the column list from the table.
+    // For simplicity, we'll use a subquery approach: search all text-like columns.
+    // But since we don't have column metadata at runtime, use a practical fallback:
+    // query information_schema once to get text columns.
+    const colResult = await q.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = $2
+       AND data_type IN ('text', 'character varying')
+       AND column_name NOT LIKE '\\_%' ESCAPE '\\'`,
+      [schema, snakeCase(type)],
+    );
+    searchFields = (colResult.rows as Array<{ column_name: string }>).map((r) =>
+      r.column_name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()),
+    );
+  }
+
+  if (searchFields.length === 0) {
+    return { hits: [], totalCount: 0, hasNextPage: false };
+  }
+
+  // Build ILIKE OR clause and score expression
+  const ilikeParts: string[] = [];
+  const scoreParts: string[] = [];
+  for (const field of searchFields) {
+    const col = pgIdent(snakeCase(field));
+    ilikeParts.push(`${col} ILIKE $${patternIdx}`);
+    scoreParts.push(`CASE WHEN ${col} ILIKE $${patternIdx} THEN 1 ELSE 0 END`);
+  }
+
+  whereClauses.push(`(${ilikeParts.join(' OR ')})`);
+
+  // Apply additional filter
+  if (query.filter) {
+    const filterFragment = filterToSql(query.filter, params.length + 1);
+    if (filterFragment.text !== 'TRUE') {
+      whereClauses.push(filterFragment.text);
+    }
+    params.push(...filterFragment.params);
+  }
+
+  const whereClause = whereClauses.join(' AND ');
+  const scoreExpr = scoreParts.join(' + ');
+
+  // Build pagination
+  let paginationClause = '';
+  if (query.limit !== undefined) {
+    params.push(query.limit);
+    paginationClause += ` LIMIT $${params.length}`;
+  }
+  if (query.offset !== undefined) {
+    params.push(query.offset);
+    paginationClause += ` OFFSET $${params.length}`;
+  }
+
+  const sql = `SELECT *, (${scoreExpr}) AS _search_score, COUNT(*) OVER() AS _total_count
+    FROM ${table}
+    WHERE ${whereClause}
+    ORDER BY _search_score DESC${paginationClause}`;
+
+  const result = await q.query(sql, params);
+  const rows = result.rows as Record<string, unknown>[];
+
+  const totalCount = rows.length > 0 ? Number((rows[0] as Record<string, unknown>)['_total_count']) : 0;
+  const offset = query.offset ?? 0;
+  const limit = query.limit ?? totalCount;
+
+  const hits: SearchHit[] = rows.map((row) => {
+    const score = Number(row['_search_score']);
+    const obj = rowToObject(row);
+    return { object: obj, score };
+  });
+
+  return {
+    hits,
+    totalCount,
+    hasNextPage: offset + limit < totalCount,
+  };
+}

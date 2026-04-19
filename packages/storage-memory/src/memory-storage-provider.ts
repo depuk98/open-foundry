@@ -29,6 +29,12 @@ import type {
   IndexDefinition,
   DateTime,
   LinkTypeDefinition,
+  AggregateQuery,
+  AggregateResult,
+  AggregateGroup,
+  SearchQuery,
+  SearchResult,
+  SearchHit,
 } from '@openfoundry/spi';
 
 // ---------------------------------------------------------------------------
@@ -573,6 +579,195 @@ export class MemoryStorageProvider implements StorageProvider {
     };
   }
 
+  async aggregateObjects(ctx: RequestContext, type: string, query: AggregateQuery): Promise<AggregateResult> {
+    // 1. Collect matching objects (tenant-scoped, non-deleted)
+    let items = Array.from(this._objects.values()).filter((obj) => {
+      if (obj._tenantId !== ctx.tenantId) return false;
+      if (obj._type !== type) return false;
+      if (obj._deletedAt) return false;
+      if (query.filter) return evaluateFilter(obj as Record<string, unknown>, query.filter);
+      return true;
+    });
+
+    // 2. Group by groupBy fields
+    const groupMap = new Map<string, Record<string, unknown>[]>();
+    const groupKeyMap = new Map<string, Record<string, unknown>>();
+
+    for (const obj of items) {
+      const keys: Record<string, unknown> = {};
+      if (query.groupBy) {
+        for (const field of query.groupBy) {
+          keys[field] = (obj as Record<string, unknown>)[field] ?? null;
+        }
+      }
+      const groupKey = JSON.stringify(keys);
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, []);
+        groupKeyMap.set(groupKey, keys);
+      }
+      groupMap.get(groupKey)!.push(obj as Record<string, unknown>);
+    }
+
+    // If no items and no groupBy, return empty
+    if (groupMap.size === 0 && (!query.groupBy || query.groupBy.length === 0)) {
+      // No groupBy: aggregate over all matching items as a single group
+      groupMap.set('{}', []);
+      groupKeyMap.set('{}', {});
+      // Re-add all items to the single group
+      for (const obj of items) {
+        groupMap.get('{}')!.push(obj as Record<string, unknown>);
+      }
+    }
+
+    // 3. Compute aggregates per group
+    let groups: AggregateGroup[] = [];
+
+    for (const [groupKey, groupItems] of groupMap) {
+      const keys = groupKeyMap.get(groupKey)!;
+      const values: Record<string, number | null> = {};
+
+      for (const aggField of query.fields) {
+        const alias = aggField.alias ?? `${aggField.fn}_${aggField.field}`;
+
+        if (aggField.fn === 'count') {
+          if (aggField.field === '*') {
+            values[alias] = groupItems.length;
+          } else {
+            values[alias] = groupItems.filter(
+              (item) => item[aggField.field] !== undefined && item[aggField.field] !== null,
+            ).length;
+          }
+        } else {
+          // sum, avg, min, max — only on numeric fields
+          const numericValues = groupItems
+            .map((item) => item[aggField.field])
+            .filter((v): v is number => typeof v === 'number');
+
+          if (numericValues.length === 0) {
+            values[alias] = null;
+          } else {
+            switch (aggField.fn) {
+              case 'sum':
+                values[alias] = numericValues.reduce((a, b) => a + b, 0);
+                break;
+              case 'avg':
+                values[alias] = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+                break;
+              case 'min':
+                values[alias] = Math.min(...numericValues);
+                break;
+              case 'max':
+                values[alias] = Math.max(...numericValues);
+                break;
+            }
+          }
+        }
+      }
+
+      groups.push({ keys, values });
+    }
+
+    const totalGroups = groups.length;
+
+    // 4. Apply ordering
+    if (query.orderBy && query.orderBy.length > 0) {
+      for (const sort of [...query.orderBy].reverse()) {
+        groups.sort((a, b) => {
+          // Check if the field is a group key or aggregate value
+          const aVal = (a.keys[sort.field] ?? a.values[sort.field]) as unknown;
+          const bVal = (b.keys[sort.field] ?? b.values[sort.field]) as unknown;
+          if (aVal === bVal) return 0;
+          if (aVal === undefined || aVal === null) return 1;
+          if (bVal === undefined || bVal === null) return -1;
+          const cmp = aVal < bVal ? -1 : 1;
+          return sort.direction === 'desc' ? -cmp : cmp;
+        });
+      }
+    }
+
+    // 5. Apply limit/offset
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? groups.length;
+    groups = groups.slice(offset, offset + limit);
+
+    return { groups, totalGroups };
+  }
+
+  async searchObjects(ctx: RequestContext, type: string, query: SearchQuery): Promise<SearchResult> {
+    const queryLower = query.query.toLowerCase();
+    const terms = queryLower.split(/\s+/).filter((t) => t.length > 0);
+
+    // Collect candidate objects (tenant-scoped, type-matched, non-deleted)
+    const candidates = Array.from(this._objects.values()).filter((obj) => {
+      if (obj._tenantId !== ctx.tenantId) return false;
+      if (obj._type !== type) return false;
+      if (obj._deletedAt) return false;
+      return true;
+    });
+
+    // Score and filter
+    const scored: SearchHit[] = [];
+    for (const obj of candidates) {
+      // Determine which fields to search
+      const searchFields = query.fields
+        ? query.fields
+        : Object.keys(obj).filter((k) => !k.startsWith('_') && typeof obj[k] === 'string');
+
+      // Count occurrences of query terms across matching fields
+      let score = 0;
+      const highlights: Record<string, string[]> = {};
+
+      for (const field of searchFields) {
+        const val = obj[field];
+        if (typeof val !== 'string') continue;
+        const valLower = val.toLowerCase();
+
+        for (const term of terms) {
+          let idx = 0;
+          let count = 0;
+          while ((idx = valLower.indexOf(term, idx)) !== -1) {
+            count++;
+            idx += term.length;
+          }
+          if (count > 0) {
+            score += count;
+            if (!highlights[field]) {
+              highlights[field] = [];
+            }
+            highlights[field].push(val);
+          }
+        }
+      }
+
+      if (score === 0) continue;
+
+      // Apply additional filter if present
+      if (query.filter && !evaluateFilter(obj as Record<string, unknown>, query.filter)) {
+        continue;
+      }
+
+      scored.push({
+        object: clone(obj),
+        score,
+        highlights: Object.keys(highlights).length > 0 ? highlights : undefined,
+      });
+    }
+
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+
+    const totalCount = scored.length;
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? scored.length;
+    const hits = scored.slice(offset, offset + limit);
+
+    return {
+      hits,
+      totalCount,
+      hasNextPage: offset + limit < totalCount,
+    };
+  }
+
   async bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult> {
     // Idempotency check — scoped by tenant to prevent cross-tenant cache hits
     const cacheKey = `${ctx.tenantId}:${request.idempotencyKey}`;
@@ -804,7 +999,7 @@ export class MemoryStorageProvider implements StorageProvider {
     return {
       supportsTransactions: true,
       supportsTemporalQueries: true,
-      supportsFullTextSearch: false,
+      supportsFullTextSearch: true,
       supportsGeoQueries: false,
       supportsGraphTraversal: true,
       supportsBulkMutations: true,

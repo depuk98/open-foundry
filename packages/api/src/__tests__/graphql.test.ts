@@ -642,6 +642,76 @@ describe('GraphQL API', () => {
     });
   });
 
+  describe('aggregate queries', () => {
+    it('generates aggregate resolver for each ObjectType', () => {
+      const deps = createMockDeps(parsed);
+      const { resolvers } = generateResolvers(parsed, deps);
+      const query = resolvers['Query']!;
+
+      expect(query['patientAggregate']).toBeTypeOf('function');
+      expect(query['wardAggregate']).toBeTypeOf('function');
+      expect(query['bedAggregate']).toBeTypeOf('function');
+      expect(query['consultantAggregate']).toBeTypeOf('function');
+    });
+
+    it('calls objectManager.aggregate with correct params', async () => {
+      const deps = createMockDeps(parsed);
+      const aggregateMock = vi.fn().mockResolvedValue({
+        groups: [{ keys: {}, values: { count: 5 } }],
+        totalGroups: 1,
+      });
+      (deps.objectManager as unknown as Record<string, unknown>).aggregate = aggregateMock;
+
+      const { resolvers } = generateResolvers(parsed, deps);
+      const ctx = createResolverContext(deps);
+
+      const result = await Q(resolvers, 'patientAggregate')(
+        null,
+        {
+          fields: [{ field: '*', fn: 'COUNT', alias: 'count' }],
+          groupBy: ['status'],
+        },
+        ctx,
+      );
+
+      expect(aggregateMock).toHaveBeenCalledTimes(1);
+      const callArgs = aggregateMock.mock.calls[0]!;
+      expect(callArgs[0]).toBe('Patient');
+      expect(callArgs[1].fields).toEqual([{ field: '*', fn: 'count', alias: 'count' }]);
+      expect(callArgs[1].groupBy).toEqual(['status']);
+      expect(result.groups).toHaveLength(1);
+      expect(result.totalGroups).toBe(1);
+    });
+
+    it('converts GraphQL filter to SPI filter', async () => {
+      const deps = createMockDeps(parsed);
+      const aggregateMock = vi.fn().mockResolvedValue({
+        groups: [{ keys: {}, values: { count: 3 } }],
+        totalGroups: 1,
+      });
+      (deps.objectManager as unknown as Record<string, unknown>).aggregate = aggregateMock;
+
+      const { resolvers } = generateResolvers(parsed, deps);
+      const ctx = createResolverContext(deps);
+
+      await Q(resolvers, 'patientAggregate')(
+        null,
+        {
+          filter: { status: { eq: 'ACTIVE' } },
+          fields: [{ field: '*', fn: 'COUNT', alias: 'count' }],
+        },
+        ctx,
+      );
+
+      const callArgs = aggregateMock.mock.calls[0]!;
+      const filter = callArgs[1].filter;
+      expect(filter).toBeDefined();
+      expect(filter.field).toBe('status');
+      expect(filter.operator).toBe('eq');
+      expect(filter.value).toBe('ACTIVE');
+    });
+  });
+
   describe('consent filtering', () => {
     it('marks consent-restricted objects', async () => {
       const deps = createMockDeps(parsed);

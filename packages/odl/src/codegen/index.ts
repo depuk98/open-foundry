@@ -330,6 +330,41 @@ function generateSharedTypes(): string {
     '  tags: [String!]',
     '}',
     '',
+    '# ─── Object Sets (Section 8.3) ───',
+    '',
+    'type ObjectSet {',
+    '  id: ID!',
+    '  name: String!',
+    '  description: String',
+    '  objectType: String!',
+    '  filter: JSON',
+    '  orderBy: JSON',
+    '  limit: Int',
+    '  isPublic: Boolean!',
+    '  createdBy: String!',
+    '  createdAt: DateTime!',
+    '  updatedAt: DateTime!',
+    '}',
+    '',
+    'input CreateObjectSetInput {',
+    '  name: String!',
+    '  description: String',
+    '  objectType: String!',
+    '  filter: JSON',
+    '  orderBy: JSON',
+    '  limit: Int',
+    '  isPublic: Boolean',
+    '}',
+    '',
+    'input UpdateObjectSetInput {',
+    '  name: String',
+    '  description: String',
+    '  filter: JSON',
+    '  orderBy: JSON',
+    '  limit: Int',
+    '  isPublic: Boolean',
+    '}',
+    '',
     '# ─── Bulk Actions (Section 5.5) ───',
     '',
     'input BulkActionInput {',
@@ -517,7 +552,58 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
     sections.push(generateMutationResultType(action));
   }
 
-  // 9. Query type
+  // 9. Search types
+  for (const obj of schema.objectTypes) {
+    sections.push([
+      `type SearchHit_${obj.name} {`,
+      `  node: ${obj.name}!`,
+      `  score: Float!`,
+      `}`,
+    ].join('\n'));
+
+    sections.push([
+      `type SearchResult_${obj.name} {`,
+      `  hits: [SearchHit_${obj.name}!]!`,
+      `  totalCount: Int!`,
+      `  hasNextPage: Boolean!`,
+      `}`,
+    ].join('\n'));
+  }
+
+  // 10. Aggregation types
+  sections.push([
+    'enum AggregateFunction {',
+    '  COUNT',
+    '  SUM',
+    '  AVG',
+    '  MIN',
+    '  MAX',
+    '}',
+  ].join('\n'));
+
+  sections.push([
+    'input AggregateFieldInput {',
+    '  field: String!',
+    '  fn: AggregateFunction!',
+    '  alias: String',
+    '}',
+  ].join('\n'));
+
+  sections.push([
+    'type AggregateGroup {',
+    '  keys: JSON!',
+    '  values: JSON!',
+    '}',
+  ].join('\n'));
+
+  sections.push([
+    'type AggregateResult {',
+    '  groups: [AggregateGroup!]!',
+    '  totalGroups: Int!',
+    '}',
+  ].join('\n'));
+
+  // 10. Query type
   const queryFields: string[] = [];
   for (const obj of schema.objectTypes) {
     const lower = lowerFirst(obj.name);
@@ -525,23 +611,35 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
     queryFields.push(
       `  ${lower}s(filter: ${obj.name}Filter, orderBy: ${obj.name}OrderBy, first: Int, after: String, last: Int, before: String): ${obj.name}Connection!`,
     );
+    queryFields.push(
+      `  ${lower}Aggregate(filter: ${obj.name}Filter, groupBy: [String!], fields: [AggregateFieldInput!]!): AggregateResult!`,
+    );
+    queryFields.push(
+      `  search${obj.name}s(query: String!, fields: [String!], filter: ${obj.name}Filter, first: Int, after: String): SearchResult_${obj.name}!`,
+    );
   }
   queryFields.push('  availableTools(filter: ToolFilter): [ToolDescriptor!]!');
+  queryFields.push('  objectSet(id: ID!): ObjectSet');
+  queryFields.push('  objectSets(objectType: String): [ObjectSet!]!');
   sections.push(['type Query {', ...queryFields, '}'].join('\n'));
 
-  // 10. Mutation type
+  // 11. Mutation type
   const mutationFields: string[] = [];
   for (const action of schema.actionTypes) {
     const fieldName = lowerFirst(action.name);
     mutationFields.push(`  ${fieldName}(input: ${action.name}Input!): ${action.name}Result!`);
   }
+  // Object Set mutations
+  mutationFields.push('  createObjectSet(input: CreateObjectSetInput!): ObjectSet!');
+  mutationFields.push('  updateObjectSet(id: ID!, input: UpdateObjectSetInput!): ObjectSet!');
+  mutationFields.push('  deleteObjectSet(id: ID!): Boolean!');
   // TODO: submitBulkAction mutation deferred — requires BulkActionJob resolver
   // and async job tracking infrastructure. Re-add when bulk action pipeline is built.
   if (mutationFields.length > 0) {
     sections.push(['type Mutation {', ...mutationFields, '}'].join('\n'));
   }
 
-  // 11. Subscription type
+  // 12. Subscription type
   const subFields: string[] = [];
   for (const obj of schema.objectTypes) {
     const lower = lowerFirst(obj.name);

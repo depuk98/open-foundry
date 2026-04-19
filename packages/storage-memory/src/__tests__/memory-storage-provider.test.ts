@@ -77,7 +77,7 @@ describe('MemoryStorageProvider', () => {
       expect(caps.supportsTemporalQueries).toBe(true);
       expect(caps.supportsGraphTraversal).toBe(true);
       expect(caps.supportsBulkMutations).toBe(true);
-      expect(caps.supportsFullTextSearch).toBe(false);
+      expect(caps.supportsFullTextSearch).toBe(true);
       expect(caps.supportsGeoQueries).toBe(false);
     });
 

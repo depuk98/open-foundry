@@ -41,6 +41,14 @@ export type {
   HealthStatus,
   ReplicationCapability,
   StorageCapabilities,
+  AggregateFunction,
+  AggregateField,
+  AggregateQuery,
+  AggregateGroup,
+  AggregateResult,
+  SearchQuery,
+  SearchHit,
+  SearchResult,
 } from './ontology.js';
 
 // Transaction (Section 3.4)
@@ -86,3 +94,9 @@ export type {
   RestoreOptions,
   RestoreResult,
 } from './backup.js';
+
+// Object Sets (Section 8.3)
+export type {
+  ObjectSetDefinition,
+  ObjectSetStore,
+} from './object-set.js';

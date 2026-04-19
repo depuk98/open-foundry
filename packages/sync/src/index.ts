@@ -19,8 +19,20 @@ export type {
   WritebackResult,
 } from "./connectors/index.js";
 
+// Connector plugin architecture
+export type {
+  ConnectorFactory,
+  ConnectorMetadata,
+  ConnectorPlugin,
+} from "./connectors/index.js";
+export { ConnectorRegistry } from "./connectors/index.js";
+
 // Connector implementations
-export { JdbcConnector } from "./connectors/index.js";
+export { JdbcConnector, jdbcPlugin } from "./connectors/index.js";
+export { RestConnector, restPlugin } from "./connectors/index.js";
+
+// Default registry
+export { createDefaultRegistry } from "./connectors/index.js";
 
 // Identity resolution (MVP 4.4.2)
 export type {
