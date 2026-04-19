@@ -15,9 +15,11 @@ type patient
     define viewer: viewer from admitted_to
     define editor: editor from admitted_to
     define clinician: [user]
-    define can_admit: [user]
-    define can_discharge: clinician
-    define can_transfer: clinician or editor
+    define nurse_in_charge: [user]
+    define admin: [user]
+    define can_admit: clinician or nurse_in_charge or admin
+    define can_discharge: clinician or nurse_in_charge
+    define can_transfer: clinician or nurse_in_charge
 
 type bed
   relations
@@ -29,3 +31,9 @@ type consultant
   relations
     define viewer: [user]
     define self: [user]
+
+type discharge_record
+  relations
+    define clinician: [user]
+    define nurse_in_charge: [user]
+    define can_view: clinician or nurse_in_charge

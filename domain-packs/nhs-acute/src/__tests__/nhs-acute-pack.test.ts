@@ -415,7 +415,7 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     expect(pack['name']).toBe('nhs-acute');
-    expect(pack['version']).toBe('0.1.0');
+    expect(pack['version']).toBe('0.2.0');
     expect(pack['namespace']).toBe('nhs.acute');
     expect(pack['description']).toBe('NHS acute healthcare domain pack — pilot slice');
   });
@@ -477,17 +477,19 @@ describe('NHS Acute Domain Pack — OpenFGA permissions', () => {
     expect(content).toContain('type patient');
     expect(content).toContain('type bed');
     expect(content).toContain('type consultant');
+    expect(content).toContain('type discharge_record');
   });
 
-  it('patient type has expected relations', () => {
+  it('patient type has role-aligned permissions', () => {
     const fgaPath = resolve(PACK_ROOT, 'permissions', 'nhs-roles.fga');
     const content = readFileSync(fgaPath, 'utf-8');
 
     expect(content).toContain('define admitted_to: [ward]');
     expect(content).toContain('define clinician: [user]');
-    expect(content).toContain('define can_admit: [user]');
-    expect(content).toContain('define can_discharge: clinician');
-    expect(content).toContain('define can_transfer: clinician or editor');
+    expect(content).toContain('define nurse_in_charge: [user]');
+    expect(content).toContain('define can_admit: clinician or nurse_in_charge or admin');
+    expect(content).toContain('define can_discharge: clinician or nurse_in_charge');
+    expect(content).toContain('define can_transfer: clinician or nurse_in_charge');
   });
 
   it('schema version is 1.1', () => {

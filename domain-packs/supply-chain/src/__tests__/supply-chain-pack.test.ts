@@ -185,6 +185,12 @@ describe('Supply Chain Domain Pack — ODL Schema Parsing', () => {
         expect(constraint).toBeDefined();
         expect(constraint!.expr).toBe('value >= 0');
       });
+
+      it('contactEmail is @sensitive', () => {
+        const supplier = schema.objectTypes.find(t => t.name === 'Supplier')!;
+        const field = supplier.fields.find(f => f.name === 'contactEmail')!;
+        expect(findDirective(field.directives, 'sensitive')).toBeDefined();
+      });
     });
 
     describe('Facility', () => {
@@ -598,21 +604,27 @@ describe('Supply Chain Domain Pack — OpenFGA permissions', () => {
     expect(content).toContain('type inventory_record');
   });
 
-  it('purchase_order type has expected relations', () => {
+  it('purchase_order type has role-aligned permissions', () => {
     const fgaPath = resolve(PACK_ROOT, 'permissions', 'supply-chain-roles.fga');
     const content = readFileSync(fgaPath, 'utf-8');
 
     expect(content).toContain('define ordered_from: [supplier]');
     expect(content).toContain('define procurement_manager: [user]');
-    expect(content).toContain('define can_create: procurement_manager');
+    expect(content).toContain('define supply_chain_admin: [user]');
+    expect(content).toContain('define can_create: procurement_manager or supply_chain_admin');
+    expect(content).toContain('define can_ship: logistics_manager or supply_chain_admin');
+    expect(content).toContain('define can_cancel: procurement_manager or supply_chain_admin');
   });
 
-  it('shipment type has facility-based access', () => {
+  it('shipment type has role-aligned permissions', () => {
     const fgaPath = resolve(PACK_ROOT, 'permissions', 'supply-chain-roles.fga');
     const content = readFileSync(fgaPath, 'utf-8');
 
     expect(content).toContain('define ships_to: [facility]');
     expect(content).toContain('define logistics_manager: [user]');
+    expect(content).toContain('define warehouse_manager: [user]');
+    expect(content).toContain('define supply_chain_admin: [user]');
+    expect(content).toContain('define can_receive: warehouse_manager or logistics_manager or supply_chain_admin');
   });
 
   it('schema version is 1.1', () => {

@@ -8,7 +8,7 @@ type Supplier @objectType {
   code: String! @unique @indexed
   tier: SupplierTier!
   contactName: String
-  contactEmail: String
+  contactEmail: String @sensitive
   country: String! @indexed
   leadTimeDays: Int @constraint(expr: "value >= 0")
   onTimeDeliveryRate: Float

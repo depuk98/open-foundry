@@ -380,6 +380,8 @@ describe("parseTransformExpression", () => {
     expect(fn("42", {})).toBe(42);
     expect(fn(null, {})).toBe(null);
     expect(fn("abc", {})).toBe(null);
+    expect(fn("Infinity", {})).toBe(null);
+    expect(fn("-Infinity", {})).toBe(null);
   });
 
   it("throws for unknown function", () => {

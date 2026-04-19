@@ -131,7 +131,7 @@ export function parseFloat_(): TransformFn {
   return (value) => {
     if (value == null) return null;
     const n = Number.parseFloat(String(value));
-    return Number.isNaN(n) ? null : n;
+    return Number.isFinite(n) ? n : null;
   };
 }
 
