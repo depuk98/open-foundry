@@ -2,7 +2,9 @@
 
 **An open-source ontology platform for building operational digital twins.**
 
-Open Foundry provides the semantic, kinetic, and security layers needed to turn commodity data infrastructure into a coherent, queryable, actionable model of a real-world system. The platform is domain-neutral — domain-specific functionality is delivered through composable **Domain Packs**. The first Domain Pack targets NHS acute healthcare.
+Open Foundry provides the semantic, kinetic, and security layers needed to turn commodity data infrastructure into a coherent, queryable, actionable model of a real-world system. The platform is domain-neutral — domain-specific functionality is delivered through composable **Domain Packs**.
+
+> **Status:** Active MVP. Core platform is functional with three domain packs. Production-hardening gaps (schema/audit persistence, Helm HA) are documented under [Known Deferrals](#known-deferrals).
 
 > Apache 2.0 licensed. No proprietary dependencies. Schema-driven. Storage-agnostic.
 
@@ -37,19 +39,19 @@ Each layer communicates only with adjacent layers through defined interfaces. No
 **ODL (Ontology Definition Language)** — An extension of GraphQL SDL with semantic directives. Define object types, link types, and action types in a single schema language. The compiler generates GraphQL APIs, REST endpoints, OpenFGA authorization models, and TypeScript SDKs from the schema.
 
 ```graphql
-type Patient @objectType {
+type Asset @objectType {
   id: ID! @primary
-  nhsNumber: String @unique @indexed
+  serialNumber: String @unique @indexed
   name: String!
-  status: PatientStatus!
-  triageCategory: TriageCategory
+  status: AssetStatus!
+  category: AssetCategory
 }
 
-link AdmittedTo @linkType(from: "Patient", to: "Ward", cardinality: ONE_TO_MANY)
+link LocatedAt @linkType(from: "Asset", to: "Facility", cardinality: MANY_TO_ONE)
 
-action AdmitPatient @actionType {
-  patientId: ID! @param
-  wardId: ID! @param
+action TransferAsset @actionType {
+  assetId: ID! @param
+  facilityId: ID! @param
 }
 ```
 
@@ -61,32 +63,28 @@ action AdmitPatient @actionType {
 
 ---
 
-## MVP: NHS Acute Pilot
+## Domain Packs
 
-The first vertical slice targets **NHS acute healthcare** — modelling patient flow through wards, beds, and consultants at an acute trust.
+Domain Packs are composable schema and configuration modules that specialise the platform for a particular domain. Three are included:
 
-### What It Demonstrates
+| Pack | Namespace | Object Types | Actions | Connectors |
+|------|-----------|-------------|---------|------------|
+| **NHS Acute** | `nhs.acute` | Patient, Ward, Bed, Consultant, DischargeRecord | Admit, Discharge, Transfer | PAS (JDBC + CDC) |
+| **AML** | `aml` | Customer, Transaction, Alert, Case, Account, SuspiciousActivityReport | AssignAlertToCase, FlagTransaction, FreezeAccount, OpenCase, FileReport, SubmitReport | TMS (JDBC) |
+| **Supply Chain** | `supply.chain` | Product, Supplier, Shipment, Facility, InventoryRecord, PurchaseOrder | ShipOrder, ReceiveShipment, CreateOrder, CancelOrder | ERP (JDBC + CDC) |
 
-1. A live ontology modelling **patients, wards, beds, and consultants**
-2. Real data flowing from a **PAS (Patient Administration System)** via JDBC/CDC
-3. Clinicians executing **actions** (admit, discharge, transfer) through GraphQL
-4. **ReBAC-enforced permissions** with ward-scoped visibility
-5. An **immutable audit trail** for every operation
-6. A **FHIR R4 read endpoint** for interoperability
+Each pack includes ODL schemas, action manifests, OpenFGA permission models, and optional sync connectors.
 
-### NHS Acute Domain Pack
+### NHS Acute Pilot
 
-| Type | Contents |
-|------|----------|
-| **Object Types** | Patient, Ward, Bed, Consultant, DischargeRecord |
-| **Link Types** | AdmittedTo, OccupiesBed, UnderCareOf, BedInWard, DischargedPatient, DischargedFromWard |
-| **Action Types** | AdmitPatient, DischargePatient, TransferWard |
-| **Connectors** | PAS JDBC connector with CDC via Debezium |
-| **Permissions** | OpenFGA role model for NHS clinical roles |
+The NHS Acute pack is the most mature vertical slice, targeting patient flow through wards, beds, and consultants at an acute trust. It demonstrates:
 
-### Spec Compliance
-
-**21 of 22** must-ship items implemented. The one partial item (Schema Registry persistence — git-backed + DB-cached) is stubbed with an in-memory implementation that preserves the interface contract for later expansion.
+- A live ontology modelling patients, wards, beds, and consultants
+- Data flowing from a PAS (Patient Administration System) via JDBC/CDC
+- Clinicians executing actions (admit, discharge, transfer) through GraphQL
+- ReBAC-enforced permissions with ward-scoped visibility
+- An immutable audit trail for every operation
+- A FHIR R4 read endpoint for interoperability
 
 ---
 
@@ -143,6 +141,7 @@ The monorepo contains 20 packages across four workspace roots:
 - Node.js >= 20.0.0
 - pnpm 9.15+
 - Docker & Docker Compose (for integration tests and local deployment)
+- Go 1.24+ (only when building `packages/cel-evaluator` outside Docker)
 
 ### Install and Build
 
@@ -173,11 +172,19 @@ docker compose up -d
 ./init-services.sh
 ```
 
-This starts 12 services: PostgreSQL+AGE, RedPanda (Kafka), Debezium CDC, Keycloak (OIDC), OpenFGA (ReBAC), OpenTelemetry Collector, and 6 application services.
+This starts 12 services: PostgreSQL+AGE, RedPanda (Kafka), Debezium CDC, Keycloak (OIDC), OpenFGA (ReBAC), OpenTelemetry Collector, api-gateway, ontology-engine, action-executor, sync-engine, security-service, and cel-evaluator. See [`deploy/README.md`](deploy/README.md) for the full service table.
 
-### Production Deployment
+### Try the API
 
-A Kubernetes Helm chart is provided:
+Once the stack is running:
+
+- **GraphQL Playground:** http://localhost:4000/graphql
+- **REST API:** http://localhost:4000/api/v1/
+- **FHIR R4:** http://localhost:4000/fhir/
+
+### Kubernetes Deployment
+
+A Helm chart is provided for single-replica evaluation deployments. HA production settings are deferred (see [Known Deferrals](#known-deferrals)).
 
 ```bash
 helm install openfoundry deploy/helm/openfoundry \
@@ -189,28 +196,9 @@ helm install openfoundry deploy/helm/openfoundry \
 
 ## Test Coverage
 
-| Suite | Tests |
-|-------|-------|
-| SPI Conformance | 287 |
-| ODL Compiler | 270 |
-| Sync Engine | 161 |
-| API Layer | 141 |
-| Actions Framework | 123 |
-| Security | 99 |
-| Postgres Storage | 97 |
-| Engine | 94 |
-| AML Pack | 88 |
-| Supply Chain Pack | 72 |
-| Memory Storage | 56 |
-| NHS Acute Pack | 53 |
-| Seed Tool | 52 |
-| Pilot Scenarios | 41 |
-| SPI Types | 16 |
-| Observability | 16 |
-| Core Pack | 14 |
-| **Total** | **1,680** |
+1,780+ unit and integration tests across all packages.
 
-91 Postgres integration tests are skipped when no database is available. This is expected.
+Database-backed integration tests are skipped unless the required Docker/PostgreSQL services are available.
 
 ---
 
@@ -247,37 +235,42 @@ These items are specified in the full technical spec but intentionally deferred 
 
 | Document | Description |
 |----------|-------------|
-| [`docs/open-foundry-spec-v2.md`](docs/open-foundry-spec-v2.md) | Full technical specification (3,104 lines) |
-| [`docs/mvp-nhs-pilot.md`](docs/mvp-nhs-pilot.md) | MVP design document (1,061 lines) |
+| [`docs/open-foundry-spec-v2.md`](docs/open-foundry-spec-v2.md) | Full technical specification |
+| [`docs/mvp-nhs-pilot.md`](docs/mvp-nhs-pilot.md) | MVP design document |
 | [`deploy/README.md`](deploy/README.md) | Development deployment quickstart |
 
 ---
 
 ## How This Was Built
 
-This codebase was authored entirely by **Claude Opus 4.6** (Anthropic) running inside the **Avril** harness — a session-based agent framework for quality-assured code generation at scale. The work was orchestrated by **Cardinal**, a task planning and execution system that decomposed the technical specification into implementable work units, managed dependencies between tasks, and tracked progress across the build.
+Open Foundry was built in two phases — an automated scaffold phase followed by human-agent collaboration for expansion and hardening.
 
-The process:
+### Phase 1: Cardinal (commits `0a3d5ff`–`b01ca90`)
 
-1. **Specification** — The Open Foundry spec (3,104 lines) and MVP plan (1,061 lines) were written via human-agent collaboration.
-2. **Task decomposition** — Cardinal broke the spec into ~120 discrete tasks across 20 packages, ordered by dependency graph.
-3. **Implementation** — Opus 4.6, operating in parallel Avril sessions, implemented each task: writing source code, tests, deployment configuration, and documentation.
-4. **Review** — 8 iterative review passes (including cross-model Codex reviews) surfaced and resolved 200+ findings across consistency, security, type safety, and architecture.
+Cardinal, a task planning and execution system, decomposed the technical specification into ~120 discrete tasks across 20 packages, ordered by dependency graph. Claude Opus 4.6, operating in parallel Avril sessions, implemented each task autonomously: source code, tests, deployment configuration, and documentation. Cardinal managed dependencies between tasks, tracked progress, and ran 8 automated review passes to resolve consistency and type-safety issues. This phase produced the core platform, NHS Acute domain pack, deployment stack, and initial test suite across 48 commits.
+
+### Phase 2: Human-Agent Collaboration (commits `87054f3`–present)
+
+A human engineer took over direction — reviewing the codebase, revising the specification, expanding domain coverage, and driving iterative hardening. Work in this phase includes:
+
+- **Spec refinement** — Three rounds of spec review addressing gaps in directives, resilience, lifecycle, and federation contracts.
+- **Domain expansion** — Two new domain packs (AML, Supply Chain) with full schemas, actions, connectors, and permission models.
+- **Feature additions** — Aggregation queries, full-text search, object sets, and connector plugin architecture.
+- **Security hardening** — Multiple review rounds (including cross-model Codex reviews) identified and fixed 200+ issues across auth pipelines, SQL injection, field-level redaction, system-field mapping, and error handling.
+- **Regression test suite** — Targeted tests covering the most critical bugs found during review.
 
 ### By the Numbers
 
 | Metric | Value |
 |--------|-------|
-| TypeScript source | ~23,000 lines |
-| Test code | ~28,000 lines |
+| TypeScript source | ~24,000 lines |
+| Test code | ~29,000 lines |
 | Go source (CEL evaluator) | ~1,900 lines |
 | Domain pack config (ODL, YAML, FGA) | ~1,700 lines |
-| Deployment config | ~1,600 lines |
+| Deployment config | ~2,000 lines |
 | Specification + MVP docs | ~4,200 lines |
-| Commits | 70 |
 | Packages | 20 |
-| Unit tests | 1,680 |
-| Human-written lines of code | 0 |
+| Unit tests | 1,780+ |
 
 ---
 
