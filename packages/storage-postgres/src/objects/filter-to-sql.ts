@@ -44,7 +44,11 @@ export function filterToSql(filter: FilterExpression, offset = 1): SqlFragment {
 }
 
 function fieldPredicateToSql(pred: FieldPredicate, offset: number): SqlFragment {
-  const col = pgIdent(snakeCase(pred.field));
+  // System fields (prefixed with _) are stored as-is in Postgres;
+  // skip snakeCase which strips the leading underscore.
+  const col = pred.field.startsWith('_')
+    ? `"${pred.field.replace(/"/g, '""')}"`
+    : pgIdent(snakeCase(pred.field));
 
   switch (pred.operator) {
     case 'eq':

@@ -175,5 +175,17 @@ describe('filterToSql', () => {
       expect(result.text).toMatch(/= \$1$/);
       expect(result.params).toEqual(['123']);
     });
+
+    it('preserves leading underscore for system fields', () => {
+      const result = filterToSql({ field: '_id', operator: 'in', value: ['a', 'b'] });
+      expect(result.text).toBe('"_id" IN ($1, $2)');
+      expect(result.params).toEqual(['a', 'b']);
+    });
+
+    it('preserves other system field prefixes', () => {
+      const result = filterToSql({ field: '_tenant_id', operator: 'eq', value: 't-1' });
+      expect(result.text).toBe('"_tenant_id" = $1');
+      expect(result.params).toEqual(['t-1']);
+    });
   });
 });
