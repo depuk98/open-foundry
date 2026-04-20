@@ -394,8 +394,7 @@ function generateQueryResolvers(
 
 /**
  * Resolve authorized object IDs for a user+type via FGA listObjects.
- * Returns the list of allowed IDs, or null if authorization returned empty
- * (meaning no access at all).
+ * Returns the list of allowed IDs (empty array if none authorized).
  */
 async function resolveAllowedIds(
   deps: ApiDependencies,

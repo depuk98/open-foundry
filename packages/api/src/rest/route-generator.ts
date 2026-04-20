@@ -1057,8 +1057,48 @@ function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
               traceId: ctx.requestContext.traceId,
             });
           }
+          const { user } = ctx;
           const id = req.params['id']!;
-          const result = await deps.objectSetManager.executeAggregate(id, ctx.requestContext);
+
+          // Look up the object set for auth scoping
+          const def = await deps.objectSetManager.get(id, ctx.requestContext);
+          if (!def) {
+            return createRestErrorResponse({
+              code: 'OBJECT_SET_NOT_FOUND',
+              category: 'not_found',
+              message: `Object set ${id} not found`,
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+          if (!def.aggregation) {
+            return createRestErrorResponse({
+              code: 'INVALID_OPERATION',
+              category: 'validation',
+              message: `Object set ${id} has no aggregation defined`,
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+
+          // Authorization: restrict aggregation to authorized objects
+          const fgaType = toSnakeCase(def.objectType);
+          const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
+          if (allowedIds.length === 0) {
+            return { status: 200, body: { data: { groups: [], totalGroups: 0 } } };
+          }
+
+          // Merge auth filter + saved filter into the aggregation query
+          const aggregation = { ...def.aggregation };
+          const savedFilter = def.filter;
+          const authFilter = buildAuthFilter(allowedIds, savedFilter);
+          if (aggregation.filter) {
+            aggregation.filter = { and: [authFilter, aggregation.filter] };
+          } else {
+            aggregation.filter = authFilter;
+          }
+
+          const result = await deps.objectManager.aggregate(def.objectType, aggregation, ctx.requestContext);
           return { status: 200, body: { data: result } };
         } catch (err) {
           return wrapErrorToRest(err, ctx.requestContext.traceId);
