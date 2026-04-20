@@ -15,12 +15,23 @@ export interface EventBus {
 }
 
 /**
- * In-memory EventBus for testing. Collects all published events.
+ * In-memory EventBus for testing and development.
+ * Collects all published events with a configurable buffer cap
+ * to prevent unbounded memory growth in long-running processes.
  */
 export class InMemoryEventBus implements EventBus {
   public readonly events: CloudEvent[] = [];
+  private readonly _maxBufferSize: number;
+
+  constructor(maxBufferSize = 10_000) {
+    this._maxBufferSize = maxBufferSize;
+  }
 
   async publish(event: CloudEvent): Promise<void> {
+    if (this.events.length >= this._maxBufferSize) {
+      // Discard oldest events to prevent unbounded memory growth
+      this.events.splice(0, Math.floor(this._maxBufferSize / 10));
+    }
     this.events.push(event);
   }
 

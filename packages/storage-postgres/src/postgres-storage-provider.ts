@@ -63,6 +63,7 @@ import {
   getObjectAtTime as pgGetObjectAtTime,
 } from './temporal/index.js';
 import { PgTransaction } from './transactions/index.js';
+import { withRetry } from './retry.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -78,6 +79,10 @@ export interface PostgresStorageConfig {
   maxPoolSize?: number;
   /** Schema name for data tables. Default: 'public'. */
   dataSchema?: string;
+  /** SSL/TLS configuration for the connection. */
+  ssl?: boolean | { rejectUnauthorized: boolean };
+  /** Transaction isolation level. Default: 'READ COMMITTED'. */
+  defaultIsolationLevel?: 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +162,8 @@ export class PostgresStorageProvider implements StorageProvider {
   private _currentSchemaVersion = 0;
   private _idempotencyCache = new Map<string, BulkMutationResult>();
 
+  private _defaultIsolationLevel: string;
+
   constructor(config: PostgresStorageConfig) {
     this._pool = new Pool({
       host: config.host,
@@ -165,8 +172,10 @@ export class PostgresStorageProvider implements StorageProvider {
       user: config.user,
       password: config.password,
       max: config.maxPoolSize ?? 10,
+      ssl: config.ssl || undefined,
     } satisfies PoolConfig);
     this._dataSchema = config.dataSchema ?? 'public';
+    this._defaultIsolationLevel = config.defaultIsolationLevel ?? 'READ COMMITTED';
   }
 
   /** Expose pool for testing / direct access. */
@@ -185,9 +194,55 @@ export class PostgresStorageProvider implements StorageProvider {
     const fromVersion = this._currentSchemaVersion;
     const ddl = generateDDL(schema, { dataSchema: this._dataSchema });
 
-    // Execute all DDL statements
-    for (const stmt of ddl.all) {
-      await this._pool.query(stmt);
+    // Ensure migration tracking table exists
+    await this._pool.query(`
+      CREATE TABLE IF NOT EXISTS _schema_migrations (
+        version INT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        checksum TEXT
+      )
+    `);
+
+    // Compute DDL checksum for drift detection (simple hash)
+    const ddlText = ddl.all.join('\n');
+    let hash = 0;
+    for (let i = 0; i < ddlText.length; i++) {
+      hash = ((hash << 5) - hash + ddlText.charCodeAt(i)) | 0;
+    }
+    const checksum = (hash >>> 0).toString(16).padStart(8, '0');
+
+    // Check if this version is already applied
+    const existing = await this._pool.query(
+      'SELECT checksum FROM _schema_migrations WHERE version = $1',
+      [schema.version],
+    );
+    if (existing.rows.length > 0) {
+      const storedChecksum = existing.rows[0].checksum;
+      if (storedChecksum && storedChecksum !== checksum) {
+        console.warn(`Schema migration: version ${schema.version} already applied but DDL checksum differs (drift detected)`);
+      }
+      this._currentSchemaVersion = schema.version;
+      this._schemas.set(schema.version, schema);
+      const now = new Date().toISOString() as DateTime;
+      return { success: true, fromVersion, toVersion: schema.version, appliedAt: now };
+    }
+
+    // Advisory lock to prevent concurrent schema applications
+    const lockId = 0x4F46; // 'OF' in hex — Open Foundry schema lock
+    await this._pool.query('SELECT pg_advisory_lock($1)', [lockId]);
+    try {
+      // Execute all DDL statements
+      for (const stmt of ddl.all) {
+        await this._pool.query(stmt);
+      }
+
+      // Record migration
+      await this._pool.query(
+        'INSERT INTO _schema_migrations (version, checksum) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING',
+        [schema.version, checksum],
+      );
+    } finally {
+      await this._pool.query('SELECT pg_advisory_unlock($1)', [lockId]);
     }
 
     this._currentSchemaVersion = schema.version;
@@ -218,7 +273,7 @@ export class PostgresStorageProvider implements StorageProvider {
   }
 
   async getObject(ctx: RequestContext, type: string, id: string): Promise<OntologyObject | null> {
-    const obj = await pgGetObject(this._pool, ctx, type, id, this._dataSchema);
+    const obj = await withRetry(() => pgGetObject(this._pool, ctx, type, id, this._dataSchema));
     if (!obj) return null;
     // Follow SPI convention: return null for soft-deleted (like memory provider)
     if (obj._deletedAt) return null;
@@ -238,15 +293,15 @@ export class PostgresStorageProvider implements StorageProvider {
   }
 
   async queryObjects(ctx: RequestContext, type: string, filter: FilterExpression, options?: QueryOptions): Promise<ObjectPage> {
-    return pgQueryObjects(this._pool, ctx, type, filter, options, this._dataSchema);
+    return withRetry(() => pgQueryObjects(this._pool, ctx, type, filter, options, this._dataSchema));
   }
 
   async aggregateObjects(ctx: RequestContext, type: string, query: AggregateQuery): Promise<AggregateResult> {
-    return pgAggregateObjects(this._pool, ctx, type, query, this._dataSchema);
+    return withRetry(() => pgAggregateObjects(this._pool, ctx, type, query, this._dataSchema));
   }
 
   async searchObjects(ctx: RequestContext, type: string, query: SearchQuery): Promise<SearchResult> {
-    return pgSearchObjects(this._pool, ctx, type, query, this._dataSchema);
+    return withRetry(() => pgSearchObjects(this._pool, ctx, type, query, this._dataSchema));
   }
 
   async bulkMutate(ctx: RequestContext, request: BulkMutationRequest): Promise<BulkMutationResult> {
@@ -317,7 +372,7 @@ export class PostgresStorageProvider implements StorageProvider {
   }
 
   async getLink(ctx: RequestContext, type: string, linkId: string): Promise<OntologyLink | null> {
-    const link = await pgGetLink(this._pool, ctx, type, linkId, this._dataSchema);
+    const link = await withRetry(() => pgGetLink(this._pool, ctx, type, linkId, this._dataSchema));
     if (!link) return null;
     if (link._deletedAt) return null;
     return link;
@@ -338,7 +393,7 @@ export class PostgresStorageProvider implements StorageProvider {
     direction: 'inbound' | 'outbound',
     options?: QueryOptions,
   ): Promise<LinkPage> {
-    return pgGetLinks(this._pool, ctx, objectId, linkType, direction, options, this._dataSchema);
+    return withRetry(() => pgGetLinks(this._pool, ctx, objectId, linkType, direction, options, this._dataSchema));
   }
 
   async traverse(
@@ -347,13 +402,13 @@ export class PostgresStorageProvider implements StorageProvider {
     path: TraversalPath,
     options?: TraversalOptions,
   ): Promise<TraversalResult> {
-    return pgTraverse(this._pool, ctx, startId, path, options, this._dataSchema);
+    return withRetry(() => pgTraverse(this._pool, ctx, startId, path, options, this._dataSchema));
   }
 
   // ─── Transactions ───
 
   async beginTransaction(ctx: RequestContext): Promise<Transaction> {
-    const tx = await PgTransaction.begin(this._pool);
+    const tx = await PgTransaction.begin(this._pool, this._defaultIsolationLevel);
     return new PgSpiTransaction(
       this._pool,
       ctx,
@@ -366,11 +421,11 @@ export class PostgresStorageProvider implements StorageProvider {
   // ─── Versioning ───
 
   async getObjectAtVersion(ctx: RequestContext, type: string, id: string, version: number): Promise<OntologyObject | null> {
-    return pgGetObjectAtVersion(this._pool, ctx, type, id, version, this._dataSchema);
+    return withRetry(() => pgGetObjectAtVersion(this._pool, ctx, type, id, version, this._dataSchema));
   }
 
   async getObjectAtTime(ctx: RequestContext, type: string, id: string, timestamp: DateTime): Promise<OntologyObject | null> {
-    return pgGetObjectAtTime(this._pool, ctx, type, id, timestamp, this._dataSchema);
+    return withRetry(() => pgGetObjectAtTime(this._pool, ctx, type, id, timestamp, this._dataSchema));
   }
 
   // ─── Indices ───

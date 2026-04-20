@@ -67,3 +67,7 @@ export type { AuditQueryFilter as PostgresAuditQueryFilter } from './audit/postg
 // ─── Transactions ───
 export { PgTransaction, resolveQueryable } from './transactions/index.js';
 export type { Queryable } from './transactions/index.js';
+
+// ─── Retry ───
+export { withRetry } from './retry.js';
+export type { RetryOptions } from './retry.js';

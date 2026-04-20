@@ -18,12 +18,20 @@ import type { AuthenticatedUserInfo } from './graphql/types.js';
 
 export function parsePostgresUrl(url: string): PostgresStorageConfig {
   const u = new URL(url);
+  const sslmode = u.searchParams.get('sslmode') ?? u.searchParams.get('ssl');
+  let ssl: PostgresStorageConfig['ssl'];
+  if (sslmode && sslmode !== 'disable') {
+    ssl = (sslmode === 'verify-full' || sslmode === 'verify-ca')
+      ? { rejectUnauthorized: true }
+      : { rejectUnauthorized: false };
+  }
   return {
     host: u.hostname,
     port: parseInt(u.port || '5432', 10),
     database: u.pathname.replace(/^\//, ''),
     user: decodeURIComponent(u.username),
     password: decodeURIComponent(u.password),
+    ssl,
   };
 }
 
@@ -136,6 +144,7 @@ export async function extractUser(
 
 export const REQUIRED_PROD_VARS = [
   'OIDC_ISSUER',
+  'OIDC_CLIENT_ID',
   'OPENFGA_URL',
   'OPENFGA_STORE_ID',
   'POSTGRES_URL',

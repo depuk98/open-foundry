@@ -19,10 +19,11 @@ export class PgTransaction {
   }
 
   /** Begin a new transaction and return the wrapper. */
-  static async begin(pool: Pool): Promise<PgTransaction> {
+  static async begin(pool: Pool, isolationLevel?: string): Promise<PgTransaction> {
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      const level = isolationLevel ?? 'READ COMMITTED';
+      await client.query(`BEGIN ISOLATION LEVEL ${level}`);
       return new PgTransaction(client);
     } catch (err) {
       client.release();

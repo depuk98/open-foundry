@@ -21,6 +21,17 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "openfoundry.serviceAccountName" . }}
+      {{- if eq (.Values.apiGateway.antiAffinity | default "") "soft" }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: api-gateway
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
       {{/* HELM-07: Security context for all pods */}}
       securityContext:
         runAsNonRoot: true

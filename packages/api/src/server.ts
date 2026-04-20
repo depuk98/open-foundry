@@ -20,6 +20,7 @@
 import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
@@ -49,6 +50,8 @@ import {
 } from './config.js';
 import type { ActionAuthzMapping } from './config.js';
 import { loadDomainPacks } from './schema-loader.js';
+import { SlidingWindowRateLimiter } from './governance/index.js';
+import type { RateLimitIdentity } from './governance/index.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
 
@@ -63,6 +66,9 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   }
+
+  // ── Rate Limiter ──
+  const rateLimiter = new SlidingWindowRateLimiter();
 
   // ── Storage ──
   let storage: StorageProvider;
@@ -93,6 +99,9 @@ async function main(): Promise<void> {
 
   // ── Engine ──
   const eventBus = new InMemoryEventBus();
+  if (!isDev) {
+    console.warn('WARNING: EventBus is in-memory — events will not survive restarts. Set REDPANDA_BROKERS to enable persistent streaming.');
+  }
   const emitter = new EngineEventEmitter(eventBus);
   const objectManager = new ObjectManager({ storage, schema, eventEmitter: emitter });
   const linkManager = new LinkManager({ storage, schema, eventEmitter: emitter });
@@ -188,7 +197,17 @@ async function main(): Promise<void> {
   apolloServer.addPlugin(ApolloServerPluginDrainHttpServer({ httpServer }) as never);
   await apolloServer.start();
 
-  app.use(cors());
+  // Security headers (disable CSP for GraphQL playground in dev)
+  app.use(helmet({ contentSecurityPolicy: isDev ? false : undefined }));
+
+  // CORS: restrict origins in production, allow-all in dev
+  const corsOrigins = process.env['CORS_ALLOWED_ORIGINS']?.split(',').map(s => s.trim()).filter(Boolean);
+  app.use(cors(
+    !isDev && corsOrigins && corsOrigins.length > 0
+      ? { origin: corsOrigins, credentials: true }
+      : undefined,
+  ));
+
   app.use(express.json({ limit: '1mb' }));
 
   // ── Health check ──
@@ -216,6 +235,20 @@ async function main(): Promise<void> {
         authorizationService.clearFieldCache();
         try {
           const user = await extractUser(req, authenticator, isDev);
+
+          // Rate limit check
+          const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+          if (!rlResult.allowed) {
+            const { GraphQLError } = await import('graphql');
+            throw new GraphQLError(`Rate limit exceeded (by ${rlResult.exceededBy})`, {
+              extensions: {
+                code: 'RATE_LIMITED',
+                http: { status: 429 },
+                retryAfter: Math.ceil((rlResult.resetAt - Date.now()) / 1000),
+              },
+            });
+          }
+
           return buildResolverContext(user, deps);
         } catch (err) {
           // Map auth failures to proper GraphQL errors with 401 status
@@ -240,7 +273,17 @@ async function main(): Promise<void> {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     app[method](route.pattern, async (req, res) => {
       try {
+        authorizationService.clearFieldCache();
         const user = await extractUser(req, authenticator, isDev);
+
+        // Rate limit check
+        const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+        if (!rlResult.allowed) {
+          res.setHeader('Retry-After', String(Math.ceil((rlResult.resetAt - Date.now()) / 1000)));
+          res.status(429).json({ error: { code: 'RATE_LIMITED', message: `Rate limit exceeded (by ${rlResult.exceededBy})`, retryable: true } });
+          return;
+        }
+
         const restReq: RestRequest = {
           method: req.method,
           path: req.path,
@@ -254,7 +297,7 @@ async function main(): Promise<void> {
         res.status(result.status).json(result.body);
       } catch (err) {
         if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
-          res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: 'Authorization required' } });
+          res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } });
           return;
         }
         console.error('REST handler error:', err);
@@ -274,10 +317,21 @@ async function main(): Promise<void> {
   }
 
   // ── FHIR at /fhir/* ──
-  const fhirHandler = createFhirRouter({ deps, baseUrl: `http://localhost:${PORT}/fhir` });
+  const fhirBaseUrl = process.env['FHIR_BASE_URL'] ?? `http://localhost:${PORT}/fhir`;
+  const fhirHandler = createFhirRouter({ deps, baseUrl: fhirBaseUrl });
   app.all('/fhir/*', async (req, res) => {
     try {
+      authorizationService.clearFieldCache();
       const user = await extractUser(req, authenticator, isDev);
+
+      // Rate limit check
+      const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+      if (!rlResult.allowed) {
+        res.setHeader('Retry-After', String(Math.ceil((rlResult.resetAt - Date.now()) / 1000)));
+        res.status(429).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'throttled', diagnostics: 'Rate limit exceeded' }] });
+        return;
+      }
+
       const fhirReq = {
         method: req.method,
         path: req.path.replace(/^\/fhir/, ''),
@@ -293,7 +347,7 @@ async function main(): Promise<void> {
       res.status(result.status).json(result.body);
     } catch (err) {
       if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
-        res.status(401).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login', diagnostics: 'Authorization required' }] });
+        res.status(401).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login', diagnostics: 'Authentication required' }] });
         return;
       }
       console.error('FHIR handler error:', err);

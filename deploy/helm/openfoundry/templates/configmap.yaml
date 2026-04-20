@@ -22,3 +22,9 @@ data:
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.observability.otlp.endpoint | quote }}
   DOMAIN_PACKS: {{ .Values.domainPacks | toJson | quote }}
   NODE_ENV: {{ .Values.nodeEnv | default "production" | quote }}
+  {{- if .Values.cors.allowedOrigins }}
+  CORS_ALLOWED_ORIGINS: {{ .Values.cors.allowedOrigins | join "," | quote }}
+  {{- end }}
+  {{- if .Values.fhirBaseUrl }}
+  FHIR_BASE_URL: {{ .Values.fhirBaseUrl | quote }}
+  {{- end }}

@@ -49,7 +49,7 @@ describe('PgTransaction', () => {
       const tx = await PgTransaction.begin(mockPool);
 
       expect(mockPool.connect).toHaveBeenCalledOnce();
-      expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+      expect(mockClient.query).toHaveBeenCalledWith('BEGIN ISOLATION LEVEL READ COMMITTED');
       expect(tx.isOpen).toBe(true);
     });
 

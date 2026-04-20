@@ -69,6 +69,13 @@ sync:
 celEvaluator:
   url: grpc://cel-evaluator:50051
 
+# -- CORS (comma-separated origins for production; empty = deny all cross-origin)
+cors:
+  allowedOrigins: []
+
+# -- FHIR base URL (used in Bundle fullUrl links; must be externally routable)
+fhirBaseUrl: ""
+
 # HELM-25: Configurable runtime environment
 nodeEnv: production
 
@@ -82,10 +89,18 @@ serviceAccount:
 # HELM-13: Ephemeral storage limits included to prevent disk exhaustion.
 
 apiGateway:
-  replicaCount: 1
+  replicaCount: 2
   image:
     repository: openfoundry/api
   port: 4000
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    minAvailable: 1
+  antiAffinity: soft
   resources:
     requests:
       cpu: 200m
@@ -97,10 +112,18 @@ apiGateway:
       ephemeral-storage: 500Mi
 
 ontologyEngine:
-  replicaCount: 1
+  replicaCount: 2
   image:
     repository: openfoundry/engine
   port: 4001
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    minAvailable: 1
+  antiAffinity: soft
   resources:
     requests:
       cpu: 150m
@@ -112,10 +135,18 @@ ontologyEngine:
       ephemeral-storage: 500Mi
 
 actionExecutor:
-  replicaCount: 1
+  replicaCount: 2
   image:
     repository: openfoundry/actions
   port: 4002
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    minAvailable: 1
+  antiAffinity: soft
   resources:
     requests:
       cpu: 100m
@@ -131,6 +162,14 @@ syncEngine:
   image:
     repository: openfoundry/sync
   port: 4003
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    minAvailable: 1
+  antiAffinity: soft
   resources:
     requests:
       cpu: 150m
@@ -142,10 +181,18 @@ syncEngine:
       ephemeral-storage: 500Mi
 
 securityService:
-  replicaCount: 1
+  replicaCount: 2
   image:
     repository: openfoundry/security
   port: 4004
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    minAvailable: 1
+  antiAffinity: soft
   resources:
     requests:
       cpu: 100m
@@ -182,6 +229,27 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+# -- Monitoring (Prometheus Operator CRDs)
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    namespace: ""
+  prometheusRules:
+    enabled: false
+
+# -- Database initialization Job (runs as Helm post-install/post-upgrade hook)
+initJob:
+  enabled: true
+  image: postgres:17
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
 
 # -- PostgreSQL PVC (for bundled PostgreSQL; disable if using external)
 postgresql:
