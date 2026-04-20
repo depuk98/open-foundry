@@ -226,6 +226,16 @@ async function main(): Promise<void> {
   };
   const actionExecutor = new ActionExecutor({ storage, security, cel, auditWriter, eventPublisher: actionEventPublisher });
 
+  // ── Consent Service ──
+  // ConsentService is not yet implemented — all consent checks are bypassed.
+  // This MUST be wired before processing real patient data in regulated environments.
+  if (!isDev) {
+    console.warn(
+      'WARNING: ConsentService is not configured. Patient consent preferences are NOT enforced. ' +
+      'This deployment is NOT suitable for regulated clinical data without a consent store.',
+    );
+  }
+
   // ── API Dependencies ──
   const deps: ApiDependencies = {
     schema,
@@ -240,6 +250,14 @@ async function main(): Promise<void> {
 
   // ── Express + HTTP Server ──
   const app = express();
+
+  // Trust proxy headers (X-Forwarded-For) when behind ingress/load balancer.
+  // Required for req.ip to reflect the real client IP, not the proxy IP.
+  // In production, Kubernetes ingress terminates TLS and forwards traffic.
+  if (!isDev) {
+    app.set('trust proxy', 1); // trust first hop (ingress controller)
+  }
+
   const httpServer = http.createServer(app);
 
   // ── GraphQL (Apollo Server) ──

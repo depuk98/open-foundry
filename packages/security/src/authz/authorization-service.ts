@@ -254,6 +254,9 @@ export class AuthorizationService {
     const result = structuredClone(obj) as Record<string, unknown>;
 
     for (const key of Object.keys(obj)) {
+      // System fields (_id, _version, _updatedAt, etc.) are never redacted —
+      // they are internal metadata required by downstream mappers (e.g. FHIR resource.id/meta).
+      if (key.startsWith('_')) continue;
       if (!visible.has(key)) {
         result[key] = null;
         redactedFields.push(key);

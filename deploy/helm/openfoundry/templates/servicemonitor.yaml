@@ -1,3 +1,8 @@
+{{/*
+NOTE: Requires prom-client middleware exposing /metrics on the api-gateway.
+Enable only after adding Prometheus exposition to the application.
+See values.yaml monitoring.serviceMonitor.enabled (default: false).
+*/}}
 {{- if .Values.monitoring.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

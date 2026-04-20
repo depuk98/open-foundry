@@ -208,7 +208,7 @@ export class PostgresStorageProvider implements StorageProvider {
     const ddlText = ddl.all.join('\n');
     const checksum = createHash('sha256').update(ddlText).digest('hex').slice(0, 16);
 
-    // Check if this version is already applied
+    // Check if this version is already applied (cheap check before acquiring lock)
     const existing = await this._pool.query(
       'SELECT checksum FROM _schema_migrations WHERE version = $1',
       [schema.version],
@@ -228,22 +228,52 @@ export class PostgresStorageProvider implements StorageProvider {
       return { success: true, fromVersion, toVersion: schema.version, appliedAt: now };
     }
 
-    // Advisory lock to prevent concurrent schema applications
-    const lockId = 0x4F46; // 'OF' in hex — Open Foundry schema lock
-    await this._pool.query('SELECT pg_advisory_lock($1)', [lockId]);
+    // Use a dedicated client for the entire migration to ensure advisory lock
+    // is held on the same session. pg_advisory_xact_lock auto-releases on COMMIT.
+    const client = await this._pool.connect();
     try {
-      // Execute all DDL statements
+      await client.query('BEGIN');
+      // Transaction-scoped advisory lock — released automatically on COMMIT/ROLLBACK
+      await client.query('SELECT pg_advisory_xact_lock($1)', [0x4F46]);
+
+      // Re-check after acquiring lock (another instance may have applied it)
+      const recheck = await client.query(
+        'SELECT checksum FROM _schema_migrations WHERE version = $1',
+        [schema.version],
+      );
+      if (recheck.rows.length > 0) {
+        const storedChecksum = recheck.rows[0].checksum;
+        if (storedChecksum && storedChecksum !== checksum) {
+          throw new Error(
+            `Schema migration: version ${schema.version} already applied but DDL checksum differs. ` +
+            `Expected ${storedChecksum}, got ${checksum}. ` +
+            `Increment schema version or resolve the drift before deploying.`,
+          );
+        }
+        await client.query('COMMIT');
+        this._currentSchemaVersion = schema.version;
+        this._schemas.set(schema.version, schema);
+        const now = new Date().toISOString() as DateTime;
+        return { success: true, fromVersion, toVersion: schema.version, appliedAt: now };
+      }
+
+      // Execute all DDL statements on the same client
       for (const stmt of ddl.all) {
-        await this._pool.query(stmt);
+        await client.query(stmt);
       }
 
       // Record migration
-      await this._pool.query(
+      await client.query(
         'INSERT INTO _schema_migrations (version, checksum) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING',
         [schema.version, checksum],
       );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
-      await this._pool.query('SELECT pg_advisory_unlock($1)', [lockId]);
+      client.release();
     }
 
     this._currentSchemaVersion = schema.version;
@@ -495,15 +525,20 @@ export class PostgresStorageProvider implements StorageProvider {
       // Basic connectivity
       await this._pool.query('SELECT 1');
 
-      // Check AGE extension
+      // Check AGE extension (required for graph/link traversal)
       const extResult = await this._pool.query(
         `SELECT extname FROM pg_extension WHERE extname = 'age'`,
       );
       const ageLoaded = extResult.rows.length > 0;
 
+      // AGE is required when link types are registered (graph features active)
+      const hasGraphFeatures = this._currentSchemaVersion > 0 &&
+        [...this._schemas.values()].some(s => s.linkTypes.length > 0);
+      const healthy = !hasGraphFeatures || ageLoaded;
+
       const latencyMs = Date.now() - start;
       return {
-        healthy: true,
+        healthy,
         provider: 'postgres',
         latencyMs,
         details: {
@@ -511,6 +546,7 @@ export class PostgresStorageProvider implements StorageProvider {
           poolTotal: this._pool.totalCount,
           poolIdle: this._pool.idleCount,
           poolWaiting: this._pool.waitingCount,
+          ...(hasGraphFeatures && !ageLoaded ? { degraded: 'AGE extension required for link traversal' } : {}),
         },
       };
     } catch (err) {

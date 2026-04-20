@@ -41,9 +41,15 @@ export function wrapError(err: unknown, traceId?: string): GraphQLError {
     return err;
   }
 
-  const message = err instanceof Error ? err.message : String(err);
+  const rawMessage = err instanceof Error ? err.message : String(err);
   const code = extractErrorCode(err);
   const category = mapCodeToCategory(code);
+
+  // Never expose internal error messages to clients for system/timeout errors.
+  // Validation, authz, consent, and conflict messages are user-facing and safe.
+  const message = (category === 'system' || category === 'timeout')
+    ? 'An internal error occurred'
+    : rawMessage;
 
   return createOpenFoundryError({
     code,
