@@ -582,7 +582,7 @@ function generateSearchResolver(
       return {
         hits,
         totalCount,
-        hasNextPage: result.hasNextPage,
+        hasNextPage: offset + hits.length < totalCount,
       };
     } catch (err) {
       throw wrapError(err, ctx.requestContext.traceId);

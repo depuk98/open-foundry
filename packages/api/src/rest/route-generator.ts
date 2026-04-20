@@ -727,7 +727,7 @@ function generateSearchRoute(
               totalCount,
               limit,
               offset,
-              hasNextPage: result.hasNextPage,
+              hasNextPage: offset + hits.length < totalCount,
               hasPreviousPage: offset > 0,
             },
           },

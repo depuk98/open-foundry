@@ -30,14 +30,13 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
   async get(ctx: RequestContext, id: string): Promise<ObjectSetDefinition | null> {
     const def = this.store.get(id);
     if (!def || def.tenantId !== ctx.tenantId) return null;
-    // Visibility: only the creator or anyone if isPublic
-    if (!def.isPublic && ctx.actorId && def.createdBy !== ctx.actorId) return null;
+    if (!this.isVisible(def, ctx)) return null;
     return def;
   }
 
   async getByName(ctx: RequestContext, name: string): Promise<ObjectSetDefinition | null> {
     for (const def of this.store.values()) {
-      if (def.name === name && def.tenantId === ctx.tenantId) {
+      if (def.name === name && def.tenantId === ctx.tenantId && this.isVisible(def, ctx)) {
         return def;
       }
     }
@@ -49,8 +48,7 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
     for (const def of this.store.values()) {
       if (def.tenantId !== ctx.tenantId) continue;
       if (objectType && def.objectType !== objectType) continue;
-      // Visibility: only public sets or sets created by the current user
-      if (!def.isPublic && ctx.actorId && def.createdBy !== ctx.actorId) continue;
+      if (!this.isVisible(def, ctx)) continue;
       results.push(def);
     }
     return results;
@@ -67,6 +65,16 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
         code: 'OBJECT_SET_NOT_FOUND',
         category: 'not_found' as const,
         message: `Object set ${id} not found`,
+        retryable: false,
+      };
+      throw error;
+    }
+    // Only the creator can update an object set
+    if (ctx.actorId && existing.createdBy !== ctx.actorId) {
+      const error = {
+        code: 'FORBIDDEN',
+        category: 'authorization' as const,
+        message: `Only the creator can update object set ${id}`,
         retryable: false,
       };
       throw error;
@@ -92,7 +100,28 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
       };
       throw error;
     }
+    // Only the creator can delete an object set
+    if (ctx.actorId && existing.createdBy !== ctx.actorId) {
+      const error = {
+        code: 'FORBIDDEN',
+        category: 'authorization' as const,
+        message: `Only the creator can delete object set ${id}`,
+        retryable: false,
+      };
+      throw error;
+    }
     this.store.delete(id);
+  }
+
+  /**
+   * Visibility check: public sets are visible to all; private sets are
+   * visible only to the creator. When actorId is absent (unauthenticated),
+   * private sets are hidden.
+   */
+  private isVisible(def: ObjectSetDefinition, ctx: RequestContext): boolean {
+    if (def.isPublic) return true;
+    if (!ctx.actorId) return false;
+    return def.createdBy === ctx.actorId;
   }
 
   /** Clear all records (test utility). */
