@@ -132,12 +132,12 @@ describeWithPg('PostgresStorageProvider lifecycle (integration)', () => {
       const caps = provider.capabilities();
       expect(caps.supportsTransactions).toBe(true);
       expect(caps.supportsTemporalQueries).toBe(true);
-      expect(caps.supportsFullTextSearch).toBe(false);
+      expect(caps.supportsFullTextSearch).toBe(true);
       expect(caps.supportsGeoQueries).toBe(false);
       expect(caps.supportsGraphTraversal).toBe(true);
       expect(caps.supportsBulkMutations).toBe(true);
       expect(caps.maxTraversalDepth).toBe(10);
-      expect(caps.replicationSupport).toBe('BOTH');
+      expect(caps.replicationSupport).toBe('NONE');
     });
   });
 

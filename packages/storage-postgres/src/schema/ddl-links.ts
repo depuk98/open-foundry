@@ -2,8 +2,8 @@
  * DDL generation for LinkType tables.
  *
  * Each LinkType gets a dedicated table with:
- * - System columns: _tenant_id, _id, _from_type, _from_id, _to_type, _to_id,
- *   _version, _created_at, _updated_at, _deleted_at
+ * - System columns: _tenant_id, _id, _type, _from_type, _from_id, _to_type,
+ *   _to_id, _version, _created_at, _updated_at, _deleted_at
  * - Property columns from the link type definition
  */
 
@@ -27,6 +27,7 @@ export function generateLinkTableDDL(linkType: LinkTypeDefinition, schema = 'pub
   const table = `CREATE TABLE IF NOT EXISTS ${qualifiedTable} (
   "_tenant_id" TEXT NOT NULL,
   "_id" TEXT NOT NULL,
+  "_type" TEXT NOT NULL DEFAULT '${linkType.name}',
   "_from_type" TEXT NOT NULL,
   "_from_id" TEXT NOT NULL,
   "_to_type" TEXT NOT NULL,

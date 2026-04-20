@@ -894,8 +894,6 @@ export class MemoryStorageProvider implements StorageProvider {
     // 1. No max depth enforcement (Postgres caps at 10 steps)
     // 2. No MAX_TRAVERSAL_NODES guard (Postgres caps at 10,000)
     // 3. Neither provider uses TraversalStep.maxDepth (SPI field is ignored)
-    // 4. Postgres collects allNodes across all steps; memory only keeps final step
-    //    (memory behavior is correct per spec, Postgres should be aligned)
     const includeDeleted = options?.includeDeleted ?? false;
     const collectedEdges = new Map<string, OntologyLink>();
 

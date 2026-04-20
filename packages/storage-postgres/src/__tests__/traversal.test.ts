@@ -333,8 +333,10 @@ describe('traverse()', () => {
 
       const result = await traverse(pool, createCtx(), 'patient-1', path);
 
-      // First step found ward-1, second step found nothing
-      expect(result.nodes).toHaveLength(1);
+      // Second step found nothing — only terminal step nodes are returned
+      expect(result.nodes).toHaveLength(0);
+      // But edges from step 1 are still collected
+      expect(result.edges).toHaveLength(1);
     });
   });
 });

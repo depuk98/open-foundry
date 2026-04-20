@@ -121,7 +121,9 @@ export async function traverse(
     throw new Error(`Traversal depth ${path.steps.length} exceeds maximum of ${MAX_TRAVERSAL_DEPTH}`);
   }
 
-  const allNodes: OntologyObject[] = [];
+  // Only the final step's nodes are returned; all edges are collected.
+  // This matches the memory provider behavior (per SPI spec).
+  let stepNodes: OntologyObject[] = [];
   const allEdges: OntologyLink[] = [];
 
   // Maximum nodes to collect during traversal to prevent resource exhaustion
@@ -129,10 +131,14 @@ export async function traverse(
 
   // Current frontier: set of object IDs we're traversing from
   let currentIds = [startId];
+  let totalNodesSeen = 0;
 
   for (const step of path.steps) {
     if (currentIds.length === 0) break;
-    if (allNodes.length >= MAX_TRAVERSAL_NODES) break;
+    if (totalNodesSeen >= MAX_TRAVERSAL_NODES) break;
+
+    // Reset step nodes — only the final step's results are returned
+    stepNodes = [];
 
     const linkTable = `${pgIdent(schema)}.${pgIdent(snakeCase(step.linkType))}`;
 
@@ -201,7 +207,8 @@ export async function traverse(
       const objects = (objResult.rows as Record<string, unknown>[]).map(
         (row) => rowToObject(row),
       );
-      allNodes.push(...objects);
+      stepNodes.push(...objects);
+      totalNodesSeen += objects.length;
       nextIds.push(...objects.map((o) => o._id));
     }
 
@@ -211,11 +218,11 @@ export async function traverse(
   // Apply pagination
   const limit = options?.limit ?? 100;
   const offset = options?.offset ?? 0;
-  const paginatedNodes = allNodes.slice(offset, offset + limit);
+  const paginatedNodes = stepNodes.slice(offset, offset + limit);
 
   return {
     nodes: paginatedNodes,
     edges: allEdges,
-    totalCount: allNodes.length,
+    totalCount: stepNodes.length,
   };
 }

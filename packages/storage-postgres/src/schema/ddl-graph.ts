@@ -24,7 +24,7 @@ export function generateGraphSetupDDL(): string[] {
     `CREATE EXTENSION IF NOT EXISTS age;`,
     `LOAD 'age';`,
     `SET search_path = ag_catalog, "$user", public;`,
-    `SELECT create_graph('${GRAPH_NAME}');`,
+    `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = '${GRAPH_NAME}') THEN PERFORM create_graph('${GRAPH_NAME}'); END IF; END $$;`,
   ];
 }
 
@@ -32,14 +32,14 @@ export function generateGraphSetupDDL(): string[] {
  * Generate DDL to create a node label for an ObjectType.
  */
 export function generateNodeLabelDDL(objectType: ObjectTypeDefinition): string {
-  return `SELECT create_vlabel('${GRAPH_NAME}', '${objectType.name}');`;
+  return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_label WHERE name = '${objectType.name}' AND graph = (SELECT graphid FROM ag_catalog.ag_graph WHERE name = '${GRAPH_NAME}')) THEN PERFORM create_vlabel('${GRAPH_NAME}', '${objectType.name}'); END IF; END $$;`;
 }
 
 /**
  * Generate DDL to create an edge label for a LinkType.
  */
 export function generateEdgeLabelDDL(linkType: LinkTypeDefinition): string {
-  return `SELECT create_elabel('${GRAPH_NAME}', '${linkType.name}');`;
+  return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_label WHERE name = '${linkType.name}' AND graph = (SELECT graphid FROM ag_catalog.ag_graph WHERE name = '${GRAPH_NAME}')) THEN PERFORM create_elabel('${GRAPH_NAME}', '${linkType.name}'); END IF; END $$;`;
 }
 
 /**

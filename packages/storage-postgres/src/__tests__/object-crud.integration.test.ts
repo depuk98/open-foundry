@@ -300,10 +300,11 @@ describeWithPg('Object CRUD (PostgreSQL integration)', () => {
       expect(history.rows.length).toBe(0);
     });
 
-    it('throws for non-existent object', async () => {
+    it('is idempotent for non-existent object (no-op)', async () => {
+      // Both providers treat hard-delete of non-existent as idempotent no-op
       await expect(
         hardDeleteObject(pool, ctx, 'Patient', 'nonexistent'),
-      ).rejects.toThrow(/not found/);
+      ).resolves.toBeUndefined();
     });
   });
 
