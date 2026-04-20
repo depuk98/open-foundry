@@ -4,7 +4,7 @@
 
 Open Foundry provides the semantic, kinetic, and security layers needed to turn commodity data infrastructure into a coherent, queryable, actionable model of a real-world system. The platform is domain-neutral — domain-specific functionality is delivered through composable **Domain Packs**.
 
-> **Status:** Active MVP. Core platform is functional with three domain packs. Production-hardening gaps (schema/audit persistence, Helm HA) are documented under [Known Deferrals](#known-deferrals).
+> **Status:** Active MVP. Core platform is functional with three domain packs. Runtime wiring and production-hardening gaps are documented under [Known Deferrals](#known-deferrals).
 
 > Apache 2.0 licensed. No proprietary dependencies. Schema-driven. Storage-agnostic.
 
@@ -55,9 +55,9 @@ action TransferAsset @actionType {
 }
 ```
 
-**Storage Provider Interface (SPI)** — All persistence goes through a pluggable interface. The platform ships with PostgreSQL+AGE (graph + relational) for production and an in-memory provider for tests. The SPI covers schema management, CRUD, links, queries, aggregation, full-text search, transactions, temporal queries, lineage, and multi-tenancy.
+**Storage Provider Interface (SPI)** — All persistence goes through a pluggable interface. The platform ships with PostgreSQL+AGE (graph + relational) and an in-memory provider. The in-memory provider passes the full SPI conformance suite (287 tests, 10 categories); the Postgres provider has 91 dedicated integration tests covering the same surface area. The SPI covers schema management, CRUD, links, queries, aggregation, full-text search, transactions, temporal queries, lineage, and multi-tenancy. See [Known Deferrals](#known-deferrals) for runtime wiring status.
 
-**Action Framework** — Actions are transactional mutations defined in YAML manifests with CEL preconditions and effects. The pipeline runs: validate → authorise → consent → preconditions → execute → audit → emit. A Go gRPC sidecar handles CEL expression evaluation.
+**Action Framework** — Actions are transactional mutations defined in YAML manifests with CEL preconditions and effects. The pipeline runs: validate → authorise → consent → preconditions → execute → side-effects → audit → emit. A Go gRPC sidecar handles CEL expression evaluation.
 
 **Security** — OIDC authentication, OpenFGA ReBAC for relationship-based access control, field-level redaction, consent management with healthcare-specific direct-care exemptions, and an immutable audit trail.
 
@@ -69,7 +69,7 @@ Domain Packs are composable schema and configuration modules that specialise the
 
 | Pack | Namespace | Object Types | Actions | Connectors |
 |------|-----------|-------------|---------|------------|
-| **NHS Acute** | `nhs.acute` | Patient, Ward, Bed, Consultant, DischargeRecord | Admit, Discharge, Transfer | PAS (JDBC + CDC) |
+| **NHS Acute** | `nhs.acute` | Patient, Ward, Bed, Consultant, DischargeRecord | AdmitPatient, DischargePatient, TransferWard | PAS (JDBC + CDC) |
 | **AML** | `aml` | Customer, Transaction, Alert, Case, Account, SuspiciousActivityReport | AssignAlertToCase, FlagTransaction, FreezeAccount, OpenCase, FileReport, SubmitReport | TMS (JDBC) |
 | **Supply Chain** | `supply.chain` | Product, Supplier, Shipment, Facility, InventoryRecord, PurchaseOrder | ShipOrder, ReceiveShipment, CreateOrder, CancelOrder | ERP (JDBC + CDC) |
 
@@ -196,9 +196,25 @@ helm install openfoundry deploy/helm/openfoundry \
 
 ## Test Coverage
 
-1,780+ unit and integration tests across all packages.
+1,829 tests across all packages:
 
-Database-backed integration tests are skipped unless the required Docker/PostgreSQL services are available.
+| Category | Count | Notes |
+|----------|-------|-------|
+| Unit tests | 1,738 | Always run |
+| Postgres integration tests | 91 | Run when `PG_TEST_URL` is set |
+| SPI conformance suite | 287 | Included in unit count; 10 categories |
+
+### PostgreSQL Provider Capabilities
+
+| Capability | Status |
+|-----------|--------|
+| Full-text search | Supported |
+| Graph traversal (AGE) | Supported (max depth: 10) |
+| Transactions | Supported |
+| Temporal queries | Supported |
+| Bulk mutations | Supported |
+| Geo queries | Not implemented |
+| Replication | Not implemented |
 
 ---
 
@@ -220,10 +236,15 @@ These items are specified in the full technical spec but intentionally deferred 
 
 | Item | Current State | Impact |
 |------|--------------|--------|
+| Production runtime wiring | `server.ts` always uses `MemoryStorageProvider` and dev stubs | Auth/FGA/CEL/Postgres not wired at runtime |
 | Schema Registry persistence | In-memory only | Schemas lost on restart |
 | Audit Trail persistence | In-memory only | Audit data lost on restart |
 | Rate limiting (distributed) | In-memory only | Single-instance only |
 | Helm HA configuration | replicas=1, no PDBs | Not production-hardened |
+| `clearFieldCache()` lifecycle | Not wired into request lifecycle | Stale field visibility until restart |
+| Link event publishing | Uses `publishObjectChange` | No dedicated `publishLinkChange` events |
+| `ROLLBACK_ALL` compensation | Doesn't handle link effects | Links not reverted on rollback |
+| Traversal `maxDepth` / guards | Memory provider lacks depth/node limits | Unbounded traversal possible in memory |
 | Application Framework | Not implemented | No UI layer; API-only |
 | Federation protocol | Interface defined, not implemented | Single-instance only |
 | TypeDB / Neo4j providers | Not implemented | PostgreSQL+AGE only |
@@ -257,20 +278,21 @@ A human engineer took over direction — reviewing the codebase, revising the sp
 - **Domain expansion** — Two new domain packs (AML, Supply Chain) with full schemas, actions, connectors, and permission models.
 - **Feature additions** — Aggregation queries, full-text search, object sets, and connector plugin architecture.
 - **Security hardening** — Multiple review rounds (including cross-model Codex reviews) identified and fixed 200+ issues across auth pipelines, SQL injection, field-level redaction, system-field mapping, and error handling.
+- **Postgres integration** — Idempotent DDL generation (AGE graph/labels), link table schema alignment, traversal behavior parity with the memory provider, and 91 integration tests against a live PostgreSQL+AGE instance.
 - **Regression test suite** — Targeted tests covering the most critical bugs found during review.
 
 ### By the Numbers
 
 | Metric | Value |
 |--------|-------|
-| TypeScript source | ~24,000 lines |
-| Test code | ~29,000 lines |
+| TypeScript source | ~25,000 lines |
+| Test code | ~34,000 lines |
 | Go source (CEL evaluator) | ~1,900 lines |
 | Domain pack config (ODL, YAML, FGA) | ~1,700 lines |
 | Deployment config | ~2,000 lines |
 | Specification + MVP docs | ~4,200 lines |
 | Packages | 20 |
-| Unit tests | 1,780+ |
+| Unit + integration tests | 1,829 |
 
 ---
 

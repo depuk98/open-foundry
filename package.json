@@ -2,6 +2,7 @@
   "name": "silmaril",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Open Foundry — an open-source ontology platform for operational digital twins",
   "packageManager": "pnpm@9.15.4",
   "engines": {
