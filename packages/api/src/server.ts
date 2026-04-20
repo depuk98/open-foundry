@@ -7,6 +7,8 @@
  * Configuration via environment variables:
  *   PORT                 — HTTP port (default: 4000)
  *   NODE_ENV             — 'production' enables real service wiring
+ *   DOMAIN_PACKS_DIR     — Path to domain-packs directory (auto-detected if omitted)
+ *   DOMAIN_PACKS         — Comma-separated pack names to load (default: all found)
  *   OIDC_ISSUER          — OIDC provider issuer URL (matches Helm configmap)
  *   OIDC_CLIENT_ID       — OIDC client ID
  *   OPENFGA_URL          — OpenFGA API URL (matches Helm configmap / docker-compose)
@@ -32,8 +34,7 @@ import { ActionExecutor, CelClient } from '@openfoundry/actions';
 import type { SecurityLayer, CelEvaluator } from '@openfoundry/actions';
 import { AuthorizationService, OidcAuthenticator } from '@openfoundry/security';
 import type { OpenFgaClientInterface } from '@openfoundry/security';
-import type { StorageProvider } from '@openfoundry/spi';
-import type { ParsedSchema } from '@openfoundry/odl';
+import type { StorageProvider, RequestContext } from '@openfoundry/spi';
 import { createGraphQLServer, buildResolverContext } from './graphql/index.js';
 import { generateRestRoutes } from './rest/index.js';
 import { createFhirRouter } from './fhir/index.js';
@@ -46,6 +47,7 @@ import {
   extractUser,
   REQUIRED_PROD_VARS,
 } from './config.js';
+import { loadDomainPacks } from './schema-loader.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
 
@@ -74,17 +76,19 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── Schema ──
-  // TODO: Load ParsedSchema from domain pack registry once SchemaRegistry
-  // supports runtime loading from the filesystem / config.
-  const schema: ParsedSchema = {
-    objectTypes: [],
-    linkTypes: [],
-    actionTypes: [],
-    enums: [],
-    interfaces: [],
-    scalars: [],
-  };
+  // ── Schema (load from domain packs) ──
+  const packNames = process.env['DOMAIN_PACKS']?.split(',').map(s => s.trim()).filter(Boolean);
+  const { parsed: schema, spiSchema, packs } = await loadDomainPacks(undefined, packNames);
+  console.log(
+    `Schema: loaded ${packs.length} domain pack(s) — ` +
+    `${schema.objectTypes.length} object types, ` +
+    `${schema.linkTypes.length} link types, ` +
+    `${schema.enums.length} enums`,
+  );
+
+  // Apply schema to storage (creates tables/indexes in Postgres, registers types in memory)
+  const bootCtx: RequestContext = { tenantId: 'system', actorId: 'boot' };
+  await storage.applySchema(bootCtx, spiSchema);
 
   // ── Engine ──
   const eventBus = new InMemoryEventBus();

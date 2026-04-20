@@ -236,7 +236,7 @@ These items are specified in the full technical spec but intentionally deferred 
 
 | Item | Current State | Impact |
 |------|--------------|--------|
-| Production runtime wiring | Conditional: Postgres/FGA/CEL in prod, stubs in dev | Schema loading from domain packs still TODO |
+| Production runtime wiring | Fully wired: Postgres/FGA/CEL/OIDC in prod, stubs in dev; domain packs loaded at boot | Complete |
 | Schema Registry persistence | In-memory only | Schemas lost on restart |
 | Audit Trail persistence | In-memory only | Audit data lost on restart |
 | Rate limiting (distributed) | In-memory only | Single-instance only |
