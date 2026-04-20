@@ -242,7 +242,7 @@ These items are specified in the full technical spec but intentionally deferred 
 | Rate limiting (distributed) | In-memory only | Single-instance only |
 | Helm HA configuration | replicas=1, no PDBs | Not production-hardened |
 | Link event publishing | Uses `publishObjectChange` | No dedicated `publishLinkChange` events |
-| `ROLLBACK_ALL` compensation | Doesn't handle link effects | Links not reverted on rollback |
+| `ROLLBACK_ALL` compensation | Handles both object and link effects | Complete |
 | Traversal `maxDepth` / guards | Memory provider lacks depth/node limits | Unbounded traversal possible in memory |
 | Application Framework | Not implemented | No UI layer; API-only |
 | Federation protocol | Interface defined, not implemented | Single-instance only |

@@ -224,27 +224,43 @@ export class ActionExecutor {
           const policy = manifest.rollback?.onSideEffectFailure ?? 'LOG_AND_CONTINUE';
           if (policy === 'ROLLBACK_ALL') {
             // CQ-24: Attempt compensating transaction to undo committed effects.
-            // Execute reverse effects to restore prior state from beforeStates.
-            // TODO: Compensation only handles object effects (create/update/delete).
-            // Link-creating actions will not have their links rolled back because
-            // the compensation loop calls deleteObject/updateObject but never
-            // deleteLink. Link entries in affectedObjects use the `link:` key
-            // prefix and have type set to the linkType, so compensatingTxn would
-            // attempt deleteObject on a link type (wrong). Add link compensation.
+            // Reverses both object and link effects using beforeStates snapshots.
             try {
               const compensatingTxn = await this.config.storage.beginTransaction(reqCtx);
               try {
                 for (const affected of affectedObjects) {
-                  const before = beforeStates.get(`${affected.type}:${affected.id}`);
-                  if (affected.changeType === 'created') {
-                    // Undo create by soft-deleting
-                    await compensatingTxn.deleteObject(affected.type, affected.id, 'soft');
-                  } else if (affected.changeType === 'updated' && before) {
-                    // Undo update by restoring prior state
-                    await compensatingTxn.updateObject(affected.type, affected.id, before);
+                  // Link entries use the `link:<type>:<id>` key prefix in beforeStates
+                  const isLink = beforeStates.has(`link:${affected.type}:${affected.id}`);
+
+                  if (isLink) {
+                    if (affected.changeType === 'created') {
+                      // Undo link creation by deleting the link
+                      await compensatingTxn.deleteLink(affected.type, affected.id);
+                    } else if (affected.changeType === 'deleted') {
+                      // Undo link deletion by recreating from beforeStates snapshot
+                      const before = beforeStates.get(`link:${affected.type}:${affected.id}`);
+                      if (before && before['_fromId'] && before['_toId']) {
+                        const { _fromId, _toId, _type, _id, _tenantId, _version, _createdAt, _updatedAt, _deletedAt, _fromType, _toType, ...props } = before;
+                        await compensatingTxn.createLink(
+                          affected.type,
+                          _fromId as string,
+                          _toId as string,
+                          props,
+                        );
+                      }
+                    }
+                  } else {
+                    const before = beforeStates.get(`${affected.type}:${affected.id}`);
+                    if (affected.changeType === 'created') {
+                      // Undo object create by soft-deleting
+                      await compensatingTxn.deleteObject(affected.type, affected.id, 'soft');
+                    } else if (affected.changeType === 'updated' && before) {
+                      // Undo object update by restoring prior state
+                      await compensatingTxn.updateObject(affected.type, affected.id, before);
+                    }
+                    // 'deleted' object rollbacks are best-effort; recreating deleted objects
+                    // requires the full prior state which may not always be available
                   }
-                  // 'deleted' rollbacks are best-effort; recreating deleted objects
-                  // requires the full prior state which may not be available
                 }
                 await compensatingTxn.commit();
               } catch (innerErr) {
