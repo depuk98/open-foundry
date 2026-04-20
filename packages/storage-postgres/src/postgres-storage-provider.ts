@@ -6,6 +6,7 @@
  * interface. Uses pg Pool for connection pooling.
  */
 
+import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
 import type { PoolConfig } from 'pg';
 import type {
@@ -203,13 +204,9 @@ export class PostgresStorageProvider implements StorageProvider {
       )
     `);
 
-    // Compute DDL checksum for drift detection (simple hash)
+    // Compute DDL checksum for drift detection (SHA-256, truncated to 16 hex chars)
     const ddlText = ddl.all.join('\n');
-    let hash = 0;
-    for (let i = 0; i < ddlText.length; i++) {
-      hash = ((hash << 5) - hash + ddlText.charCodeAt(i)) | 0;
-    }
-    const checksum = (hash >>> 0).toString(16).padStart(8, '0');
+    const checksum = createHash('sha256').update(ddlText).digest('hex').slice(0, 16);
 
     // Check if this version is already applied
     const existing = await this._pool.query(

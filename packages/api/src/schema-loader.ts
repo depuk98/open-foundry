@@ -103,83 +103,11 @@ function discoverPacks(packsDir: string): string[] {
 function readManifest(packDir: string): PackManifest {
   const yamlPath = resolve(packDir, 'pack.yaml');
   const content = readFileSync(yamlPath, 'utf-8');
-  // Simple YAML parsing — pack.yaml uses flat key: value and lists
-  return parseSimpleYaml(content);
-}
-
-/**
- * Minimal YAML parser for pack.yaml files.
- * Handles: scalars, flat objects, and arrays of strings.
- * Does NOT handle nested objects, multi-line strings, or anchors.
- */
-function parseSimpleYaml(content: string): PackManifest {
-  const result: Record<string, unknown> = {};
-  const lines = content.split('\n');
-  let currentKey: string | null = null;
-  let currentList: string[] | null = null;
-
-  for (const line of lines) {
-    // Skip comments and empty lines
-    if (line.trim().startsWith('#') || line.trim() === '') continue;
-
-    // List item (indented with -)
-    const listMatch = line.match(/^\s+-\s+(.+)/);
-    if (listMatch?.[1] && currentKey && currentList) {
-      currentList.push(listMatch[1].trim());
-      continue;
-    }
-
-    // Key-value or key with nested content
-    const kvMatch = line.match(/^(\w+):\s*(.*)/);
-    if (kvMatch?.[1]) {
-      // Save previous list
-      if (currentKey && currentList) {
-        result[currentKey] = currentList;
-        currentList = null;
-      }
-
-      const key = kvMatch[1];
-      const value = (kvMatch[2] ?? '').trim();
-
-      if (value === '' || value === '>') {
-        // Start of a list or block
-        currentKey = key;
-        currentList = [];
-      } else {
-        // Scalar value
-        currentKey = null;
-        currentList = null;
-        // Remove surrounding quotes
-        result[key] = value.replace(/^["']|["']$/g, '');
-      }
-      continue;
-    }
-
-    // Indented key-value (for nested objects like dependencies/provides)
-    const nestedMatch = line.match(/^\s+(\S+):\s*(.*)/);
-    if (nestedMatch?.[1] && currentKey) {
-      const nestedKey = nestedMatch[1];
-      const nestedVal = (nestedMatch[2] ?? '').trim().replace(/^["']|["']$/g, '');
-      if (currentList) {
-        // Was expecting a list but got a nested object — switch
-        const obj = (result[currentKey] as Record<string, string>) ?? {};
-        obj[nestedKey] = nestedVal;
-        result[currentKey] = obj;
-        currentList = null;
-      } else {
-        const obj = ((result[currentKey] ?? {}) as Record<string, string>);
-        obj[nestedKey] = nestedVal;
-        result[currentKey] = obj;
-      }
-    }
+  const parsed = parseYaml(content);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`Invalid pack.yaml at ${yamlPath}: expected an object`);
   }
-
-  // Save final list
-  if (currentKey && currentList) {
-    result[currentKey] = currentList;
-  }
-
-  return result as unknown as PackManifest;
+  return parsed as unknown as PackManifest;
 }
 
 /**
@@ -528,8 +456,13 @@ export async function loadDomainPacks(
 
     const odlSource = loadPackOdl(packDir, manifest);
     if (odlSource.trim()) {
-      const parsed = parseOdl(odlSource);
-      parsedSchemas.push(parsed);
+      try {
+        const parsed = parseOdl(odlSource);
+        parsedSchemas.push(parsed);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Schema loader: failed to parse ODL from pack '${name}': ${msg}`);
+      }
     }
 
     // Load field permission configurations

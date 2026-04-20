@@ -21,6 +21,7 @@ import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { GraphQLError } from 'graphql';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
@@ -313,7 +314,6 @@ async function main(): Promise<void> {
           // Rate limit check
           const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
           if (!rlResult.allowed) {
-            const { GraphQLError } = await import('graphql');
             throw new GraphQLError(`Rate limit exceeded (by ${rlResult.exceededBy})`, {
               extensions: {
                 code: 'RATE_LIMITED',
@@ -327,7 +327,6 @@ async function main(): Promise<void> {
         } catch (err) {
           // Map auth failures to proper GraphQL errors with 401 status
           if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
-            const { GraphQLError } = await import('graphql');
             throw new GraphQLError('Authentication required', {
               extensions: {
                 code: 'UNAUTHENTICATED',
@@ -374,7 +373,7 @@ async function main(): Promise<void> {
           res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } });
           return;
         }
-        console.error('REST handler error:', err);
+        console.error('REST handler error:', err instanceof Error ? err.message : 'unknown');
         res.status(500).json({
           error: {
             code: 'INTERNAL_ERROR',
@@ -424,7 +423,7 @@ async function main(): Promise<void> {
         res.status(401).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login', diagnostics: 'Authentication required' }] });
         return;
       }
-      console.error('FHIR handler error:', err);
+      console.error('FHIR handler error:', err instanceof Error ? err.message : 'unknown');
       res.status(500).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'fatal', code: 'exception', diagnostics: 'Internal server error' }] });
     }
   });

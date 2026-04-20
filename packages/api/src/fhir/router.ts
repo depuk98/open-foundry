@@ -156,7 +156,7 @@ async function handlePatientRead(
       body: patient,
     };
   } catch (err) {
-    console.error('FHIR Patient read error:', err);
+    console.error('FHIR Patient read error:', err instanceof Error ? err.message : 'unknown');
     return operationOutcome(500, 'exception', 'Internal server error');
   }
 }
@@ -265,7 +265,7 @@ async function handlePatientSearch(
       body: bundle,
     };
   } catch (err) {
-    console.error('FHIR Patient search error:', err);
+    console.error('FHIR Patient search error:', err instanceof Error ? err.message : 'unknown');
     return operationOutcome(500, 'exception', 'Internal server error');
   }
 }
@@ -365,7 +365,7 @@ async function handleEncounterSearch(
       body: bundle,
     };
   } catch (err) {
-    console.error('FHIR Encounter search error:', err);
+    console.error('FHIR Encounter search error:', err instanceof Error ? err.message : 'unknown');
     return operationOutcome(500, 'exception', 'Internal server error');
   }
 }
