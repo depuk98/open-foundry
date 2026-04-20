@@ -184,7 +184,7 @@ Once the stack is running:
 
 ### Kubernetes Deployment
 
-A Helm chart is provided for single-replica evaluation deployments. HA production settings are deferred (see [Known Deferrals](#known-deferrals)).
+A Helm chart is provided with production-ready HA primitives: HPA (2–5 replicas), PodDisruptionBudget, pod anti-affinity, readiness/liveness probes, security contexts, resource limits, and optional Prometheus monitoring. ServiceMonitor and PrometheusRule are included but disabled by default (require prom-client middleware).
 
 ```bash
 helm install openfoundry deploy/helm/openfoundry \
@@ -196,11 +196,11 @@ helm install openfoundry deploy/helm/openfoundry \
 
 ## Test Coverage
 
-1,844 tests across all packages:
+1,845 tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,746 | Always run |
+| Unit tests | 1,747 | Always run |
 | Postgres integration tests | 98 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -239,8 +239,11 @@ These items are specified in the full technical spec but intentionally deferred 
 | Production runtime wiring | Fully wired: Postgres/FGA/CEL/OIDC in prod, stubs in dev; domain packs loaded at boot | Complete |
 | Schema Registry persistence | In-memory only | Schemas lost on restart |
 | Audit Trail persistence | PostgresAuditStore wired in prod mode | Complete |
-| Rate limiting (distributed) | In-memory only | Single-instance only |
-| Helm HA configuration | replicas=1, no PDBs | Not production-hardened |
+| Consent service | Interface present, not wired; startup warns | Patient consent preferences not enforced |
+| Event bus (persistent) | InMemoryEventBus in prod (warns at startup) | Events lost on restart; needs Kafka/RedPanda |
+| Rate limiting (distributed) | In-memory per-pod | Effective limit scales with replica count; needs Redis |
+| Prometheus metrics endpoint | ServiceMonitor/PrometheusRule templates exist (disabled) | Requires prom-client middleware |
+| Helm HA configuration | HPA, PDB, anti-affinity, resource limits configured | Complete |
 | Link event publishing | Routes link effects through `publishLinkChange()` | Complete |
 | `ROLLBACK_ALL` compensation | Handles both object and link effects | Complete |
 | Traversal `maxDepth` / guards | Memory provider lacks depth/node limits | Unbounded traversal possible in memory |
@@ -276,7 +279,7 @@ A human engineer took over direction — reviewing the codebase, revising the sp
 - **Spec refinement** — Three rounds of spec review addressing gaps in directives, resilience, lifecycle, and federation contracts.
 - **Domain expansion** — Two new domain packs (AML, Supply Chain) with full schemas, actions, connectors, and permission models.
 - **Feature additions** — Aggregation queries, full-text search, object sets, and connector plugin architecture.
-- **Security hardening** — Multiple review rounds (including cross-model Codex reviews) identified and fixed 200+ issues across auth pipelines, SQL injection, field-level redaction, system-field mapping, and error handling.
+- **Security hardening** — Multiple review rounds (including cross-model Codex reviews) identified and fixed 200+ issues across auth pipelines, SQL injection, field-level redaction, system-field mapping, error message sanitization, CORS fail-closed, proxy-aware rate limiting, advisory lock safety, and schema migration integrity.
 - **Postgres integration** — Idempotent DDL generation (AGE graph/labels), link table schema alignment, traversal behavior parity with the memory provider, and 91 integration tests against a live PostgreSQL+AGE instance.
 - **Regression test suite** — Targeted tests covering the most critical bugs found during review.
 
@@ -284,14 +287,14 @@ A human engineer took over direction — reviewing the codebase, revising the sp
 
 | Metric | Value |
 |--------|-------|
-| TypeScript source | ~25,000 lines |
-| Test code | ~34,000 lines |
+| TypeScript source | ~26,000 lines |
+| Test code | ~37,000 lines |
 | Go source (CEL evaluator) | ~1,900 lines |
 | Domain pack config (ODL, YAML, FGA) | ~1,700 lines |
 | Deployment config | ~2,000 lines |
 | Specification + MVP docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,844 |
+| Unit + integration tests | 1,845 |
 
 ---
 

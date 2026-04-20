@@ -8,13 +8,16 @@
  *   PORT                 — HTTP port (default: 4000)
  *   NODE_ENV             — 'production' enables real service wiring
  *   DOMAIN_PACKS_DIR     — Path to domain-packs directory (auto-detected if omitted)
- *   DOMAIN_PACKS         — Comma-separated pack names to load (default: all found)
+ *   DOMAIN_PACKS         — Comma-separated or JSON array of pack names to load
  *   OIDC_ISSUER          — OIDC provider issuer URL (matches Helm configmap)
  *   OIDC_CLIENT_ID       — OIDC client ID
+ *   OIDC_JWKS_URI        — JWKS endpoint override for non-Keycloak issuers
  *   OPENFGA_URL          — OpenFGA API URL (matches Helm configmap / docker-compose)
  *   OPENFGA_STORE_ID     — OpenFGA store ID
- *   POSTGRES_URL         — PostgreSQL connection string
+ *   POSTGRES_URL         — PostgreSQL connection string (with ?sslmode= for TLS)
  *   CEL_EVALUATOR_URL    — CEL gRPC sidecar address (default: localhost:50051)
+ *   CORS_ALLOWED_ORIGINS — Comma-separated allowed origins (empty = deny all in prod)
+ *   FHIR_BASE_URL        — Externally routable FHIR base URL for Bundle links
  */
 
 import http from 'node:http';
