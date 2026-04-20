@@ -47,6 +47,7 @@ import {
   extractUser,
   REQUIRED_PROD_VARS,
 } from './config.js';
+import type { ActionAuthzMapping } from './config.js';
 import { loadDomainPacks } from './schema-loader.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
 
   // ── Schema (load from domain packs) ──
   const packNames = process.env['DOMAIN_PACKS']?.split(',').map(s => s.trim()).filter(Boolean);
-  const { parsed: schema, spiSchema, packs } = await loadDomainPacks(undefined, packNames);
+  const { parsed: schema, spiSchema, packs, manifestRegistry, fieldPermissions } = await loadDomainPacks(undefined, packNames);
   console.log(
     `Schema: loaded ${packs.length} domain pack(s) — ` +
     `${schema.objectTypes.length} object types, ` +
@@ -107,7 +108,7 @@ async function main(): Promise<void> {
   // ── Authorization (OpenFGA) ──
   let fgaClient: OpenFgaClientInterface;
   if (!isDev && process.env['OPENFGA_URL'] && process.env['OPENFGA_STORE_ID']) {
-    fgaClient = createFgaClient(
+    fgaClient = await createFgaClient(
       process.env['OPENFGA_URL'],
       process.env['OPENFGA_STORE_ID'],
     );
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
       console.warn('Authorization: allow-all stub (development mode)');
     }
   }
-  const authorizationService = new AuthorizationService(fgaClient, []);
+  const authorizationService = new AuthorizationService(fgaClient, fieldPermissions);
 
   // ── CEL Evaluator ──
   let cel: CelEvaluator;
@@ -140,9 +141,12 @@ async function main(): Promise<void> {
   }
 
   // ── Security Layer (for action pipeline) ──
+  // Derive action-to-FGA mappings from schema actionTypes.
+  // E.g., AdmitPatient → check can_admit on patient:<id>
+  const actionMappings = deriveActionAuthzMappings(schema);
   let security: SecurityLayer;
   if (!isDev) {
-    security = createSecurityLayer(authorizationService);
+    security = createSecurityLayer(authorizationService, actionMappings);
   } else {
     security = { async checkPermission() { return { allowed: true }; } };
   }
@@ -172,6 +176,7 @@ async function main(): Promise<void> {
     authorizationService,
     authenticator,
     storage,
+    manifestRegistry,
   };
 
   // ── Express + HTTP Server ──
@@ -209,8 +214,22 @@ async function main(): Promise<void> {
     expressMiddleware(apolloServer, {
       context: async ({ req }): Promise<ResolverContext> => {
         authorizationService.clearFieldCache();
-        const user = await extractUser(req, authenticator, isDev);
-        return buildResolverContext(user, deps);
+        try {
+          const user = await extractUser(req, authenticator, isDev);
+          return buildResolverContext(user, deps);
+        } catch (err) {
+          // Map auth failures to proper GraphQL errors with 401 status
+          if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
+            const { GraphQLError } = await import('graphql');
+            throw new GraphQLError('Authentication required', {
+              extensions: {
+                code: 'UNAUTHENTICATED',
+                http: { status: 401 },
+              },
+            });
+          }
+          throw err;
+        }
       },
     }),
   );
@@ -308,6 +327,49 @@ async function main(): Promise<void> {
   console.log(`  GraphQL:  http://localhost:${PORT}/graphql`);
   console.log(`  REST:     http://localhost:${PORT}/api/v1/`);
   console.log(`  FHIR:     http://localhost:${PORT}/fhir/`);
+}
+
+/** Convert PascalCase to snake_case — must match FGA codegen convention. */
+function fgaSnakeCase(s: string): string {
+  return s
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+}
+
+/**
+ * Build action authorization mappings from the parsed schema's actionTypes.
+ * Extracts verb from PascalCase name, finds first object-typed param.
+ * Uses snake_case for FGA object types (matching OpenFGA codegen convention).
+ */
+function deriveActionAuthzMappings(
+  schema: import('@openfoundry/odl').ParsedSchema,
+): Map<string, ActionAuthzMapping> {
+  const mappings = new Map<string, ActionAuthzMapping>();
+  const objectTypeNames = new Set(schema.objectTypes.map(o => o.name));
+
+  for (const action of schema.actionTypes) {
+    // Extract verb: "AdmitPatient" → "admit", "DischargePatient" → "discharge", "TransferWard" → "transfer"
+    const verbMatch = action.name.match(/^([A-Z][a-z]+)/);
+    if (!verbMatch) continue;
+    const verb = verbMatch[1]!.toLowerCase();
+    const relation = `can_${verb}`;
+
+    // Find first @param field that references an ObjectType (the authorization target)
+    const paramFields = action.fields.filter(f =>
+      f.directives.some(d => d.kind === 'param'),
+    );
+    const objectParam = paramFields.find(f => objectTypeNames.has(f.type.name));
+    if (!objectParam) continue;
+
+    mappings.set(action.name, {
+      relation,
+      objectType: fgaSnakeCase(objectParam.type.name),
+      objectIdParam: objectParam.name,
+    });
+  }
+
+  return mappings;
 }
 
 main().catch((err) => {

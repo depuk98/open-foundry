@@ -157,6 +157,59 @@ function convertOrderBy(orderBy: Record<string, string> | undefined): { field: s
 }
 
 /**
+ * Extract all field names referenced in a filter expression.
+ * Used to validate that users cannot filter/sort on redacted fields.
+ */
+function extractFilterFields(filter: FilterExpression | undefined): Set<string> {
+  const fields = new Set<string>();
+  if (!filter) return fields;
+
+  function walk(expr: FilterExpression): void {
+    if ('field' in expr) {
+      fields.add((expr as { field: string }).field);
+      return;
+    }
+    const logical = expr as { and?: FilterExpression[]; or?: FilterExpression[]; not?: FilterExpression };
+    if (logical.and) {
+      for (const sub of logical.and) walk(sub);
+    }
+    if (logical.or) {
+      for (const sub of logical.or) walk(sub);
+    }
+    if (logical.not) {
+      walk(logical.not);
+    }
+  }
+  walk(filter);
+  return fields;
+}
+
+/**
+ * Validate that filter and sort fields are not targeting redacted fields.
+ * Returns the set of disallowed field names, or empty set if all are valid.
+ */
+function validateQueryFields(
+  filterFields: Set<string>,
+  orderByFields: string[],
+  visibleFields: Set<string> | undefined,
+): string[] {
+  // No field config → all fields visible (no redaction configured)
+  if (!visibleFields) return [];
+
+  const violations: string[] = [];
+  for (const field of filterFields) {
+    // System fields (_id) are always allowed for filtering
+    if (field.startsWith('_')) continue;
+    if (!visibleFields.has(field)) violations.push(field);
+  }
+  for (const field of orderByFields) {
+    if (field.startsWith('_')) continue;
+    if (!visibleFields.has(field)) violations.push(field);
+  }
+  return violations;
+}
+
+/**
  * Convert an OntologyObject to a GraphQL-friendly shape.
  * Strips the underscore prefix from system fields that map to schema fields.
  */
@@ -332,6 +385,21 @@ function generateQueryResolvers(
 
       // Build filter: combine user filter with authorization filter
       const userFilter = convertFilter(args.filter);
+
+      // SEC-14: Validate filter/sort fields against redacted fields
+      // Prevents users from inferring hidden field values via predicate leakage.
+      const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
+      const orderByFields = args.orderBy ? Object.keys(args.orderBy) : [];
+      const violations = validateQueryFields(
+        extractFilterFields(userFilter),
+        orderByFields,
+        visibleFields,
+      );
+      if (violations.length > 0) {
+        throw new Error(
+          `Access denied: cannot filter or sort on redacted fields: ${violations.join(', ')}`,
+        );
+      }
 
       // Extract IDs from authorization results (format: "type:id")
       const allowedIds = allowedObjects.map((o: string) => {
@@ -569,6 +637,33 @@ function generateSearchResolver(
 
       // Convert GraphQL filter to SPI filter and combine with auth filter
       const userFilter = convertFilter(args.filter);
+
+      // SEC-14: Validate search/filter fields against redacted fields
+      const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
+      const searchFieldViolations = validateQueryFields(
+        extractFilterFields(userFilter),
+        [],
+        visibleFields,
+      );
+      // Also validate explicitly requested search fields
+      if (args.fields && visibleFields) {
+        for (const f of args.fields) {
+          if (!visibleFields.has(f)) searchFieldViolations.push(f);
+        }
+      }
+      if (searchFieldViolations.length > 0) {
+        throw new Error(
+          `Access denied: cannot search or filter on redacted fields: ${searchFieldViolations.join(', ')}`,
+        );
+      }
+
+      // SEC-14b: When no explicit search fields provided and redaction is active,
+      // restrict search to visible fields only (prevents hidden field leakage).
+      let searchFields = args.fields;
+      if (!searchFields && visibleFields) {
+        searchFields = [...visibleFields].filter(f => !f.startsWith('_'));
+      }
+
       const combinedFilter = buildAuthFilter(allowedIds, userFilter);
 
       // Resolve pagination: 'after' is an opaque cursor encoding an offset
@@ -579,7 +674,7 @@ function generateSearchResolver(
 
       const searchQuery: SearchQuery = {
         query: args.query,
-        fields: args.fields,
+        fields: searchFields,
         filter: combinedFilter,
         limit: args.first ?? 20,
         offset,

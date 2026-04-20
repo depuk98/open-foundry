@@ -52,6 +52,27 @@ function failResult(actionId: string, errors: ActionError[]): ActionResult {
   return { success: false, actionId, errors, affectedObjects: [] };
 }
 
+/** System field prefixes that storage manages internally. */
+const SYSTEM_FIELD_PREFIXES = new Set([
+  '_id', '_tenantId', '_version', '_createdAt', '_updatedAt', '_deletedAt',
+  '_type', '_fromId', '_toId', '_fromType', '_toType',
+]);
+
+/**
+ * Strip system fields from an object snapshot before using it in compensation.
+ * Storage providers manage these fields internally; including them in an
+ * updateObject() call can cause column-mapping errors.
+ */
+function stripSystemFields(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (!SYSTEM_FIELD_PREFIXES.has(key)) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // ActionExecutor
 // ---------------------------------------------------------------------------
@@ -255,8 +276,11 @@ export class ActionExecutor {
                       // Undo object create by soft-deleting
                       await compensatingTxn.deleteObject(affected.type, affected.id, 'soft');
                     } else if (affected.changeType === 'updated' && before) {
-                      // Undo object update by restoring prior state
-                      await compensatingTxn.updateObject(affected.type, affected.id, before);
+                      // Undo object update by restoring prior state.
+                      // Strip system fields — storage manages these internally
+                      // and they would cause column-mapping errors in Postgres.
+                      const userProps = stripSystemFields(before);
+                      await compensatingTxn.updateObject(affected.type, affected.id, userProps);
                     }
                     // 'deleted' object rollbacks are best-effort; recreating deleted objects
                     // requires the full prior state which may not always be available

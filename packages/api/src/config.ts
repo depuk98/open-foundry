@@ -6,7 +6,8 @@
  */
 
 import type { PostgresStorageConfig } from '@openfoundry/storage-postgres';
-import type { OpenFgaClientInterface, AuthorizationService, OidcAuthenticator } from '@openfoundry/security';
+import type { OpenFgaClientInterface, OidcAuthenticator } from '@openfoundry/security';
+import { AuthenticationError, AuthorizationService } from '@openfoundry/security';
 import type { SecurityLayer } from '@openfoundry/actions';
 import type { Request } from 'express';
 import type { AuthenticatedUserInfo } from './graphql/types.js';
@@ -30,10 +31,9 @@ export function parsePostgresUrl(url: string): PostgresStorageConfig {
 // OpenFGA client adapter
 // ---------------------------------------------------------------------------
 
-export function createFgaClient(apiUrl: string, storeId: string): OpenFgaClientInterface {
-  // Lazy import to avoid pulling @openfga/sdk in dev mode
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { OpenFgaClient } = require('@openfga/sdk') as typeof import('@openfga/sdk');
+export async function createFgaClient(apiUrl: string, storeId: string): Promise<OpenFgaClientInterface> {
+  // Dynamic import to avoid pulling @openfga/sdk in dev mode
+  const { OpenFgaClient } = await import('@openfga/sdk');
   const client = new OpenFgaClient({ apiUrl, storeId });
   return {
     check: (body) => client.check(body),
@@ -47,9 +47,44 @@ export function createFgaClient(apiUrl: string, storeId: string): OpenFgaClientI
 // SecurityLayer bridge (authz -> action pipeline)
 // ---------------------------------------------------------------------------
 
-export function createSecurityLayer(authz: AuthorizationService): SecurityLayer {
+/**
+ * Maps action names to FGA authorization checks.
+ * Each entry defines the relation to check and how to derive the target object
+ * from the action parameters.
+ *
+ * Example: AdmitPatient checks `can_admit` on `patient:<params.patient>`
+ */
+export interface ActionAuthzMapping {
+  /** FGA relation to check (e.g., 'can_admit') */
+  relation: string;
+  /** FGA object type (e.g., 'patient') */
+  objectType: string;
+  /** Action parameter name that holds the object ID (e.g., 'patient') */
+  objectIdParam: string;
+}
+
+export function createSecurityLayer(
+  authz: AuthorizationService,
+  actionMappings?: Map<string, ActionAuthzMapping>,
+): SecurityLayer {
   return {
-    async checkPermission(actor, actionType, _params, _ctx) {
+    async checkPermission(actor, actionType, params, _ctx) {
+      const mapping = actionMappings?.get(actionType);
+      if (mapping) {
+        // Use domain-specific FGA check: relation on target object
+        const objectId = params?.[mapping.objectIdParam] as string | undefined;
+        if (!objectId) {
+          // Fail closed: mapped action missing required target param → deny
+          return { allowed: false };
+        }
+        const allowed = await authz.check(
+          `user:${actor.id}`,
+          mapping.relation,
+          `${mapping.objectType}:${objectId}`,
+        );
+        return { allowed };
+      }
+      // Unmapped actions: generic action-level check
       const allowed = await authz.check(
         `user:${actor.id}`,
         'execute',
@@ -84,7 +119,15 @@ export async function extractUser(
     throw Object.assign(new Error('Authorization header required'), { status: 401 });
   }
   const token = authHeader.slice(7);
-  return authenticator.authenticate(token);
+  try {
+    return await authenticator.authenticate(token);
+  } catch (err) {
+    // AuthenticationError (invalid/expired token) should map to 401, not 500
+    if (err instanceof AuthenticationError) {
+      throw Object.assign(err, { status: 401 });
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

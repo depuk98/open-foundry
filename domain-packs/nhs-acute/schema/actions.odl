@@ -1,0 +1,27 @@
+# NHS Acute Domain Pack — Action Types
+#
+# Defines the GraphQL/REST input schema for domain actions.
+# Operational behavior (preconditions, effects, side effects) is in actions/*.yaml.
+
+extend schema @namespace(name: "nhs.acute", version: "0.2.0")
+
+type AdmitPatient @actionType {
+  patient: Patient! @param
+  ward: Ward! @param
+  bed: Bed @param
+  consultant: Consultant! @param
+  reason: String @param
+}
+
+type DischargePatient @actionType {
+  patient: Patient! @param
+  destination: DischargeDestination! @param
+  notes: String @param
+}
+
+type TransferWard @actionType {
+  patient: Patient! @param
+  toWard: Ward! @param
+  toBed: Bed @param
+  reason: String @param
+}

@@ -49,6 +49,7 @@ const ODL_FILES = [
   'consultant.odl',
   'discharge-record.odl',
   'links.odl',
+  'actions.odl',
 ];
 
 function buildCombinedSource(): string {
@@ -293,12 +294,13 @@ describe('NHS Acute Domain Pack — ODL Schema Parsing', () => {
     });
   });
 
-  describe('no action types in ODL files', () => {
-    it('action types are defined in YAML manifests, not ODL', () => {
-      // The ODL schema files for the domain pack do not define @actionType.
-      // Action types are cross-referenced from YAML manifests against
-      // a combined schema that includes action type definitions.
-      expect(schema.actionTypes).toHaveLength(0);
+  describe('action types', () => {
+    it('defines 3 action types in ODL', () => {
+      expect(schema.actionTypes).toHaveLength(3);
+      const names = schema.actionTypes.map(a => a.name);
+      expect(names).toContain('AdmitPatient');
+      expect(names).toContain('DischargePatient');
+      expect(names).toContain('TransferWard');
     });
   });
 });
@@ -447,7 +449,7 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     const schemaFiles = pack['schema'] as string[];
-    expect(schemaFiles).toHaveLength(7);
+    expect(schemaFiles).toHaveLength(8);
     for (const odlFile of ODL_FILES) {
       expect(schemaFiles).toContain(`schema/${odlFile}`);
     }

@@ -24,6 +24,7 @@ schema:
   - schema/consultant.odl
   - schema/discharge-record.odl
   - schema/links.odl
+  - schema/actions.odl
 
 actions:
   - actions/admit-patient.yaml

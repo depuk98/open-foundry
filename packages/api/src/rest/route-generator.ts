@@ -255,6 +255,22 @@ function generateListRoute(
         };
 
         const userFilter = parseQueryFilter(req.query);
+
+        // SEC-14: Validate filter fields against redacted fields
+        const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
+        if (visibleFields && userFilter) {
+          const filterViolations = collectFilterFields(userFilter).filter(f => !f.startsWith('_') && !visibleFields.has(f));
+          if (filterViolations.length > 0) {
+            return createRestErrorResponse({
+              code: 'ACCESS_DENIED',
+              category: 'authorization',
+              message: `Cannot filter on redacted fields: ${filterViolations.join(', ')}`,
+              retryable: false,
+              traceId: requestContext.traceId,
+            });
+          }
+        }
+
         const combinedFilter: FilterExpression = userFilter
           ? { and: [idFilter, userFilter] }
           : idFilter;
@@ -716,11 +732,33 @@ function generateSearchRoute(
         const fieldsRaw = typeof req.query['fields'] === 'string' ? req.query['fields'] : undefined;
         const fields = fieldsRaw ? fieldsRaw.split(',').map((f) => f.trim()).filter((f) => f.length > 0) : undefined;
 
+        // SEC-14: Validate search fields against redacted fields
+        const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
+        if (visibleFields && fields) {
+          const searchViolations = fields.filter(f => !f.startsWith('_') && !visibleFields.has(f));
+          if (searchViolations.length > 0) {
+            return createRestErrorResponse({
+              code: 'ACCESS_DENIED',
+              category: 'authorization',
+              message: `Cannot search on redacted fields: ${searchViolations.join(', ')}`,
+              retryable: false,
+              traceId: requestContext.traceId,
+            });
+          }
+        }
+
+        // SEC-14b: When no explicit search fields and redaction is active,
+        // restrict search to visible fields only (prevents hidden field leakage).
+        let searchFields = fields;
+        if (!searchFields && visibleFields) {
+          searchFields = [...visibleFields].filter(f => !f.startsWith('_'));
+        }
+
         const { offset, limit } = parsePagination(req.query);
 
         const searchQuery: SearchQuery = {
           query: q,
-          fields,
+          fields: searchFields,
           filter: authFilter,
           limit,
           offset,

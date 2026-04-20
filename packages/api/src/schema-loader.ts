@@ -13,9 +13,14 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { parseOdl } from '@openfoundry/odl';
 import type { ParsedSchema, ObjectType, LinkType } from '@openfoundry/odl';
+import { parseActionManifest } from '@openfoundry/actions';
+import type { ActionManifest } from '@openfoundry/actions';
 import type { OntologySchema, ObjectTypeDefinition, LinkTypeDefinition, PropertyDefinition, IndexDefinition } from '@openfoundry/spi';
+import type { FieldPermissionConfig } from '@openfoundry/security';
+import type { ManifestRegistry } from './graphql/types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +45,10 @@ export interface LoadedSchema {
   spiSchema: OntologySchema;
   /** Pack manifests that were loaded. */
   packs: PackManifest[];
+  /** Action manifests (ManifestRegistry for action executor). */
+  manifestRegistry: ManifestRegistry;
+  /** Field permission configurations for field-level redaction. */
+  fieldPermissions: FieldPermissionConfig[];
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +199,135 @@ function loadPackOdl(packDir: string, manifest: PackManifest): string {
     s.replace(/^extend schema @namespace\([^)]+\)\s*/m, ''),
   );
   return [first, ...rest].join('\n\n');
+}
+
+/**
+ * Load action YAML manifests from a domain pack.
+ * Parses each file listed in pack.yaml actions: and adds valid manifests to the map.
+ *
+ * Structural validation is strict (invalid manifests are fatal).
+ * Schema cross-reference validation is handled separately post-merge:
+ * the loadDomainPacks function verifies every @actionType has a manifest.
+ */
+function loadPackActions(
+  packDir: string,
+  manifest: PackManifest,
+  manifests: Map<string, ActionManifest>,
+): void {
+  const actionFiles = manifest.actions ?? [];
+  for (const file of actionFiles) {
+    const filePath = resolve(packDir, file);
+    if (!existsSync(filePath)) {
+      console.warn(`Schema loader: action file '${file}' not found in ${packDir}, skipping`);
+      continue;
+    }
+    const yamlContent = readFileSync(filePath, 'utf-8');
+    // Structural validation only — cross-ref checked post-merge
+    const result = parseActionManifest(yamlContent);
+    if (result.valid && result.manifest) {
+      manifests.set(result.manifest.action, result.manifest);
+    } else {
+      // Structural errors are fatal — manifest must parse correctly
+      const errors = result.errors.map(e => e.message).join('; ');
+      throw new Error(`Schema loader: action manifest '${file}' is invalid: ${errors}`);
+    }
+  }
+}
+
+/**
+ * Load field permission configurations from a domain pack.
+ * Looks for permissions/field-permissions.yaml in the pack directory.
+ */
+function loadPackFieldPermissions(
+  packDir: string,
+  _manifest: PackManifest,
+  configs: FieldPermissionConfig[],
+): void {
+  const filePath = resolve(packDir, 'permissions', 'field-permissions.yaml');
+  if (!existsSync(filePath)) return;
+
+  const content = readFileSync(filePath, 'utf-8');
+  const parsed = parseYaml(content);
+  if (!Array.isArray(parsed)) return;
+
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const objectType = e['objectType'];
+    const alwaysVisible = Array.isArray(e['alwaysVisible']) ? e['alwaysVisible'] as string[] : [];
+    const fieldsByRelation: Record<string, string[]> = {};
+
+    if (e['fieldsByRelation'] && typeof e['fieldsByRelation'] === 'object') {
+      for (const [relation, fields] of Object.entries(e['fieldsByRelation'] as Record<string, unknown>)) {
+        if (Array.isArray(fields)) {
+          fieldsByRelation[relation] = fields as string[];
+        }
+      }
+    }
+
+    if (typeof objectType === 'string') {
+      configs.push({ objectType, alwaysVisible, fieldsByRelation });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate field permission configs against the merged schema.
+ * Warns on invalid object types or field names to catch config drift early.
+ */
+function validateFieldPermissions(
+  configs: FieldPermissionConfig[],
+  schema: ParsedSchema,
+): void {
+  const objectTypes = new Map(schema.objectTypes.map(o => [o.name, o]));
+
+  for (const config of configs) {
+    const objType = objectTypes.get(config.objectType);
+    if (!objType) {
+      console.warn(
+        `Field permissions: unknown object type "${config.objectType}". ` +
+        `Known types: ${[...objectTypes.keys()].join(', ')}`,
+      );
+      continue;
+    }
+
+    // Collect stored field names (excluding @link, @computed, @primary)
+    const storedFields = new Set<string>();
+    for (const field of objType.fields) {
+      if (field.directives.some(d => d.kind === 'primary')) {
+        storedFields.add('id'); // primary maps to 'id' in API
+        continue;
+      }
+      if (field.directives.some(d => d.kind === 'link' || d.kind === 'computed')) continue;
+      storedFields.add(field.name);
+    }
+
+    // Validate alwaysVisible
+    for (const f of config.alwaysVisible) {
+      if (f !== 'id' && !storedFields.has(f)) {
+        console.warn(
+          `Field permissions [${config.objectType}]: alwaysVisible field "${f}" not in schema. ` +
+          `Valid: ${[...storedFields].join(', ')}`,
+        );
+      }
+    }
+
+    // Validate fieldsByRelation
+    for (const [relation, fields] of Object.entries(config.fieldsByRelation)) {
+      for (const f of fields) {
+        if (!storedFields.has(f)) {
+          console.warn(
+            `Field permissions [${config.objectType}].${relation}: field "${f}" not in schema. ` +
+            `Valid: ${[...storedFields].join(', ')}`,
+          );
+        }
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,9 +509,11 @@ export async function loadDomainPacks(
     names = ['core', ...names];
   }
 
-  // Load each pack
+  // Phase 1: Load ODL schemas and field permissions from all packs
   const parsedSchemas: ParsedSchema[] = [];
   const manifests: PackManifest[] = [];
+  const packDirs: string[] = [];
+  const fieldPermissions: FieldPermissionConfig[] = [];
 
   for (const name of names) {
     const packDir = resolve(dir, name);
@@ -384,16 +524,48 @@ export async function loadDomainPacks(
 
     const manifest = readManifest(packDir);
     manifests.push(manifest);
+    packDirs.push(packDir);
 
     const odlSource = loadPackOdl(packDir, manifest);
     if (odlSource.trim()) {
       const parsed = parseOdl(odlSource);
       parsedSchemas.push(parsed);
     }
+
+    // Load field permission configurations
+    loadPackFieldPermissions(packDir, manifest, fieldPermissions);
   }
 
   const merged = mergeSchemas(parsedSchemas);
   const spiSchema = toOntologySchema(merged);
 
-  return { parsed: merged, spiSchema, packs: manifests };
+  // Phase 2: Load action manifests (structural validation only — cross-ref checked in Phase 3)
+  const actionManifests = new Map<string, ActionManifest>();
+  for (let i = 0; i < manifests.length; i++) {
+    loadPackActions(packDirs[i]!, manifests[i]!, actionManifests);
+  }
+
+  // Phase 3: Validate all schema-defined actionTypes have matching manifests (fail-closed)
+  const missingManifests: string[] = [];
+  for (const actionType of merged.actionTypes) {
+    if (!actionManifests.has(actionType.name)) {
+      missingManifests.push(actionType.name);
+    }
+  }
+  if (missingManifests.length > 0) {
+    throw new Error(
+      `Schema loader: actionTypes defined in ODL but missing YAML manifests: ${missingManifests.join(', ')}. ` +
+      `Each @actionType must have a corresponding action manifest.`,
+    );
+  }
+
+  // Phase 4: Validate field permissions against merged schema
+  validateFieldPermissions(fieldPermissions, merged);
+
+  // Build a ManifestRegistry from loaded action manifests
+  const manifestRegistry: ManifestRegistry = {
+    get(actionName: string) { return actionManifests.get(actionName); },
+  };
+
+  return { parsed: merged, spiSchema, packs: manifests, manifestRegistry, fieldPermissions };
 }
