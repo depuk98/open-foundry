@@ -35,7 +35,9 @@
     "@openfoundry/odl": "workspace:*",
     "@openfoundry/observability": "workspace:*",
     "@openfoundry/spi": "workspace:*",
-    "@openfoundry/storage-memory": "workspace:*"
+    "@openfoundry/storage-memory": "workspace:*",
+    "@openfoundry/storage-postgres": "workspace:*",
+    "@openfga/sdk": "^0.9.1"
   },
   "devDependencies": {
     "@types/express": "^4.17.0",

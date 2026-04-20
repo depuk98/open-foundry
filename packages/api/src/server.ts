@@ -6,11 +6,13 @@
  *
  * Configuration via environment variables:
  *   PORT                 — HTTP port (default: 4000)
+ *   NODE_ENV             — 'production' enables real service wiring
  *   OIDC_ISSUER          — OIDC provider issuer URL (matches Helm configmap)
  *   OIDC_CLIENT_ID       — OIDC client ID
  *   OPENFGA_URL          — OpenFGA API URL (matches Helm configmap / docker-compose)
  *   OPENFGA_STORE_ID     — OpenFGA store ID
- *   POSTGRES_URL         — PostgreSQL connection string (optional; uses memory storage if absent)
+ *   POSTGRES_URL         — PostgreSQL connection string
+ *   CEL_EVALUATOR_URL    — CEL gRPC sidecar address (default: localhost:50051)
  */
 
 import http from 'node:http';
@@ -19,60 +21,62 @@ import cors from 'cors';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
+import { PostgresStorageProvider } from '@openfoundry/storage-postgres';
 import {
   ObjectManager,
   LinkManager,
   InMemoryEventBus,
   EngineEventEmitter,
 } from '@openfoundry/engine';
-import { ActionExecutor } from '@openfoundry/actions';
+import { ActionExecutor, CelClient } from '@openfoundry/actions';
 import type { SecurityLayer, CelEvaluator } from '@openfoundry/actions';
 import { AuthorizationService, OidcAuthenticator } from '@openfoundry/security';
+import type { OpenFgaClientInterface } from '@openfoundry/security';
+import type { StorageProvider } from '@openfoundry/spi';
 import type { ParsedSchema } from '@openfoundry/odl';
 import { createGraphQLServer, buildResolverContext } from './graphql/index.js';
 import { generateRestRoutes } from './rest/index.js';
 import { createFhirRouter } from './fhir/index.js';
 import type { ApiDependencies, ResolverContext } from './graphql/types.js';
 import type { RestRequest } from './rest/types.js';
+import {
+  parsePostgresUrl,
+  createFgaClient,
+  createSecurityLayer,
+  extractUser,
+  REQUIRED_PROD_VARS,
+} from './config.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
 
-/** Build a default dev user context (bypasses OIDC in development). */
-function devUser() {
-  return {
-    id: 'dev-user',
-    name: 'Development User',
-    email: 'dev@openfoundry.local',
-    roles: ['admin'],
-    groups: [],
-    tenantId: 'default',
-  };
-}
-
 async function main(): Promise<void> {
-  // ── Dev-mode guard ──
-  // This entrypoint uses allow-all stubs for auth, FGA, and CEL.
-  // In production, these MUST be replaced with real service clients.
   const isDev = process.env['NODE_ENV'] !== 'production';
-  if (isDev) {
-    console.warn('⚠ Running in DEVELOPMENT mode — auth/authz/CEL are stubbed (allow-all)');
-    console.warn('⚠ Set NODE_ENV=production and configure OIDC/FGA/CEL for deployment');
-  }
+
+  // ── Validate production environment ──
   if (!isDev) {
-    const missing = ['OIDC_ISSUER', 'OPENFGA_URL', 'OPENFGA_STORE_ID']
-      .filter((k) => !process.env[k]);
+    const missing = REQUIRED_PROD_VARS.filter((k) => !process.env[k]);
     if (missing.length > 0) {
       console.error(`FATAL: Production mode requires env vars: ${missing.join(', ')}`);
       process.exit(1);
     }
-    // TODO: Production mode still uses dev stubs (allow-all FGA, allow-all
-    // security/CEL, in-memory storage, devUser identity). Replace with real
-    // service clients wired from env vars before deploying to production.
-    console.warn('⚠ WARNING: Production wiring not yet implemented — auth/FGA/CEL stubs still active');
   }
 
-  // Schema must be loaded from domain packs at startup.
-  // TODO: Load ParsedSchema from domain pack registry once SchemaRegistry is implemented.
+  // ── Storage ──
+  let storage: StorageProvider;
+  if (!isDev && process.env['POSTGRES_URL']) {
+    const config = parsePostgresUrl(process.env['POSTGRES_URL']);
+    storage = new PostgresStorageProvider(config);
+    console.log(`Storage: PostgreSQL @ ${config.host}:${config.port}/${config.database}`);
+  } else {
+    storage = new MemoryStorageProvider();
+    if (isDev) {
+      console.warn('Storage: in-memory (development mode)');
+    }
+  }
+
+  // ── Schema ──
+  // TODO: Load ParsedSchema from domain pack registry once SchemaRegistry
+  // supports runtime loading from the filesystem / config.
   const schema: ParsedSchema = {
     objectTypes: [],
     linkTypes: [],
@@ -82,28 +86,13 @@ async function main(): Promise<void> {
     scalars: [],
   };
 
-  // Storage — default to in-memory for development
-  const storage = new MemoryStorageProvider();
-
-  // Engine event bus
+  // ── Engine ──
   const eventBus = new InMemoryEventBus();
   const emitter = new EngineEventEmitter(eventBus);
-
   const objectManager = new ObjectManager({ storage, schema, eventEmitter: emitter });
   const linkManager = new LinkManager({ storage, schema, eventEmitter: emitter });
 
-  // Authorization — stub FGA client for development (allows all)
-  const authorizationService = new AuthorizationService(
-    {
-      check: async () => ({ allowed: true }),
-      listObjects: async () => ({ objects: [] }),
-      writeTuples: async () => ({}),
-      deleteTuples: async () => ({}),
-    },
-    [],
-  );
-
-  // Authentication
+  // ── Authentication ──
   const authenticator = new OidcAuthenticator();
   authenticator.configure({
     issuer: process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry',
@@ -111,15 +100,53 @@ async function main(): Promise<void> {
     jwksUri: `${process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry'}/protocol/openid-connect/certs`,
   });
 
-  // Action executor — stub security and CEL for development
-  const security: SecurityLayer = {
-    async checkPermission() { return { allowed: true }; },
-  };
-  const cel: CelEvaluator = {
-    async evaluate() { return { value: true }; },
-  };
+  // ── Authorization (OpenFGA) ──
+  let fgaClient: OpenFgaClientInterface;
+  if (!isDev && process.env['OPENFGA_URL'] && process.env['OPENFGA_STORE_ID']) {
+    fgaClient = createFgaClient(
+      process.env['OPENFGA_URL'],
+      process.env['OPENFGA_STORE_ID'],
+    );
+    console.log(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
+  } else {
+    // Dev stub: allow everything
+    fgaClient = {
+      check: async () => ({ allowed: true }),
+      listObjects: async () => ({ objects: [] }),
+      writeTuples: async () => ({}),
+      deleteTuples: async () => ({}),
+    };
+    if (isDev) {
+      console.warn('Authorization: allow-all stub (development mode)');
+    }
+  }
+  const authorizationService = new AuthorizationService(fgaClient, []);
+
+  // ── CEL Evaluator ──
+  let cel: CelEvaluator;
+  const celAddress = (process.env['CEL_EVALUATOR_URL'] ?? 'localhost:50051')
+    .replace(/^grpc:\/\//, '');
+  if (!isDev) {
+    cel = new CelClient({ address: celAddress });
+    console.log(`CEL evaluator: gRPC @ ${celAddress}`);
+  } else {
+    // Dev stub: always evaluate to true
+    cel = { async evaluate() { return { value: true }; } };
+    console.warn('CEL evaluator: allow-all stub (development mode)');
+  }
+
+  // ── Security Layer (for action pipeline) ──
+  let security: SecurityLayer;
+  if (!isDev) {
+    security = createSecurityLayer(authorizationService);
+  } else {
+    security = { async checkPermission() { return { allowed: true }; } };
+  }
+
+  // ── Action Executor ──
   const actionExecutor = new ActionExecutor({ storage, security, cel });
 
+  // ── API Dependencies ──
   const deps: ApiDependencies = {
     schema,
     objectManager,
@@ -130,11 +157,11 @@ async function main(): Promise<void> {
     storage,
   };
 
-  // Express + HTTP server
+  // ── Express + HTTP Server ──
   const app = express();
   const httpServer = http.createServer(app);
 
-  // GraphQL — Apollo Server with drain plugin for graceful shutdown
+  // ── GraphQL (Apollo Server) ──
   const { server: apolloServer } = createGraphQLServer({ schema, deps });
   apolloServer.addPlugin(ApolloServerPluginDrainHttpServer({ httpServer }) as never);
   await apolloServer.start();
@@ -142,42 +169,58 @@ async function main(): Promise<void> {
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));
 
-  // Health check endpoints — used by Docker/Helm probes
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'api-gateway' });
+  // ── Health check ──
+  app.get('/health', async (_req, res) => {
+    try {
+      const storageHealth = await storage.healthCheck();
+      res.json({
+        status: storageHealth.healthy ? 'ok' : 'degraded',
+        service: 'api-gateway',
+        storage: { healthy: storageHealth.healthy },
+      });
+    } catch {
+      res.status(503).json({ status: 'unhealthy', service: 'api-gateway' });
+    }
   });
   app.get('/.well-known/apollo/server-health', (_req, res) => {
     res.json({ status: 'pass' });
   });
 
-  // Mount GraphQL at /graphql
+  // ── GraphQL at /graphql ──
   app.use(
     '/graphql',
     expressMiddleware(apolloServer, {
-      context: async (): Promise<ResolverContext> => {
-        return buildResolverContext(devUser(), deps);
+      context: async ({ req }): Promise<ResolverContext> => {
+        authorizationService.clearFieldCache();
+        const user = await extractUser(req, authenticator, isDev);
+        return buildResolverContext(user, deps);
       },
     }),
   );
 
-  // Mount REST routes at /api/v1/*
+  // ── REST at /api/v1/* ──
   const restRoutes = generateRestRoutes(schema, deps);
   for (const route of restRoutes) {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     app[method](route.pattern, async (req, res) => {
       try {
+        const user = await extractUser(req, authenticator, isDev);
         const restReq: RestRequest = {
           method: req.method,
           path: req.path,
           params: req.params as Record<string, string>,
           query: req.query as Record<string, string>,
           body: req.body as Record<string, unknown>,
-          user: devUser(),
+          user,
         };
-        const ctx: ResolverContext = buildResolverContext(devUser(), deps);
+        const ctx: ResolverContext = buildResolverContext(user, deps);
         const result = await route.handler(restReq, ctx);
         res.status(result.status).json(result.body);
       } catch (err) {
+        if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
+          res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: 'Authorization required' } });
+          return;
+        }
         console.error('REST handler error:', err);
         res.status(500).json({
           error: {
@@ -194,15 +237,16 @@ async function main(): Promise<void> {
     });
   }
 
-  // Mount FHIR routes at /fhir/*
+  // ── FHIR at /fhir/* ──
   const fhirHandler = createFhirRouter({ deps, baseUrl: `http://localhost:${PORT}/fhir` });
   app.all('/fhir/*', async (req, res) => {
     try {
+      const user = await extractUser(req, authenticator, isDev);
       const fhirReq = {
         method: req.method,
         path: req.path.replace(/^\/fhir/, ''),
         query: req.query as Record<string, string>,
-        user: devUser(),
+        user,
       };
       const result = await fhirHandler(fhirReq);
       if (result.headers) {
@@ -212,17 +256,38 @@ async function main(): Promise<void> {
       }
       res.status(result.status).json(result.body);
     } catch (err) {
+      if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
+        res.status(401).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login', diagnostics: 'Authorization required' }] });
+        return;
+      }
       console.error('FHIR handler error:', err);
       res.status(500).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'fatal', code: 'exception', diagnostics: 'Internal server error' }] });
     }
   });
 
-  // Start listening
+  // ── Graceful shutdown ──
+  async function shutdown() {
+    console.log('Shutting down...');
+    await apolloServer.stop();
+    if (cel instanceof CelClient) {
+      cel.close();
+    }
+    if (storage instanceof PostgresStorageProvider) {
+      await storage.close();
+    }
+    httpServer.close();
+    process.exit(0);
+  }
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+
+  // ── Start ──
   await new Promise<void>((resolve) => {
     httpServer.listen(PORT, resolve);
   });
 
-  console.log(`Open Foundry API gateway listening at http://localhost:${PORT}`);
+  const mode = isDev ? 'DEVELOPMENT' : 'PRODUCTION';
+  console.log(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT}`);
   console.log(`  GraphQL:  http://localhost:${PORT}/graphql`);
   console.log(`  REST:     http://localhost:${PORT}/api/v1/`);
   console.log(`  FHIR:     http://localhost:${PORT}/fhir/`);

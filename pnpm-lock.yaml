@@ -105,6 +105,9 @@ importers:
       '@apollo/server':
         specifier: ^4.11.0
         version: 4.13.0(graphql@16.12.0)
+      '@openfga/sdk':
+        specifier: ^0.9.1
+        version: 0.9.1
       '@openfoundry/actions':
         specifier: workspace:*
         version: link:../actions
@@ -126,6 +129,9 @@ importers:
       '@openfoundry/storage-memory':
         specifier: workspace:*
         version: link:../storage-memory
+      '@openfoundry/storage-postgres':
+        specifier: workspace:*
+        version: link:../storage-postgres
       cors:
         specifier: ^2.8.5
         version: 2.8.6

@@ -236,12 +236,11 @@ These items are specified in the full technical spec but intentionally deferred 
 
 | Item | Current State | Impact |
 |------|--------------|--------|
-| Production runtime wiring | `server.ts` always uses `MemoryStorageProvider` and dev stubs | Auth/FGA/CEL/Postgres not wired at runtime |
+| Production runtime wiring | Conditional: Postgres/FGA/CEL in prod, stubs in dev | Schema loading from domain packs still TODO |
 | Schema Registry persistence | In-memory only | Schemas lost on restart |
 | Audit Trail persistence | In-memory only | Audit data lost on restart |
 | Rate limiting (distributed) | In-memory only | Single-instance only |
 | Helm HA configuration | replicas=1, no PDBs | Not production-hardened |
-| `clearFieldCache()` lifecycle | Not wired into request lifecycle | Stale field visibility until restart |
 | Link event publishing | Uses `publishObjectChange` | No dedicated `publishLinkChange` events |
 | `ROLLBACK_ALL` compensation | Doesn't handle link effects | Links not reverted on rollback |
 | Traversal `maxDepth` / guards | Memory provider lacks depth/node limits | Unbounded traversal possible in memory |
