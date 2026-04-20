@@ -34,6 +34,8 @@ auth:
   oidc:
     issuer: https://am.nhsidentity.spineservices.nhs.uk
     clientId: ""
+    # Override for non-Keycloak issuers (e.g. NHS CIS2). If empty, uses ${issuer}/protocol/openid-connect/certs
+    jwksUri: ""
     existingSecret: openfoundry-oidc
     secretKeys:
       clientSecret: clientSecret

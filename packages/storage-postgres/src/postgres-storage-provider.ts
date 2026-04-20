@@ -219,7 +219,11 @@ export class PostgresStorageProvider implements StorageProvider {
     if (existing.rows.length > 0) {
       const storedChecksum = existing.rows[0].checksum;
       if (storedChecksum && storedChecksum !== checksum) {
-        console.warn(`Schema migration: version ${schema.version} already applied but DDL checksum differs (drift detected)`);
+        throw new Error(
+          `Schema migration: version ${schema.version} already applied but DDL checksum differs. ` +
+          `Expected ${storedChecksum}, got ${checksum}. ` +
+          `Increment schema version or resolve the drift before deploying.`,
+        );
       }
       this._currentSchemaVersion = schema.version;
       this._schemas.set(schema.version, schema);

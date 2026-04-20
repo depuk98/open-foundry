@@ -179,6 +179,17 @@ async function handlePatientSearch(
       return operationOutcome(400, 'invalid', 'At least one search parameter is required (identifier, name, birthdate)');
     }
 
+    // SEC-14: Validate search parameters against visible fields
+    // Reject searches that filter on redacted fields (prevents inference attacks)
+    const visibleFields = deps.authorizationService.getVisibleFields(req.user.id, req.user.roles, 'Patient');
+    if (visibleFields) {
+      const searchedFields = extractSearchFilterFields(req.query);
+      const blocked = searchedFields.filter(f => !visibleFields.has(f));
+      if (blocked.length > 0) {
+        return operationOutcome(403, 'forbidden', `Cannot search on redacted fields: ${blocked.join(', ')}`);
+      }
+    }
+
     // Authorization: get list of patients user can view
     const allowedObjects = await deps.authorizationService.listObjects(
       `user:${req.user.id}`,
@@ -397,6 +408,19 @@ export function buildPatientFilter(
   if (conditions.length === 0) return null;
   if (conditions.length === 1) return conditions[0]!;
   return { and: conditions };
+}
+
+/**
+ * Extract the SPI field names that a FHIR search query would filter on.
+ * Maps FHIR parameter names to the underlying ontology field names.
+ */
+function extractSearchFilterFields(query: Record<string, string>): string[] {
+  const fields: string[] = [];
+  if (query['identifier']) fields.push('nhsNumber');
+  if (query['name']) fields.push('name');
+  if (query['birthdate']) fields.push('dateOfBirth');
+  if (query['patient']) fields.push('_id'); // Encounter by patient — not a redactable field
+  return fields;
 }
 
 // ─── Helpers ───

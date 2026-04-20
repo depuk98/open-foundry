@@ -32,7 +32,7 @@ import {
   EngineEventEmitter,
 } from '@openfoundry/engine';
 import { ActionExecutor, CelClient } from '@openfoundry/actions';
-import type { SecurityLayer, CelEvaluator } from '@openfoundry/actions';
+import type { SecurityLayer, CelEvaluator, ActionEventPublisher } from '@openfoundry/actions';
 import { AuthorizationService, OidcAuthenticator, AuditWriter, MemoryAuditStore } from '@openfoundry/security';
 import type { OpenFgaClientInterface } from '@openfoundry/security';
 import type { StorageProvider, RequestContext } from '@openfoundry/spi';
@@ -54,6 +54,34 @@ import { SlidingWindowRateLimiter } from './governance/index.js';
 import type { RateLimitIdentity } from './governance/index.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
+
+/**
+ * Parse DOMAIN_PACKS env var which may be:
+ *   - Comma-separated names: "nhs-acute,aml"
+ *   - JSON array of objects from Helm: [{"name":"nhs-acute","version":"0.2.0"}]
+ *   - undefined (returns undefined → auto-discover)
+ */
+function parseDomainPacksEnv(raw?: string): string[] | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item: unknown) => {
+            if (typeof item === 'string') return item;
+            if (item && typeof item === 'object' && 'name' in item) return String((item as { name: unknown }).name);
+            return '';
+          })
+          .filter(Boolean);
+      }
+    } catch {
+      // Fall through to comma-split
+    }
+  }
+  return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+}
 
 async function main(): Promise<void> {
   const isDev = process.env['NODE_ENV'] !== 'production';
@@ -84,7 +112,9 @@ async function main(): Promise<void> {
   }
 
   // ── Schema (load from domain packs) ──
-  const packNames = process.env['DOMAIN_PACKS']?.split(',').map(s => s.trim()).filter(Boolean);
+  // DOMAIN_PACKS may be comma-separated names ("nhs-acute,aml") or JSON from Helm
+  // ([{"name":"nhs-acute","version":"0.2.0"}]). Handle both formats.
+  const packNames = parseDomainPacksEnv(process.env['DOMAIN_PACKS']);
   const { parsed: schema, spiSchema, packs, manifestRegistry, fieldPermissions } = await loadDomainPacks(undefined, packNames);
   console.log(
     `Schema: loaded ${packs.length} domain pack(s) — ` +
@@ -107,11 +137,14 @@ async function main(): Promise<void> {
   const linkManager = new LinkManager({ storage, schema, eventEmitter: emitter });
 
   // ── Authentication ──
+  const oidcIssuer = process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry';
   const authenticator = new OidcAuthenticator();
   authenticator.configure({
-    issuer: process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry',
+    issuer: oidcIssuer,
     clientId: process.env['OIDC_CLIENT_ID'] ?? 'openfoundry',
-    jwksUri: `${process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry'}/protocol/openid-connect/certs`,
+    // OIDC_JWKS_URI overrides for non-Keycloak issuers (e.g. NHS CIS2).
+    // Default: Keycloak-style path. Set OIDC_JWKS_URI for other providers.
+    jwksUri: process.env['OIDC_JWKS_URI'] ?? `${oidcIssuer}/protocol/openid-connect/certs`,
   });
 
   // ── Authorization (OpenFGA) ──
@@ -174,7 +207,22 @@ async function main(): Promise<void> {
   }
 
   // ── Action Executor ──
-  const actionExecutor = new ActionExecutor({ storage, security, cel, auditWriter });
+  // Bridge the engine event bus to the action event publisher interface
+  const actionEventPublisher: ActionEventPublisher = {
+    async publishObjectChange(changeType, objectType, objectId, _before, _after, cause, ctx) {
+      const version = 1; // Actions don't track version; use placeholder
+      const eventCause = { actionType: cause.actionType, actionId: cause.actionId, actor: cause.actor };
+      if (changeType === 'created') await emitter.emitObjectCreated(ctx, objectType, objectId, version, eventCause);
+      else if (changeType === 'updated') await emitter.emitObjectUpdated(ctx, objectType, objectId, version, {}, eventCause);
+      else if (changeType === 'deleted') await emitter.emitObjectDeleted(ctx, objectType, objectId, version, eventCause);
+    },
+    async publishLinkChange(changeType, linkType, linkId, fromId, toId, cause, ctx) {
+      const eventCause = { actionType: cause.actionType, actionId: cause.actionId, actor: cause.actor };
+      if (changeType === 'created') await emitter.emitLinkCreated(ctx, linkType, linkId, fromId, toId, 1, eventCause);
+      else if (changeType === 'deleted') await emitter.emitLinkDeleted(ctx, linkType, linkId, fromId, toId, 1, eventCause);
+    },
+  };
+  const actionExecutor = new ActionExecutor({ storage, security, cel, auditWriter, eventPublisher: actionEventPublisher });
 
   // ── API Dependencies ──
   const deps: ApiDependencies = {
@@ -200,28 +248,54 @@ async function main(): Promise<void> {
   // Security headers (disable CSP for GraphQL playground in dev)
   app.use(helmet({ contentSecurityPolicy: isDev ? false : undefined }));
 
-  // CORS: restrict origins in production, allow-all in dev
+  // CORS: restrict origins in production (fail-closed), allow-all in dev
   const corsOrigins = process.env['CORS_ALLOWED_ORIGINS']?.split(',').map(s => s.trim()).filter(Boolean);
-  app.use(cors(
-    !isDev && corsOrigins && corsOrigins.length > 0
-      ? { origin: corsOrigins, credentials: true }
-      : undefined,
-  ));
+  if (!isDev && (!corsOrigins || corsOrigins.length === 0)) {
+    // Production: deny all cross-origin requests when not configured
+    app.use(cors({ origin: false }));
+  } else if (!isDev) {
+    app.use(cors({ origin: corsOrigins, credentials: true }));
+  } else {
+    app.use(cors());
+  }
 
   app.use(express.json({ limit: '1mb' }));
 
+  // Pre-auth IP-based rate limiter: protects against unauthenticated floods
+  // (auth+JWKS work is expensive; this gate runs before identity extraction)
+  const ipRateLimiter = new SlidingWindowRateLimiter({
+    principal: { windowMs: 60_000, maxRequests: 300 },
+  });
+  app.use((req, res, next) => {
+    const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    const result = ipRateLimiter.check({ tenantId: 'global', principalId: ip });
+    if (!result.allowed) {
+      res.setHeader('Retry-After', String(Math.ceil((result.resetAt - Date.now()) / 1000)));
+      res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many requests', retryable: true } });
+      return;
+    }
+    next();
+  });
+
   // ── Health check ──
+  // /health — used by readiness probe; returns 503 when storage is degraded
   app.get('/health', async (_req, res) => {
     try {
       const storageHealth = await storage.healthCheck();
-      res.json({
-        status: storageHealth.healthy ? 'ok' : 'degraded',
+      const status = storageHealth.healthy ? 'ok' : 'degraded';
+      const httpStatus = storageHealth.healthy ? 200 : 503;
+      res.status(httpStatus).json({
+        status,
         service: 'api-gateway',
         storage: { healthy: storageHealth.healthy },
       });
     } catch {
       res.status(503).json({ status: 'unhealthy', service: 'api-gateway' });
     }
+  });
+  // /healthz — liveness probe (lightweight, always pass if process is up)
+  app.get('/healthz', (_req, res) => {
+    res.json({ status: 'pass' });
   });
   app.get('/.well-known/apollo/server-health', (_req, res) => {
     res.json({ status: 'pass' });

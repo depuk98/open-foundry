@@ -14,6 +14,9 @@ data:
   {{/* HELM-05: OIDC_CLIENT_ID moved to deployment env from secret if sensitive,
        kept in ConfigMap as it is typically a public client identifier */}}
   OIDC_CLIENT_ID: {{ .Values.auth.oidc.clientId | quote }}
+  {{- if .Values.auth.oidc.jwksUri }}
+  OIDC_JWKS_URI: {{ .Values.auth.oidc.jwksUri | quote }}
+  {{- end }}
   OPENFGA_URL: {{ .Values.authz.openfga.url | quote }}
   {{/* HELM-06: OPENFGA_STORE_ID is infrastructure config, not a secret */}}
   OPENFGA_STORE_ID: {{ .Values.authz.openfga.storeId | quote }}
