@@ -23,18 +23,44 @@ function tableName(type: string, schema = 'public'): string {
 }
 
 /**
- * Map a snake_case row from Postgres back to camelCase OntologyObject.
+ * Map a snake_case database row to an OntologyObject with camelCase fields.
+ * System fields (_id, _type, etc.) are mapped explicitly to preserve their
+ * underscore-prefixed names — generic camelCase conversion would produce
+ * wrong keys (e.g., _id → Id).
  */
 function rowToObject(row: Record<string, unknown>): OntologyObject {
-  const obj: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(row)) {
-    // Skip internal scoring column
-    if (key === '_search_score' || key === '_total_count') continue;
-    // Convert snake_case keys back to camelCase
-    const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-    obj[camelKey] = value;
+  const obj: OntologyObject = {
+    _tenantId: row['_tenant_id'] as string,
+    _type: row['_type'] as string,
+    _id: row['_id'] as string,
+    _version: row['_version'] as number,
+    _createdAt: row['_created_at'] instanceof Date
+      ? row['_created_at'].toISOString()
+      : String(row['_created_at'] ?? ''),
+    _updatedAt: row['_updated_at'] instanceof Date
+      ? row['_updated_at'].toISOString()
+      : String(row['_updated_at'] ?? ''),
+  };
+
+  if (row['_deleted_at'] != null) {
+    obj._deletedAt = row['_deleted_at'] instanceof Date
+      ? row['_deleted_at'].toISOString()
+      : String(row['_deleted_at']);
   }
-  return obj as OntologyObject;
+
+  const systemCols = new Set([
+    '_tenant_id', '_id', '_type', '_version',
+    '_created_at', '_updated_at', '_deleted_at',
+    '_search_score', '_total_count',
+  ]);
+  for (const [key, value] of Object.entries(row)) {
+    if (!systemCols.has(key)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+      obj[camelKey] = value;
+    }
+  }
+
+  return obj;
 }
 
 /**

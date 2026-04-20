@@ -457,6 +457,25 @@ function generateAggregateResolver(
         return { groups: [], totalGroups: 0 };
       }
 
+      // Field-level authorization: reject aggregation over redacted fields
+      const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
+      if (visibleFields) {
+        const allRequestedFields = [
+          ...args.fields.filter(f => f.field !== '*').map(f => f.field),
+          ...(args.groupBy ?? []),
+        ];
+        const blocked = allRequestedFields.filter(f => !visibleFields.has(f));
+        if (blocked.length > 0) {
+          throw createOpenFoundryError({
+            code: 'FORBIDDEN',
+            category: 'authorization',
+            message: `Cannot aggregate over redacted fields: ${blocked.join(', ')}`,
+            retryable: false,
+            traceId: requestContext.traceId,
+          });
+        }
+      }
+
       // Convert GraphQL filter to SPI filter and combine with auth filter
       const userFilter = convertFilter(args.filter);
       const combinedFilter = buildAuthFilter(allowedIds, userFilter);
@@ -817,6 +836,7 @@ function generateObjectSetResolvers(
           filter: args.input['filter'] as FilterExpression | undefined,
           orderBy: args.input['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined,
           limit: args.input['limit'] as number | undefined,
+          aggregation: args.input['aggregation'] as AggregateQuery | undefined,
           isPublic: (args.input['isPublic'] as boolean) ?? false,
           createdBy: ctx.user.id,
           tenantId: ctx.requestContext.tenantId,
@@ -891,6 +911,7 @@ function objectSetToGraphQL(def: {
   filter?: unknown;
   orderBy?: unknown;
   limit?: number;
+  aggregation?: unknown;
   isPublic: boolean;
   createdBy: string;
   createdAt: string;
@@ -904,6 +925,7 @@ function objectSetToGraphQL(def: {
     filter: def.filter ?? null,
     orderBy: def.orderBy ?? null,
     limit: def.limit ?? null,
+    aggregation: def.aggregation ?? null,
     isPublic: def.isPublic,
     createdBy: def.createdBy,
     createdAt: def.createdAt,

@@ -69,8 +69,9 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
       };
       throw error;
     }
-    // Only the creator can update an object set
-    if (ctx.actorId && existing.createdBy !== ctx.actorId) {
+    // Only the creator can update an object set.
+    // When actorId is absent, deny access (fail closed).
+    if (!ctx.actorId || existing.createdBy !== ctx.actorId) {
       const error = {
         code: 'FORBIDDEN',
         category: 'authorization' as const,
@@ -100,8 +101,9 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
       };
       throw error;
     }
-    // Only the creator can delete an object set
-    if (ctx.actorId && existing.createdBy !== ctx.actorId) {
+    // Only the creator can delete an object set.
+    // When actorId is absent, deny access (fail closed).
+    if (!ctx.actorId || existing.createdBy !== ctx.actorId) {
       const error = {
         code: 'FORBIDDEN',
         category: 'authorization' as const,

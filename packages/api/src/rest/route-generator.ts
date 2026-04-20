@@ -161,7 +161,7 @@ export function generateRestRoutes(
   }
 
   // Object Set routes
-  routes.push(...generateObjectSetRoutes(deps));
+  routes.push(...generateObjectSetRoutes(schema, deps));
 
   return routes;
 }
@@ -593,6 +593,27 @@ function generateAggregateRoute(
 
         // Build AggregateQuery from body
         const rawFields = (body['fields'] ?? []) as Array<{ field: string; fn: string; alias?: string }>;
+        const groupBy = body['groupBy'] as string[] | undefined;
+
+        // Field-level authorization: reject aggregation over redacted fields
+        const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
+        if (visibleFields) {
+          const allRequestedFields = [
+            ...rawFields.filter(f => f.field !== '*').map(f => f.field),
+            ...(groupBy ?? []),
+          ];
+          const blocked = allRequestedFields.filter(f => !visibleFields.has(f));
+          if (blocked.length > 0) {
+            return createRestErrorResponse({
+              code: 'FORBIDDEN',
+              category: 'authorization',
+              message: `Cannot aggregate over redacted fields: ${blocked.join(', ')}`,
+              retryable: false,
+              traceId: requestContext.traceId,
+            });
+          }
+        }
+
         const fields: AggregateField[] = rawFields.map((f) => ({
           field: f.field,
           fn: f.fn.toLowerCase() as AggregateFunction,
@@ -605,7 +626,7 @@ function generateAggregateRoute(
 
         const query: AggregateQuery = {
           fields,
-          groupBy: body['groupBy'] as string[] | undefined,
+          groupBy,
           filter: combinedFilter,
           orderBy: body['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined,
           limit: body['limit'] as number | undefined,
@@ -822,6 +843,7 @@ function objectSetToRest(def: ObjectSetDefinition): Record<string, unknown> {
     filter: def.filter ?? null,
     orderBy: def.orderBy ?? null,
     limit: def.limit ?? null,
+    aggregation: def.aggregation ?? null,
     isPublic: def.isPublic,
     createdBy: def.createdBy,
     createdAt: def.createdAt,
@@ -829,7 +851,7 @@ function objectSetToRest(def: ObjectSetDefinition): Record<string, unknown> {
   };
 }
 
-function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
+function generateObjectSetRoutes(schema: ParsedSchema, deps: ApiDependencies): RestRoute[] {
   return [
     // GET /api/v1/object-sets — list
     {
@@ -904,6 +926,7 @@ function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
               filter: body['filter'] as FilterExpression | undefined,
               orderBy: body['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined,
               limit: body['limit'] as number | undefined,
+              aggregation: body['aggregation'] as AggregateQuery | undefined,
               isPublic: (body['isPublic'] as boolean) ?? false,
               createdBy: ctx.user.id,
               tenantId: ctx.requestContext.tenantId,
@@ -1025,15 +1048,54 @@ function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
             ctx.requestContext,
           );
 
+          // Resolve ObjectType for field mapping and redaction
+          const obj = schema.objectTypes.find((o) => o.name === def.objectType);
+
+          // Field-level redaction (when schema type is known)
+          let items: Record<string, unknown>[];
+          if (obj) {
+            const redactedItems = deps.authorizationService.redactFieldsBatch(
+              user.id,
+              user.roles,
+              def.objectType,
+              page.items.map((item: OntologyObject) => objectToRest(item, obj)),
+            );
+            items = redactedItems.map((r: RedactionResult<Record<string, unknown>>) => {
+              const data = r.data as Record<string, unknown>;
+              data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+              data._consentRestricted = false;
+              return data;
+            });
+          } else {
+            items = page.items as unknown as Record<string, unknown>[];
+          }
+
+          // Consent filtering
+          let totalCount = page.totalCount;
+          if (deps.consentService && obj) {
+            const getPrimaryId = (item: Record<string, unknown>) => {
+              const primaryField = obj.fields.find(f => isPrimaryField(f));
+              return String(item[primaryField?.name ?? 'id'] ?? '');
+            };
+            const consentResult = await deps.consentService.filterList(
+              items,
+              getPrimaryId,
+              DEFAULT_CONSENT_PURPOSE as DataPurpose,
+              user.id,
+            );
+            items = consentResult.edges;
+            totalCount = consentResult.totalCount;
+          }
+
           return {
             status: 200,
             body: {
-              data: page.items,
+              data: items,
               pagination: {
-                totalCount: page.totalCount,
+                totalCount,
                 limit,
                 offset,
-                hasNextPage: page.hasNextPage,
+                hasNextPage: offset + items.length < totalCount,
                 hasPreviousPage: offset > 0,
               },
             },

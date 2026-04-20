@@ -72,11 +72,15 @@ function fieldPredicateToSql(pred: FieldPredicate, offset: number): SqlFragment 
       const placeholders = arr.map((_, i) => `$${offset + i}`).join(', ');
       return { text: `${col} IN (${placeholders})`, params: [...arr] };
     }
-    case 'contains':
-      // LIKE '%value%' via bind parameter
-      return { text: `${col} LIKE $${offset}`, params: [`%${String(pred.value)}%`] };
-    case 'startsWith':
-      return { text: `${col} LIKE $${offset}`, params: [`${String(pred.value)}%`] };
+    case 'contains': {
+      // Escape LIKE wildcards so they match literally
+      const escaped = String(pred.value).replace(/[%_\\]/g, '\\$&');
+      return { text: `${col} LIKE $${offset} ESCAPE '\\'`, params: [`%${escaped}%`] };
+    }
+    case 'startsWith': {
+      const escaped = String(pred.value).replace(/[%_\\]/g, '\\$&');
+      return { text: `${col} LIKE $${offset} ESCAPE '\\'`, params: [`${escaped}%`] };
+    }
     case 'exists':
       if (pred.value) {
         return { text: `${col} IS NOT NULL`, params: [] };

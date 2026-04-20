@@ -152,6 +152,7 @@ function createMockDeps(schema: ParsedSchema): ApiDependencies {
     authorizationService: {
       check: vi.fn().mockResolvedValue(true),
       listObjects: vi.fn().mockResolvedValue([]),
+      getVisibleFields: vi.fn().mockReturnValue(undefined),
       redactFields: vi.fn().mockImplementation(
         (_userId: string, _roles: string[], _type: string, obj: Record<string, unknown>) => ({
           data: obj,

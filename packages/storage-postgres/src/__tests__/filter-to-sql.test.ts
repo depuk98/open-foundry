@@ -62,14 +62,25 @@ describe('filterToSql', () => {
 
     it('contains', () => {
       const result = filterToSql({ field: 'description', operator: 'contains', value: 'urgent' });
-      expect(result.text).toBe('"description" LIKE $1');
+      // ESCAPE clause ensures wildcards in values are literal
+      expect(result.text).toContain('LIKE $1 ESCAPE');
       expect(result.params).toEqual(['%urgent%']);
+    });
+
+    it('contains escapes LIKE wildcards in values', () => {
+      const result = filterToSql({ field: 'description', operator: 'contains', value: '100%' });
+      expect(result.params).toEqual(['%100\\%%']);
     });
 
     it('startsWith', () => {
       const result = filterToSql({ field: 'nhsNumber', operator: 'startsWith', value: '123' });
-      expect(result.text).toBe('"nhs_number" LIKE $1');
+      expect(result.text).toContain('LIKE $1 ESCAPE');
       expect(result.params).toEqual(['123%']);
+    });
+
+    it('startsWith escapes LIKE wildcards in values', () => {
+      const result = filterToSql({ field: 'nhsNumber', operator: 'startsWith', value: 'a_b' });
+      expect(result.params).toEqual(['a\\_b%']);
     });
 
     it('exists true', () => {
