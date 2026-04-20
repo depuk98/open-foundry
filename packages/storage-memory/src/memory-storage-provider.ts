@@ -580,6 +580,9 @@ export class MemoryStorageProvider implements StorageProvider {
   }
 
   async aggregateObjects(ctx: RequestContext, type: string, query: AggregateQuery): Promise<AggregateResult> {
+    if (!query.fields || query.fields.length === 0) {
+      throw new Error('Aggregate query must specify at least one field');
+    }
     // 1. Collect matching objects (tenant-scoped, non-deleted)
     let items = Array.from(this._objects.values()).filter((obj) => {
       if (obj._tenantId !== ctx.tenantId) return false;

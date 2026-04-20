@@ -845,9 +845,10 @@ function generateObjectSetResolvers(
           traceId: ctx.requestContext.traceId,
         });
       }
+      const ALLOWED_UPDATE_FIELDS = new Set(['name', 'description', 'filter', 'orderBy', 'limit', 'aggregation', 'isPublic']);
       const updates: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(args.input)) {
-        if (value !== undefined) {
+        if (value !== undefined && ALLOWED_UPDATE_FIELDS.has(key)) {
           updates[key] = value;
         }
       }

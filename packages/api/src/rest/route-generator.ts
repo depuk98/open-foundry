@@ -933,9 +933,10 @@ function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
           }
           const id = req.params['id']!;
           const body = (req.body ?? {}) as Record<string, unknown>;
+          const ALLOWED_UPDATE_FIELDS = new Set(['name', 'description', 'filter', 'orderBy', 'limit', 'aggregation', 'isPublic']);
           const updates: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(body)) {
-            if (value !== undefined) {
+            if (value !== undefined && ALLOWED_UPDATE_FIELDS.has(key)) {
               updates[key] = value;
             }
           }
