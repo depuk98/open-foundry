@@ -26,5 +26,5 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Action Executor listening on port ${PORT}`);
+  console.info(`Action Executor listening on port ${PORT}`);
 });

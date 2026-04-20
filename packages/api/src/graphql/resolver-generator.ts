@@ -28,20 +28,9 @@ import {
   createIdFilteredSubscription,
   createFilteredSubscription,
 } from '../subscriptions/subscription-manager.js';
+import { lowerFirst, toSnakeCase } from '../utils.js';
 
 // ─── Helpers ───
-
-function lowerFirst(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
-}
-
-/** Convert PascalCase to snake_case — must match FGA codegen convention. */
-function toSnakeCase(s: string): string {
-  return s
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
-    .toLowerCase();
-}
 
 function isPrimaryField(field: FieldDefinition): boolean {
   return field.directives.some(d => d.kind === 'primary');

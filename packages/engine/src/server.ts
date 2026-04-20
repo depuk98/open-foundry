@@ -26,5 +26,5 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Ontology Engine listening on port ${PORT}`);
+  console.info(`Ontology Engine listening on port ${PORT}`);
 });

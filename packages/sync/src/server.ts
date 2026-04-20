@@ -26,5 +26,5 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Sync Engine listening on port ${PORT}`);
+  console.info(`Sync Engine listening on port ${PORT}`);
 });

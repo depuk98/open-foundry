@@ -23,20 +23,9 @@ import type { ApiDependencies, ResolverContext } from '../graphql/types.js';
 import { DEFAULT_CONSENT_PURPOSE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../graphql/types.js';
 import type { RestRequest, RestResponse, RestRoute } from './types.js';
 import { createRestErrorResponse, wrapErrorToRest } from './errors.js';
+import { lowerFirst, toSnakeCase } from '../utils.js';
 
 // ─── Helpers ───
-
-function lowerFirst(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
-}
-
-/** Convert PascalCase to snake_case — must match FGA codegen convention. */
-function toSnakeCase(s: string): string {
-  return s
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
-    .toLowerCase();
-}
 
 function pluralize(s: string): string {
   return lowerFirst(s) + 's';

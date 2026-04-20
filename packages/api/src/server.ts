@@ -53,6 +53,7 @@ import type { ActionAuthzMapping } from './config.js';
 import { loadDomainPacks } from './schema-loader.js';
 import { SlidingWindowRateLimiter } from './governance/index.js';
 import type { RateLimitIdentity } from './governance/index.js';
+import { toSnakeCase } from './utils.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
 
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
   if (!isDev && process.env['POSTGRES_URL']) {
     const config = parsePostgresUrl(process.env['POSTGRES_URL']);
     storage = new PostgresStorageProvider(config);
-    console.log(`Storage: PostgreSQL @ ${config.host}:${config.port}/${config.database}`);
+    console.info(`Storage: PostgreSQL @ ${config.host}:${config.port}/${config.database}`);
   } else {
     storage = new MemoryStorageProvider();
     if (isDev) {
@@ -117,7 +118,7 @@ async function main(): Promise<void> {
   // ([{"name":"nhs-acute","version":"0.2.0"}]). Handle both formats.
   const packNames = parseDomainPacksEnv(process.env['DOMAIN_PACKS']);
   const { parsed: schema, spiSchema, packs, manifestRegistry, fieldPermissions } = await loadDomainPacks(undefined, packNames);
-  console.log(
+  console.info(
     `Schema: loaded ${packs.length} domain pack(s) — ` +
     `${schema.objectTypes.length} object types, ` +
     `${schema.linkTypes.length} link types, ` +
@@ -155,7 +156,7 @@ async function main(): Promise<void> {
       process.env['OPENFGA_URL'],
       process.env['OPENFGA_STORE_ID'],
     );
-    console.log(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
+    console.info(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
   } else {
     // Dev stub: allow everything
     fgaClient = {
@@ -176,7 +177,7 @@ async function main(): Promise<void> {
     .replace(/^grpc:\/\//, '');
   if (!isDev) {
     cel = new CelClient({ address: celAddress });
-    console.log(`CEL evaluator: gRPC @ ${celAddress}`);
+    console.info(`CEL evaluator: gRPC @ ${celAddress}`);
   } else {
     // Dev stub: always evaluate to true
     cel = { async evaluate() { return { value: true }; } };
@@ -202,7 +203,7 @@ async function main(): Promise<void> {
   // Adapt return type: security AuditWriter returns AuditRecord, action pipeline expects void
   const auditWriter = { async write(record: Parameters<typeof securityAuditWriter.write>[0]) { await securityAuditWriter.write(record); } };
   if (storage instanceof PostgresStorageProvider) {
-    console.log('Audit: PostgreSQL (persistent)');
+    console.info('Audit: PostgreSQL (persistent)');
   } else {
     console.warn('Audit: in-memory (development mode)');
   }
@@ -290,7 +291,8 @@ async function main(): Promise<void> {
         service: 'api-gateway',
         storage: { healthy: storageHealth.healthy },
       });
-    } catch {
+    } catch (err) {
+      console.error('Health check failed:', err instanceof Error ? err.message : 'unknown');
       res.status(503).json({ status: 'unhealthy', service: 'api-gateway' });
     }
   });
@@ -430,7 +432,7 @@ async function main(): Promise<void> {
 
   // ── Graceful shutdown ──
   async function shutdown() {
-    console.log('Shutting down...');
+    console.info('Shutting down...');
     await apolloServer.stop();
     if (cel instanceof CelClient) {
       cel.close();
@@ -450,18 +452,10 @@ async function main(): Promise<void> {
   });
 
   const mode = isDev ? 'DEVELOPMENT' : 'PRODUCTION';
-  console.log(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT}`);
-  console.log(`  GraphQL:  http://localhost:${PORT}/graphql`);
-  console.log(`  REST:     http://localhost:${PORT}/api/v1/`);
-  console.log(`  FHIR:     http://localhost:${PORT}/fhir/`);
-}
-
-/** Convert PascalCase to snake_case — must match FGA codegen convention. */
-function fgaSnakeCase(s: string): string {
-  return s
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
-    .toLowerCase();
+  console.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT}`);
+  console.info(`  GraphQL:  http://localhost:${PORT}/graphql`);
+  console.info(`  REST:     http://localhost:${PORT}/api/v1/`);
+  console.info(`  FHIR:     http://localhost:${PORT}/fhir/`);
 }
 
 /**
@@ -491,7 +485,7 @@ function deriveActionAuthzMappings(
 
     mappings.set(action.name, {
       relation,
-      objectType: fgaSnakeCase(objectParam.type.name),
+      objectType: toSnakeCase(objectParam.type.name),
       objectIdParam: objectParam.name,
     });
   }

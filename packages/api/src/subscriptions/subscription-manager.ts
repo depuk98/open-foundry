@@ -11,6 +11,7 @@ import type { CloudEvent } from '@openfoundry/spi';
 import type { ObjectEventData, LinkEventData } from '@openfoundry/engine';
 import type { EventBus } from '@openfoundry/engine';
 import type { AuthenticatedUserInfo } from '../graphql/types.js';
+import { lowerFirst } from '../utils.js';
 
 // ─── Types ───
 
@@ -51,10 +52,6 @@ const LINK_EVENT_TYPES: Set<string> = new Set([
   'openfoundry.link.updated',
   'openfoundry.link.deleted',
 ]);
-
-function lowerFirst(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
-}
 
 /**
  * Convert a CloudEvent with ObjectEventData into a ChangeEvent

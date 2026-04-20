@@ -26,5 +26,5 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Security Service listening on port ${PORT}`);
+  console.info(`Security Service listening on port ${PORT}`);
 });
