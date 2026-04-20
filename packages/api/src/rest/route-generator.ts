@@ -47,6 +47,27 @@ function isPrimaryField(field: FieldDefinition): boolean {
 }
 
 /**
+ * Recursively collect field names referenced in an SPI FilterExpression.
+ * Used to enforce field-level authorization on filter predicates.
+ */
+function collectFilterFields(filter: FilterExpression | undefined): string[] {
+  if (!filter) return [];
+  if ('field' in filter) return [(filter as { field: string }).field];
+  const fields: string[] = [];
+  const logical = filter as { and?: FilterExpression[]; or?: FilterExpression[]; not?: FilterExpression };
+  if (logical.and) {
+    for (const sub of logical.and) fields.push(...collectFilterFields(sub));
+  }
+  if (logical.or) {
+    for (const sub of logical.or) fields.push(...collectFilterFields(sub));
+  }
+  if (logical.not) {
+    fields.push(...collectFilterFields(logical.not));
+  }
+  return fields;
+}
+
+/**
  * Convert an OntologyObject to a REST-friendly shape.
  * Same logic as GraphQL objectToGraphQL.
  */
@@ -596,11 +617,16 @@ function generateAggregateRoute(
         const groupBy = body['groupBy'] as string[] | undefined;
 
         // Field-level authorization: reject aggregation over redacted fields
+        // Check aggregate fields, groupBy, orderBy, and filter predicates
+        const userFilter = body['filter'] as FilterExpression | undefined;
+        const orderBy = body['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined;
         const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
         if (visibleFields) {
           const allRequestedFields = [
             ...rawFields.filter(f => f.field !== '*').map(f => f.field),
             ...(groupBy ?? []),
+            ...collectFilterFields(userFilter),
+            ...(orderBy ?? []).map(o => o.field),
           ];
           const blocked = allRequestedFields.filter(f => !visibleFields.has(f));
           if (blocked.length > 0) {
@@ -619,16 +645,13 @@ function generateAggregateRoute(
           fn: f.fn.toLowerCase() as AggregateFunction,
           alias: f.alias,
         }));
-
-        // Combine user filter with authorization filter
-        const userFilter = body['filter'] as FilterExpression | undefined;
         const combinedFilter = buildAuthFilter(allowedIds, userFilter);
 
         const query: AggregateQuery = {
           fields,
           groupBy,
           filter: combinedFilter,
-          orderBy: body['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined,
+          orderBy,
           limit: body['limit'] as number | undefined,
           offset: body['offset'] as number | undefined,
         };
@@ -665,15 +688,13 @@ function generateSearchRoute(
 
         const q = typeof req.query['q'] === 'string' ? req.query['q'] : '';
         if (!q || q.trim().length === 0) {
-          return {
-            status: 400,
-            body: {
-              error: {
-                code: 'MISSING_QUERY',
-                message: 'The "q" query parameter is required for search',
-              },
-            },
-          };
+          return createRestErrorResponse({
+            code: 'MISSING_QUERY',
+            category: 'validation',
+            message: 'The "q" query parameter is required for search',
+            retryable: false,
+            traceId: requestContext.traceId,
+          });
         }
 
         // Authorization: restrict search to authorized objects
@@ -791,15 +812,13 @@ function generateActionRoute(
         // Resolve manifest from registry — fail closed if not found
         const manifest = deps.manifestRegistry?.get(action.name);
         if (!manifest) {
-          return {
-            status: 400,
-            body: {
-              error: {
-                code: 'MANIFEST_NOT_FOUND',
-                message: `No manifest registered for action "${action.name}"`,
-              },
-            },
-          };
+          return createRestErrorResponse({
+            code: 'MANIFEST_NOT_FOUND',
+            category: 'not_found',
+            message: `No manifest registered for action "${action.name}"`,
+            retryable: false,
+            traceId: requestContext.traceId,
+          });
         }
 
         const result = await deps.actionExecutor.execute(
@@ -1023,6 +1042,18 @@ function generateObjectSetRoutes(schema: ParsedSchema, deps: ApiDependencies): R
             });
           }
 
+          // Validate schema type before querying storage — fail closed if unknown
+          const obj = schema.objectTypes.find((o) => o.name === def.objectType);
+          if (!obj) {
+            return createRestErrorResponse({
+              code: 'SCHEMA_TYPE_NOT_FOUND',
+              category: 'system',
+              message: `Object type "${def.objectType}" not found in schema`,
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+
           // Authorization: restrict results to authorized objects
           const fgaType = toSnakeCase(def.objectType);
           const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
@@ -1048,31 +1079,23 @@ function generateObjectSetRoutes(schema: ParsedSchema, deps: ApiDependencies): R
             ctx.requestContext,
           );
 
-          // Resolve ObjectType for field mapping and redaction
-          const obj = schema.objectTypes.find((o) => o.name === def.objectType);
-
-          // Field-level redaction (when schema type is known)
-          let items: Record<string, unknown>[];
-          if (obj) {
-            const redactedItems = deps.authorizationService.redactFieldsBatch(
-              user.id,
-              user.roles,
-              def.objectType,
-              page.items.map((item: OntologyObject) => objectToRest(item, obj)),
-            );
-            items = redactedItems.map((r: RedactionResult<Record<string, unknown>>) => {
-              const data = r.data as Record<string, unknown>;
-              data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
-              data._consentRestricted = false;
-              return data;
-            });
-          } else {
-            items = page.items as unknown as Record<string, unknown>[];
-          }
+          // Field-level redaction
+          const redactedItems = deps.authorizationService.redactFieldsBatch(
+            user.id,
+            user.roles,
+            def.objectType,
+            page.items.map((item: OntologyObject) => objectToRest(item, obj)),
+          );
+          let items: Record<string, unknown>[] = redactedItems.map((r: RedactionResult<Record<string, unknown>>) => {
+            const data = r.data as Record<string, unknown>;
+            data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+            data._consentRestricted = false;
+            return data;
+          });
 
           // Consent filtering
           let totalCount = page.totalCount;
-          if (deps.consentService && obj) {
+          if (deps.consentService) {
             const getPrimaryId = (item: Record<string, unknown>) => {
               const primaryField = obj.fields.find(f => isPrimaryField(f));
               return String(item[primaryField?.name ?? 'id'] ?? '');
@@ -1144,11 +1167,45 @@ function generateObjectSetRoutes(schema: ParsedSchema, deps: ApiDependencies): R
             });
           }
 
+          // Validate schema type before querying storage
+          if (!schema.objectTypes.find((o) => o.name === def.objectType)) {
+            return createRestErrorResponse({
+              code: 'SCHEMA_TYPE_NOT_FOUND',
+              category: 'system',
+              message: `Object type "${def.objectType}" not found in schema`,
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+
           // Authorization: restrict aggregation to authorized objects
           const fgaType = toSnakeCase(def.objectType);
           const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
           if (allowedIds.length === 0) {
             return { status: 200, body: { data: { groups: [], totalGroups: 0 } } };
+          }
+
+          // Field-level authorization: reject aggregation over redacted fields
+          // Check aggregate fields, groupBy, orderBy, saved filter, and aggregation filter
+          const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, def.objectType);
+          if (visibleFields) {
+            const allRequestedFields = [
+              ...def.aggregation.fields.filter(f => f.field !== '*').map(f => f.field),
+              ...(def.aggregation.groupBy ?? []),
+              ...collectFilterFields(def.filter),
+              ...collectFilterFields(def.aggregation.filter),
+              ...(def.aggregation.orderBy ?? []).map(o => o.field),
+            ];
+            const blocked = allRequestedFields.filter(f => !visibleFields.has(f));
+            if (blocked.length > 0) {
+              return createRestErrorResponse({
+                code: 'FORBIDDEN',
+                category: 'authorization',
+                message: `Cannot aggregate over redacted fields: ${blocked.join(', ')}`,
+                retryable: false,
+                traceId: ctx.requestContext.traceId,
+              });
+            }
           }
 
           // Merge auth filter + saved filter into the aggregation query

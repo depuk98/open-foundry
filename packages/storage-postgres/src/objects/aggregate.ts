@@ -12,7 +12,7 @@ import type {
   AggregateResult,
   AggregateGroup,
 } from '@openfoundry/spi';
-import { snakeCase, pgIdent } from '../schema/type-mapping.js';
+import { snakeCase, pgIdent, fieldCol, fieldColName } from '../schema/type-mapping.js';
 import { filterToSql } from './filter-to-sql.js';
 import { PgTransaction, resolveQueryable } from '../transactions/index.js';
 
@@ -45,8 +45,8 @@ export async function aggregateObjects(
   // Group-by columns
   if (query.groupBy && query.groupBy.length > 0) {
     for (const field of query.groupBy) {
-      const col = pgIdent(snakeCase(field));
-      selectParts.push(`${col} AS ${pgIdent(snakeCase(field))}`);
+      const col = fieldCol(field);
+      selectParts.push(`${col} AS ${col}`);
     }
   }
 
@@ -66,10 +66,10 @@ export async function aggregateObjects(
       if (aggField.field === '*') {
         selectParts.push(`COUNT(*) AS ${aliasIdent}`);
       } else {
-        selectParts.push(`COUNT(${pgIdent(snakeCase(aggField.field))}) AS ${aliasIdent}`);
+        selectParts.push(`COUNT(${fieldCol(aggField.field)}) AS ${aliasIdent}`);
       }
     } else {
-      const col = pgIdent(snakeCase(aggField.field));
+      const col = fieldCol(aggField.field);
       const fnUpper = fnLower.toUpperCase();
       selectParts.push(`${fnUpper}(${col}) AS ${aliasIdent}`);
     }
@@ -92,7 +92,7 @@ export async function aggregateObjects(
   // --- GROUP BY clause ---
   let groupByClause = '';
   if (query.groupBy && query.groupBy.length > 0) {
-    const groupCols = query.groupBy.map((f) => pgIdent(snakeCase(f)));
+    const groupCols = query.groupBy.map((f) => fieldCol(f));
     groupByClause = ` GROUP BY ${groupCols.join(', ')}`;
   }
 
@@ -100,7 +100,7 @@ export async function aggregateObjects(
   let orderClause = '';
   if (query.orderBy && query.orderBy.length > 0) {
     const orderParts = query.orderBy.map(
-      (o) => `${pgIdent(snakeCase(o.field))} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`,
+      (o) => `${fieldCol(o.field)} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`,
     );
     orderClause = ` ORDER BY ${orderParts.join(', ')}`;
   }
@@ -137,7 +137,7 @@ export async function aggregateObjects(
   const groups: AggregateGroup[] = (result.rows as Record<string, unknown>[]).map((row) => {
     const keys: Record<string, unknown> = {};
     for (const field of groupByFields) {
-      const col = snakeCase(field);
+      const col = fieldColName(field);
       keys[field] = row[col] ?? null;
     }
 

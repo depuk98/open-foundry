@@ -105,55 +105,60 @@ async function handlePatientRead(
   req: FhirRequest,
   id: string,
 ): Promise<FhirResponse> {
-  // Authorization check
-  const allowed = await deps.authorizationService.check(
-    `user:${req.user.id}`,
-    'viewer',
-    `patient:${id}`,
-  );
-  if (!allowed) {
-    return operationOutcome(403, 'forbidden', `Access denied to Patient ${id}`);
-  }
-
-  const ctx = {
-    tenantId: req.user.tenantId,
-    actorId: req.user.id,
-    traceId: `fhir-${Date.now()}`,
-  };
-
-  const obj = await deps.objectManager.get('Patient', id, ctx);
-  if (!obj) {
-    return operationOutcome(404, 'not-found', `Patient/${id} not found`);
-  }
-
-  // Field-level redaction
-  const { data } = deps.authorizationService.redactFields(
-    req.user.id,
-    req.user.roles,
-    'Patient',
-    obj as unknown as Record<string, unknown>,
-  );
-
-  // Consent check (if service available)
-  if (deps.consentService) {
-    const consent = await deps.consentService.checkSingleObject(
-      data,
-      id,
-      DataPurpose.DIRECT_CARE,
-      req.user.id,
+  try {
+    // Authorization check
+    const allowed = await deps.authorizationService.check(
+      `user:${req.user.id}`,
+      'viewer',
+      `patient:${id}`,
     );
-    if (consent._consentRestricted) {
-      return operationOutcome(403, 'forbidden', 'Consent denied for this patient');
+    if (!allowed) {
+      return operationOutcome(403, 'forbidden', `Access denied to Patient ${id}`);
     }
+
+    const ctx = {
+      tenantId: req.user.tenantId,
+      actorId: req.user.id,
+      traceId: `fhir-${Date.now()}`,
+    };
+
+    const obj = await deps.objectManager.get('Patient', id, ctx);
+    if (!obj) {
+      return operationOutcome(404, 'not-found', `Patient/${id} not found`);
+    }
+
+    // Field-level redaction
+    const { data } = deps.authorizationService.redactFields(
+      req.user.id,
+      req.user.roles,
+      'Patient',
+      obj as unknown as Record<string, unknown>,
+    );
+
+    // Consent check (if service available)
+    if (deps.consentService) {
+      const consent = await deps.consentService.checkSingleObject(
+        data,
+        id,
+        DataPurpose.DIRECT_CARE,
+        req.user.id,
+      );
+      if (consent._consentRestricted) {
+        return operationOutcome(403, 'forbidden', 'Consent denied for this patient');
+      }
+    }
+
+    const patient = mapPatientToFhir(data as unknown as OntologyObject);
+
+    return {
+      status: 200,
+      headers: fhirHeaders(),
+      body: patient,
+    };
+  } catch (err) {
+    console.error('FHIR Patient read error:', err);
+    return operationOutcome(500, 'exception', 'Internal server error');
   }
-
-  const patient = mapPatientToFhir(data as unknown as OntologyObject);
-
-  return {
-    status: 200,
-    headers: fhirHeaders(),
-    body: patient,
-  };
 }
 
 async function handlePatientSearch(
@@ -161,84 +166,97 @@ async function handlePatientSearch(
   req: FhirRequest,
   baseUrl: string,
 ): Promise<FhirResponse> {
-  const ctx = {
-    tenantId: req.user.tenantId,
-    actorId: req.user.id,
-    traceId: `fhir-${Date.now()}`,
-  };
-
-  // Build filter from FHIR search parameters
-  const searchFilter = buildPatientFilter(req.query);
-  if (!searchFilter) {
-    return operationOutcome(400, 'invalid', 'At least one search parameter is required (identifier, name, birthdate)');
-  }
-
-  // Authorization: get list of patients user can view
-  const allowedObjects = await deps.authorizationService.listObjects(
-    `user:${req.user.id}`,
-    'viewer',
-    'patient',
-  );
-
-  const allowedIds = allowedObjects.map((o: string) => {
-    const parts = o.split(':');
-    return parts[parts.length - 1];
-  }).filter((id): id is string => id !== undefined && id !== '');
-
-  // Combine authorization filter with search filter
-  const idFilter: FieldPredicate = { field: '_id', operator: 'in', value: allowedIds };
-  const combinedFilter: FilterExpression = {
-    and: [idFilter, searchFilter],
-  };
-
-  const page = await deps.objectManager.query(
-    'Patient',
-    combinedFilter,
-    { limit: 100, offset: 0 },
-    ctx,
-  );
-
-  // Redact fields for all results
-  const redacted = deps.authorizationService.redactFieldsBatch(
-    req.user.id,
-    req.user.roles,
-    'Patient',
-    page.items as unknown as Record<string, unknown>[],
-  );
-
-  // Consent filtering — exclude patients that the user lacks consent for.
-  // NOTE: Applied after pagination — see Encounter handler for details.
-  let consentFiltered = redacted;
-  if (deps.consentService) {
-    const consentResult = await deps.consentService.filterList(
-      redacted.map((r: { data: Record<string, unknown> }) => r.data),
-      (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
-      DataPurpose.DIRECT_CARE,
-      req.user.id,
-    );
-    consentFiltered = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
-  }
-
-  const entries = consentFiltered.map((r: { data: Record<string, unknown> }) => {
-    const patient = mapPatientToFhir(r.data as unknown as OntologyObject);
-    return {
-      fullUrl: baseUrl ? `${baseUrl}/Patient/${patient.id}` : undefined,
-      resource: patient,
+  try {
+    const ctx = {
+      tenantId: req.user.tenantId,
+      actorId: req.user.id,
+      traceId: `fhir-${Date.now()}`,
     };
-  });
 
-  const bundle: FhirBundle = {
-    resourceType: 'Bundle',
-    type: 'searchset',
-    total: entries.length,
-    entry: entries.length > 0 ? entries : undefined,
-  };
+    // Build filter from FHIR search parameters
+    const searchFilter = buildPatientFilter(req.query);
+    if (!searchFilter) {
+      return operationOutcome(400, 'invalid', 'At least one search parameter is required (identifier, name, birthdate)');
+    }
 
-  return {
-    status: 200,
-    headers: fhirHeaders(),
-    body: bundle,
-  };
+    // Authorization: get list of patients user can view
+    const allowedObjects = await deps.authorizationService.listObjects(
+      `user:${req.user.id}`,
+      'viewer',
+      'patient',
+    );
+
+    const allowedIds = allowedObjects.map((o: string) => {
+      const parts = o.split(':');
+      return parts[parts.length - 1];
+    }).filter((id): id is string => id !== undefined && id !== '');
+
+    if (allowedIds.length === 0) {
+      return {
+        status: 200,
+        headers: fhirHeaders(),
+        body: { resourceType: 'Bundle', type: 'searchset', total: 0 } as FhirBundle,
+      };
+    }
+
+    // Combine authorization filter with search filter
+    const idFilter: FieldPredicate = { field: '_id', operator: 'in', value: allowedIds };
+    const combinedFilter: FilterExpression = {
+      and: [idFilter, searchFilter],
+    };
+
+    const page = await deps.objectManager.query(
+      'Patient',
+      combinedFilter,
+      { limit: 100, offset: 0 },
+      ctx,
+    );
+
+    // Redact fields for all results
+    const redacted = deps.authorizationService.redactFieldsBatch(
+      req.user.id,
+      req.user.roles,
+      'Patient',
+      page.items as unknown as Record<string, unknown>[],
+    );
+
+    // Consent filtering — exclude patients that the user lacks consent for.
+    // NOTE: Applied after pagination — see Encounter handler for details.
+    let consentFiltered = redacted;
+    if (deps.consentService) {
+      const consentResult = await deps.consentService.filterList(
+        redacted.map((r: { data: Record<string, unknown> }) => r.data),
+        (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
+        DataPurpose.DIRECT_CARE,
+        req.user.id,
+      );
+      consentFiltered = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
+    }
+
+    const entries = consentFiltered.map((r: { data: Record<string, unknown> }) => {
+      const patient = mapPatientToFhir(r.data as unknown as OntologyObject);
+      return {
+        fullUrl: baseUrl ? `${baseUrl}/Patient/${patient.id}` : undefined,
+        resource: patient,
+      };
+    });
+
+    const bundle: FhirBundle = {
+      resourceType: 'Bundle',
+      type: 'searchset',
+      total: entries.length,
+      entry: entries.length > 0 ? entries : undefined,
+    };
+
+    return {
+      status: 200,
+      headers: fhirHeaders(),
+      body: bundle,
+    };
+  } catch (err) {
+    console.error('FHIR Patient search error:', err);
+    return operationOutcome(500, 'exception', 'Internal server error');
+  }
 }
 
 // ─── Encounter handlers ───
@@ -248,89 +266,97 @@ async function handleEncounterSearch(
   req: FhirRequest,
   baseUrl: string,
 ): Promise<FhirResponse> {
-  const patientParam = req.query['patient'];
-  if (!patientParam) {
-    return operationOutcome(400, 'invalid', 'The "patient" search parameter is required for Encounter search');
-  }
+  try {
+    const patientParam = req.query['patient'];
+    if (!patientParam) {
+      return operationOutcome(400, 'invalid', 'The "patient" search parameter is required for Encounter search');
+    }
 
-  // Extract patient ID from "Patient/{id}" format
-  const patientId = patientParam.replace(/^Patient\//, '');
+    // Extract patient ID from "Patient/{id}" format
+    const patientId = patientParam.replace(/^Patient\//, '');
+    if (!patientId) {
+      return operationOutcome(400, 'invalid', 'Invalid patient reference format');
+    }
 
-  const ctx = {
-    tenantId: req.user.tenantId,
-    actorId: req.user.id,
-    traceId: `fhir-${Date.now()}`,
-  };
-
-  // Authorization: check user can view this patient
-  const allowed = await deps.authorizationService.check(
-    `user:${req.user.id}`,
-    'viewer',
-    `patient:${patientId}`,
-  );
-  if (!allowed) {
-    return operationOutcome(403, 'forbidden', `Access denied to Patient ${patientId}`);
-  }
-
-  // Query encounters linked to this patient.
-  // TODO: NHS acute schema has no 'Encounter' ODL type — admissions are modeled
-  // as AdmittedTo links (Patient→Ward). This query will return empty until either
-  // an Encounter object type is added to the domain pack, or this handler is
-  // remapped to query AdmittedTo links and synthesize Encounter resources.
-  const filter: FieldPredicate = { field: 'patientId', operator: 'eq', value: patientId };
-
-  const page = await deps.objectManager.query(
-    'Encounter',
-    filter,
-    { limit: 100, offset: 0 },
-    ctx,
-  );
-
-  // Field-level redaction
-  const redacted = deps.authorizationService.redactFieldsBatch(
-    req.user.id,
-    req.user.roles,
-    'Encounter',
-    page.items as unknown as Record<string, unknown>[],
-  );
-
-  // Consent filtering.
-  // NOTE: Consent is applied after storage pagination. If the storage layer
-  // returns a full page and consent removes items, the response may contain
-  // fewer entries than the requested limit. This is a known architectural
-  // limitation — addressing it requires push-down filtering into the storage
-  // layer (deferred post-MVP).
-  let filteredItems = redacted;
-  if (deps.consentService) {
-    const consentResult = await deps.consentService.filterList(
-      redacted.map((r: { data: Record<string, unknown> }) => r.data),
-      (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
-      DataPurpose.DIRECT_CARE,
-      req.user.id,
-    );
-    filteredItems = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
-  }
-
-  const entries = filteredItems.map((r: { data: Record<string, unknown> }) => {
-    const encounter = mapEncounterToFhir(r.data as unknown as OntologyObject, patientId);
-    return {
-      fullUrl: baseUrl ? `${baseUrl}/Encounter/${encounter.id}` : undefined,
-      resource: encounter,
+    const ctx = {
+      tenantId: req.user.tenantId,
+      actorId: req.user.id,
+      traceId: `fhir-${Date.now()}`,
     };
-  });
 
-  const bundle: FhirBundle = {
-    resourceType: 'Bundle',
-    type: 'searchset',
-    total: entries.length,
-    entry: entries.length > 0 ? entries : undefined,
-  };
+    // Authorization: check user can view this patient
+    const allowed = await deps.authorizationService.check(
+      `user:${req.user.id}`,
+      'viewer',
+      `patient:${patientId}`,
+    );
+    if (!allowed) {
+      return operationOutcome(403, 'forbidden', `Access denied to Patient ${patientId}`);
+    }
 
-  return {
-    status: 200,
-    headers: fhirHeaders(),
-    body: bundle,
-  };
+    // Query encounters linked to this patient.
+    // TODO: NHS acute schema has no 'Encounter' ODL type — admissions are modeled
+    // as AdmittedTo links (Patient→Ward). This query will return empty until either
+    // an Encounter object type is added to the domain pack, or this handler is
+    // remapped to query AdmittedTo links and synthesize Encounter resources.
+    const filter: FieldPredicate = { field: 'patientId', operator: 'eq', value: patientId };
+
+    const page = await deps.objectManager.query(
+      'Encounter',
+      filter,
+      { limit: 100, offset: 0 },
+      ctx,
+    );
+
+    // Field-level redaction
+    const redacted = deps.authorizationService.redactFieldsBatch(
+      req.user.id,
+      req.user.roles,
+      'Encounter',
+      page.items as unknown as Record<string, unknown>[],
+    );
+
+    // Consent filtering.
+    // NOTE: Consent is applied after storage pagination. If the storage layer
+    // returns a full page and consent removes items, the response may contain
+    // fewer entries than the requested limit. This is a known architectural
+    // limitation — addressing it requires push-down filtering into the storage
+    // layer (deferred post-MVP).
+    let filteredItems = redacted;
+    if (deps.consentService) {
+      const consentResult = await deps.consentService.filterList(
+        redacted.map((r: { data: Record<string, unknown> }) => r.data),
+        (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
+        DataPurpose.DIRECT_CARE,
+        req.user.id,
+      );
+      filteredItems = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
+    }
+
+    const entries = filteredItems.map((r: { data: Record<string, unknown> }) => {
+      const encounter = mapEncounterToFhir(r.data as unknown as OntologyObject, patientId);
+      return {
+        fullUrl: baseUrl ? `${baseUrl}/Encounter/${encounter.id}` : undefined,
+        resource: encounter,
+      };
+    });
+
+    const bundle: FhirBundle = {
+      resourceType: 'Bundle',
+      type: 'searchset',
+      total: entries.length,
+      entry: entries.length > 0 ? entries : undefined,
+    };
+
+    return {
+      status: 200,
+      headers: fhirHeaders(),
+      body: bundle,
+    };
+  } catch (err) {
+    console.error('FHIR Encounter search error:', err);
+    return operationOutcome(500, 'exception', 'Internal server error');
+  }
 }
 
 // ─── Search filter builders ───

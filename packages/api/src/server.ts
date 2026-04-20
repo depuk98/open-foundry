@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   await apolloServer.start();
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
 
   // Health check endpoints — used by Docker/Helm probes
   app.get('/health', (_req, res) => {
@@ -179,7 +179,17 @@ async function main(): Promise<void> {
         res.status(result.status).json(result.body);
       } catch (err) {
         console.error('REST handler error:', err);
-        res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
+        res.status(500).json({
+          error: {
+            code: 'INTERNAL_ERROR',
+            category: 'system',
+            message: 'Internal server error',
+            retryable: false,
+            details: {},
+            traceId: 'unknown',
+            timestamp: new Date().toISOString(),
+          },
+        });
       }
     });
   }

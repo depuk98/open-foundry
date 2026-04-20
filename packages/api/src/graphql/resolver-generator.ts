@@ -22,7 +22,7 @@ import type { RedactionResult } from '@openfoundry/security';
 import { PubSub } from 'graphql-subscriptions';
 import type { ApiDependencies, ResolverContext, PaginationArgs } from './types.js';
 import { DEFAULT_CONSENT_PURPOSE } from './types.js';
-import { resolvePagination, buildConnection } from './pagination.js';
+import { resolvePagination, buildConnection, decodeCursor } from './pagination.js';
 import { createOpenFoundryError, wrapError } from './errors.js';
 import {
   createIdFilteredSubscription,
@@ -49,6 +49,28 @@ function isPrimaryField(field: FieldDefinition): boolean {
 
 function isParamField(field: FieldDefinition): boolean {
   return field.directives.some(d => d.kind === 'param');
+}
+
+/**
+ * Recursively collect field names referenced in a GraphQL filter object.
+ * Used to enforce field-level authorization on filter predicates.
+ */
+function collectGraphQLFilterFields(filter: Record<string, unknown> | undefined): string[] {
+  if (!filter) return [];
+  const fields: string[] = [];
+  for (const [key, value] of Object.entries(filter)) {
+    if (value == null) continue;
+    if ((key === 'AND' || key === 'OR') && Array.isArray(value)) {
+      for (const sub of value) {
+        fields.push(...collectGraphQLFilterFields(sub as Record<string, unknown>));
+      }
+    } else if (key === 'NOT' && typeof value === 'object') {
+      fields.push(...collectGraphQLFilterFields(value as Record<string, unknown>));
+    } else {
+      fields.push(key);
+    }
+  }
+  return fields;
 }
 
 /**
@@ -115,6 +137,7 @@ function mapFilterOp(op: string): SpiOperator | undefined {
     in: 'in',
     contains: 'contains',
     startsWith: 'startsWith',
+    exists: 'exists',
   };
   return mapping[op];
 }
@@ -458,11 +481,13 @@ function generateAggregateResolver(
       }
 
       // Field-level authorization: reject aggregation over redacted fields
+      // Check aggregate fields, groupBy, and filter predicates
       const visibleFields = deps.authorizationService.getVisibleFields(user.id, user.roles, typeName);
       if (visibleFields) {
         const allRequestedFields = [
           ...args.fields.filter(f => f.field !== '*').map(f => f.field),
           ...(args.groupBy ?? []),
+          ...collectGraphQLFilterFields(args.filter),
         ];
         const blocked = allRequestedFields.filter(f => !visibleFields.has(f));
         if (blocked.length > 0) {
@@ -549,10 +574,7 @@ function generateSearchResolver(
       // Resolve pagination: 'after' is an opaque cursor encoding an offset
       let offset = 0;
       if (args.after) {
-        const decoded = parseInt(Buffer.from(args.after, 'base64').toString('utf8'), 10);
-        if (!isNaN(decoded)) {
-          offset = decoded;
-        }
+        offset = decodeCursor(args.after) + 1;
       }
 
       const searchQuery: SearchQuery = {

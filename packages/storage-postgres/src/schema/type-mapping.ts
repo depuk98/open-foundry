@@ -81,3 +81,28 @@ export function snakeCase(name: string): string {
     .toLowerCase()
     .replace(/^_/, '');
 }
+
+/**
+ * Return the unquoted PostgreSQL column name for a field.
+ * System fields (prefixed with _) convert the body from camelCase to snake_case
+ * while preserving the leading underscore:
+ *   _createdAt → _created_at, _tenantId → _tenant_id, _id → _id
+ * User fields go through standard snakeCase conversion.
+ */
+export function fieldColName(field: string): string {
+  if (field.startsWith('_')) {
+    const body = field.slice(1);
+    return `_${body.replace(/([A-Z])/g, '_$1').toLowerCase()}`;
+  }
+  return snakeCase(field);
+}
+
+/**
+ * Quote a field name as a PostgreSQL column identifier.
+ * Uses fieldColName for the mapping, then wraps in double-quotes.
+ */
+export function fieldCol(field: string): string {
+  const col = fieldColName(field);
+  const escaped = col.replace(/"/g, '""');
+  return `"${escaped}"`;
+}

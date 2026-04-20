@@ -7,7 +7,7 @@
  */
 
 import type { FilterExpression, FieldPredicate, LogicalPredicate } from '@openfoundry/spi';
-import { pgIdent, snakeCase } from '../schema/type-mapping.js';
+import { fieldCol } from '../schema/type-mapping.js';
 
 /** Result of translating a FilterExpression. */
 export interface SqlFragment {
@@ -44,11 +44,7 @@ export function filterToSql(filter: FilterExpression, offset = 1): SqlFragment {
 }
 
 function fieldPredicateToSql(pred: FieldPredicate, offset: number): SqlFragment {
-  // System fields (prefixed with _) are stored as-is in Postgres;
-  // skip snakeCase which strips the leading underscore.
-  const col = pred.field.startsWith('_')
-    ? `"${pred.field.replace(/"/g, '""')}"`
-    : pgIdent(snakeCase(pred.field));
+  const col = fieldCol(pred.field);
 
   switch (pred.operator) {
     case 'eq':

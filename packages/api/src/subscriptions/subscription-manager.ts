@@ -261,6 +261,12 @@ export class SubscriptionManager {
  * Create a subscription resolver that filters by object ID.
  *
  * Used for `fooChanged(id: ID!)` subscriptions.
+ *
+ * SECURITY TODO: No per-object authorization check. WebSocket connections are
+ * authenticated, but events are not filtered by FGA permissions — a subscriber
+ * can receive change events for any object ID they specify, even if they lack
+ * read access. Fixing this requires passing the auth context (3rd GraphQL arg)
+ * and calling FGA `check()` on each event, with an async-capable filter iterator.
  */
 export function createIdFilteredSubscription(
   pubsub: PubSub,
@@ -283,6 +289,10 @@ export function createIdFilteredSubscription(
  * Create a subscription resolver for type-level changes with optional filter.
  *
  * Used for `foosChanged(filter: FooFilter)` subscriptions.
+ *
+ * SECURITY TODO: No per-object authorization or tenant isolation check.
+ * All events for a type are delivered to any authenticated subscriber.
+ * See createIdFilteredSubscription for details.
  */
 export function createFilteredSubscription(
   pubsub: PubSub,

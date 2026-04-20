@@ -13,7 +13,7 @@ import type {
   SearchHit,
   OntologyObject,
 } from '@openfoundry/spi';
-import { snakeCase, pgIdent } from '../schema/type-mapping.js';
+import { snakeCase, pgIdent, fieldCol } from '../schema/type-mapping.js';
 import { filterToSql } from './filter-to-sql.js';
 import { PgTransaction, resolveQueryable } from '../transactions/index.js';
 
@@ -121,7 +121,7 @@ export async function searchObjects(
   const ilikeParts: string[] = [];
   const scoreParts: string[] = [];
   for (const field of searchFields) {
-    const col = pgIdent(snakeCase(field));
+    const col = fieldCol(field);
     ilikeParts.push(`${col} ILIKE $${patternIdx} ESCAPE '\\'`);
     scoreParts.push(`CASE WHEN ${col} ILIKE $${patternIdx} ESCAPE '\\' THEN 1 ELSE 0 END`);
   }

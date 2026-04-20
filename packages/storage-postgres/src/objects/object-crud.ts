@@ -17,7 +17,7 @@ import type {
   ObjectPage,
   DateTime,
 } from '@openfoundry/spi';
-import { snakeCase, pgIdent } from '../schema/type-mapping.js';
+import { snakeCase, pgIdent, fieldCol } from '../schema/type-mapping.js';
 import { filterToSql } from './filter-to-sql.js';
 import { PgTransaction, resolveQueryable } from '../transactions/index.js';
 
@@ -363,7 +363,7 @@ export async function queryObjects(
   let orderClause = '';
   if (options?.orderBy && options.orderBy.length > 0) {
     const orderParts = options.orderBy.map(
-      (o) => `${pgIdent(snakeCase(o.field))} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`,
+      (o) => `${fieldCol(o.field)} ${o.direction === 'desc' ? 'DESC' : 'ASC'}`,
     );
     orderClause = ` ORDER BY ${orderParts.join(', ')}`;
   }

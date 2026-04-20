@@ -15,6 +15,12 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
     ctx: RequestContext,
     def: Omit<ObjectSetDefinition, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<ObjectSetDefinition> {
+    // Enforce createdBy from request context — fail closed if unauthenticated
+    if (!ctx.actorId) {
+      throw Object.assign(new Error('Cannot create object set without authenticated user'), {
+        code: 'UNAUTHENTICATED',
+      });
+    }
     const now = new Date().toISOString();
     const objectSet: ObjectSetDefinition = {
       ...def,
@@ -22,6 +28,7 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
       createdAt: now,
       updatedAt: now,
       tenantId: ctx.tenantId,
+      createdBy: ctx.actorId,
     };
     this.store.set(objectSet.id, objectSet);
     return objectSet;

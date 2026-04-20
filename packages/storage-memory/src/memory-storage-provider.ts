@@ -567,9 +567,10 @@ export class MemoryStorageProvider implements StorageProvider {
       }
     }
 
-    // Pagination
+    // Pagination — enforce maximum limit to prevent DoS (matches Postgres provider)
+    const MAX_QUERY_LIMIT = 1000;
     const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? items.length;
+    const limit = Math.min(options?.limit ?? 100, MAX_QUERY_LIMIT);
     items = items.slice(offset, offset + limit);
 
     return {
@@ -582,6 +583,14 @@ export class MemoryStorageProvider implements StorageProvider {
   async aggregateObjects(ctx: RequestContext, type: string, query: AggregateQuery): Promise<AggregateResult> {
     if (!query.fields || query.fields.length === 0) {
       throw new Error('Aggregate query must specify at least one field');
+    }
+    // Validate aggregate functions upfront (before grouping) so invalid
+    // functions always throw, even when there are zero matching rows.
+    const ALLOWED_FNS = new Set(['count', 'sum', 'avg', 'min', 'max']);
+    for (const aggField of query.fields) {
+      if (!ALLOWED_FNS.has(aggField.fn.toLowerCase())) {
+        throw new Error(`Invalid aggregate function: ${aggField.fn}`);
+      }
     }
     // 1. Collect matching objects (tenant-scoped, non-deleted)
     let items = Array.from(this._objects.values()).filter((obj) => {
@@ -630,9 +639,10 @@ export class MemoryStorageProvider implements StorageProvider {
       const values: Record<string, number | null> = {};
 
       for (const aggField of query.fields) {
+        const fnLower = aggField.fn.toLowerCase();
         const alias = aggField.alias ?? `${aggField.fn}_${aggField.field}`;
 
-        if (aggField.fn === 'count') {
+        if (fnLower === 'count') {
           if (aggField.field === '*') {
             values[alias] = groupItems.length;
           } else {
@@ -649,7 +659,7 @@ export class MemoryStorageProvider implements StorageProvider {
           if (numericValues.length === 0) {
             values[alias] = null;
           } else {
-            switch (aggField.fn) {
+            switch (fnLower) {
               case 'sum':
                 values[alias] = numericValues.reduce((a, b) => a + b, 0);
                 break;
@@ -697,6 +707,11 @@ export class MemoryStorageProvider implements StorageProvider {
   }
 
   async searchObjects(ctx: RequestContext, type: string, query: SearchQuery): Promise<SearchResult> {
+    // Guard against empty search queries (matches Postgres provider behavior)
+    if (!query.query || query.query.trim().length === 0) {
+      return { hits: [], totalCount: 0, hasNextPage: false };
+    }
+
     const queryLower = query.query.toLowerCase();
     const terms = queryLower.split(/\s+/).filter((t) => t.length > 0);
 
