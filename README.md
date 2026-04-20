@@ -241,7 +241,7 @@ These items are specified in the full technical spec but intentionally deferred 
 | Audit Trail persistence | PostgresAuditStore wired in prod mode | Complete |
 | Rate limiting (distributed) | In-memory only | Single-instance only |
 | Helm HA configuration | replicas=1, no PDBs | Not production-hardened |
-| Link event publishing | Uses `publishObjectChange` | No dedicated `publishLinkChange` events |
+| Link event publishing | Routes link effects through `publishLinkChange()` | Complete |
 | `ROLLBACK_ALL` compensation | Handles both object and link effects | Complete |
 | Traversal `maxDepth` / guards | Memory provider lacks depth/node limits | Unbounded traversal possible in memory |
 | Application Framework | Not implemented | No UI layer; API-only |

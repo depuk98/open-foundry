@@ -313,24 +313,38 @@ export class ActionExecutor {
         });
       }
 
-      // TODO: Link effects (createLink/deleteLink) are published via publishObjectChange()
-      // but the ActionEventPublisher interface defines a separate publishLinkChange() method.
-      // Link-created/deleted entries in affectedObjects use `link:${type}:${id}` keys in
-      // beforeStates/afterStates but the lookup below uses `${type}:${id}` (no prefix),
-      // so before/after payloads for links will always be undefined. Route link events
-      // through publishLinkChange() with fromId/toId to fix both issues.
       if (this.config.eventPublisher) {
         const cause = { actionType, actionId, actor: actor.id };
         for (const affected of affectedObjects) {
-          await this.config.eventPublisher.publishObjectChange(
-            affected.changeType,
-            affected.type,
-            affected.id,
-            beforeStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
-            afterStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
-            cause,
-            reqCtx,
-          );
+          const linkKey = `link:${affected.type}:${affected.id}`;
+          const isLink = beforeStates.has(linkKey) || afterStates.has(linkKey);
+
+          if (isLink) {
+            // Use publishLinkChange for link effects with fromId/toId
+            const linkState = (afterStates.get(linkKey) ?? beforeStates.get(linkKey)) as Record<string, unknown> | undefined;
+            const fromId = (linkState?.['_fromId'] as string) ?? '';
+            const toId = (linkState?.['_toId'] as string) ?? '';
+            await this.config.eventPublisher.publishLinkChange(
+              affected.changeType as 'created' | 'deleted',
+              affected.type,
+              affected.id,
+              fromId,
+              toId,
+              cause,
+              reqCtx,
+            );
+          } else {
+            // Use publishObjectChange for object effects
+            await this.config.eventPublisher.publishObjectChange(
+              affected.changeType,
+              affected.type,
+              affected.id,
+              beforeStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
+              afterStates.get(`${affected.type}:${affected.id}`) as Record<string, unknown> | undefined,
+              cause,
+              reqCtx,
+            );
+          }
         }
       }
     } catch (postCommitErr) {
