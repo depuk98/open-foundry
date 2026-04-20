@@ -35,6 +35,10 @@ export async function aggregateObjects(
   const q = resolveQueryable(pool, tx);
   const table = tableName(type, schema);
 
+  if (!query.fields || query.fields.length === 0) {
+    throw new Error('Aggregate query must specify at least one field');
+  }
+
   // --- SELECT clause ---
   const selectParts: string[] = [];
 

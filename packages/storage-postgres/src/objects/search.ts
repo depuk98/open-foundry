@@ -59,8 +59,10 @@ export async function searchObjects(
     return { hits: [], totalCount: 0, hasNextPage: false };
   }
 
-  // Build ILIKE matching for search fields
-  const searchPattern = `%${query.query}%`;
+  // Build ILIKE matching for search fields.
+  // Escape LIKE wildcards (% and _) in the user query so they match literally.
+  const escapedQuery = query.query.replace(/[%_\\]/g, '\\$&');
+  const searchPattern = `%${escapedQuery}%`;
   params.push(searchPattern);
   const patternIdx = params.length;
 
@@ -94,8 +96,8 @@ export async function searchObjects(
   const scoreParts: string[] = [];
   for (const field of searchFields) {
     const col = pgIdent(snakeCase(field));
-    ilikeParts.push(`${col} ILIKE $${patternIdx}`);
-    scoreParts.push(`CASE WHEN ${col} ILIKE $${patternIdx} THEN 1 ELSE 0 END`);
+    ilikeParts.push(`${col} ILIKE $${patternIdx} ESCAPE '\\'`);
+    scoreParts.push(`CASE WHEN ${col} ILIKE $${patternIdx} ESCAPE '\\' THEN 1 ELSE 0 END`);
   }
 
   whereClauses.push(`(${ilikeParts.join(' OR ')})`);
