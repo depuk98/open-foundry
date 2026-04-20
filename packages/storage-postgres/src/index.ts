@@ -60,6 +60,10 @@ export {
   getObjectAtTime,
 } from './temporal/index.js';
 
+// ─── Audit ───
+export { PostgresAuditStore } from './audit/postgres-audit-store.js';
+export type { AuditQueryFilter as PostgresAuditQueryFilter } from './audit/postgres-audit-store.js';
+
 // ─── Transactions ───
 export { PgTransaction, resolveQueryable } from './transactions/index.js';
 export type { Queryable } from './transactions/index.js';

@@ -23,7 +23,7 @@ import cors from 'cors';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
-import { PostgresStorageProvider } from '@openfoundry/storage-postgres';
+import { PostgresStorageProvider, PostgresAuditStore } from '@openfoundry/storage-postgres';
 import {
   ObjectManager,
   LinkManager,
@@ -32,7 +32,7 @@ import {
 } from '@openfoundry/engine';
 import { ActionExecutor, CelClient } from '@openfoundry/actions';
 import type { SecurityLayer, CelEvaluator } from '@openfoundry/actions';
-import { AuthorizationService, OidcAuthenticator } from '@openfoundry/security';
+import { AuthorizationService, OidcAuthenticator, AuditWriter, MemoryAuditStore } from '@openfoundry/security';
 import type { OpenFgaClientInterface } from '@openfoundry/security';
 import type { StorageProvider, RequestContext } from '@openfoundry/spi';
 import { createGraphQLServer, buildResolverContext } from './graphql/index.js';
@@ -147,8 +147,21 @@ async function main(): Promise<void> {
     security = { async checkPermission() { return { allowed: true }; } };
   }
 
+  // ── Audit Trail ──
+  const auditStore = (storage instanceof PostgresStorageProvider)
+    ? new PostgresAuditStore(storage.pool)
+    : new MemoryAuditStore();
+  const securityAuditWriter = new AuditWriter(auditStore);
+  // Adapt return type: security AuditWriter returns AuditRecord, action pipeline expects void
+  const auditWriter = { async write(record: Parameters<typeof securityAuditWriter.write>[0]) { await securityAuditWriter.write(record); } };
+  if (storage instanceof PostgresStorageProvider) {
+    console.log('Audit: PostgreSQL (persistent)');
+  } else {
+    console.warn('Audit: in-memory (development mode)');
+  }
+
   // ── Action Executor ──
-  const actionExecutor = new ActionExecutor({ storage, security, cel });
+  const actionExecutor = new ActionExecutor({ storage, security, cel, auditWriter });
 
   // ── API Dependencies ──
   const deps: ApiDependencies = {

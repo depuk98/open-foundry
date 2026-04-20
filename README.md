@@ -196,12 +196,12 @@ helm install openfoundry deploy/helm/openfoundry \
 
 ## Test Coverage
 
-1,829 tests across all packages:
+1,844 tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,738 | Always run |
-| Postgres integration tests | 91 | Run when `PG_TEST_URL` is set |
+| Unit tests | 1,746 | Always run |
+| Postgres integration tests | 98 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
 ### PostgreSQL Provider Capabilities
@@ -238,7 +238,7 @@ These items are specified in the full technical spec but intentionally deferred 
 |------|--------------|--------|
 | Production runtime wiring | Fully wired: Postgres/FGA/CEL/OIDC in prod, stubs in dev; domain packs loaded at boot | Complete |
 | Schema Registry persistence | In-memory only | Schemas lost on restart |
-| Audit Trail persistence | In-memory only | Audit data lost on restart |
+| Audit Trail persistence | PostgresAuditStore wired in prod mode | Complete |
 | Rate limiting (distributed) | In-memory only | Single-instance only |
 | Helm HA configuration | replicas=1, no PDBs | Not production-hardened |
 | Link event publishing | Uses `publishObjectChange` | No dedicated `publishLinkChange` events |
@@ -291,7 +291,7 @@ A human engineer took over direction — reviewing the codebase, revising the sp
 | Deployment config | ~2,000 lines |
 | Specification + MVP docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,829 |
+| Unit + integration tests | 1,844 |
 
 ---
 
