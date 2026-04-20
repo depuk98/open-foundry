@@ -105,6 +105,42 @@ function parsePagination(query: Record<string, string | string[] | undefined>): 
   return { offset, limit };
 }
 
+// ─── Auth helpers ───
+
+/**
+ * Resolve authorized object IDs for a user+type via FGA listObjects.
+ */
+async function resolveAllowedIds(
+  deps: ApiDependencies,
+  userId: string,
+  fgaType: string,
+): Promise<string[]> {
+  const allowedObjects = await deps.authorizationService.listObjects(
+    `user:${userId}`,
+    'viewer',
+    fgaType,
+  );
+  return allowedObjects.map((o: string) => {
+    const parts = o.split(':');
+    return parts[parts.length - 1];
+  }).filter((id): id is string => id !== undefined && id !== '');
+}
+
+/**
+ * Build a combined filter that restricts to authorized IDs + optional user filter.
+ */
+function buildAuthFilter(
+  allowedIds: string[],
+  userFilter?: FilterExpression,
+): FilterExpression {
+  const idFilter: FilterExpression = {
+    field: '_id',
+    operator: 'in',
+    value: allowedIds,
+  };
+  return userFilter ? { and: [idFilter, userFilter] } : idFilter;
+}
+
 // ─── Public API ───
 
 /**
@@ -139,13 +175,15 @@ function generateObjectRoutes(
   const plural = pluralize(obj.name);
   const fgaType = toSnakeCase(obj.name);
 
+  // Route order matters for Express: static path segments must come before
+  // parameterized segments (e.g., /search before /:id) to avoid shadowing.
   return [
     generateListRoute(obj, plural, fgaType, deps),
+    generateAggregateRoute(obj, plural, fgaType, deps),
+    generateSearchRoute(obj, plural, fgaType, deps),
     generateGetByIdRoute(obj, plural, fgaType, deps),
     generateLinksRoute(plural, fgaType, deps),
     generateHistoryRoute(obj, plural, fgaType, deps),
-    generateAggregateRoute(obj, plural, deps),
-    generateSearchRoute(obj, plural, deps),
   ];
 }
 
@@ -534,6 +572,7 @@ function generateHistoryRoute(
 function generateAggregateRoute(
   obj: ObjectType,
   plural: string,
+  fgaType: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -541,8 +580,15 @@ function generateAggregateRoute(
     pattern: `/api/v1/${plural}/aggregate`,
     handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
       try {
-        const { requestContext } = ctx;
+        const { user, requestContext } = ctx;
         const typeName = obj.name;
+
+        // Authorization: restrict aggregation to authorized objects
+        const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
+        if (allowedIds.length === 0) {
+          return { status: 200, body: { data: { groups: [], totalGroups: 0 } } };
+        }
+
         const body = (req.body ?? {}) as Record<string, unknown>;
 
         // Build AggregateQuery from body
@@ -553,10 +599,14 @@ function generateAggregateRoute(
           alias: f.alias,
         }));
 
+        // Combine user filter with authorization filter
+        const userFilter = body['filter'] as FilterExpression | undefined;
+        const combinedFilter = buildAuthFilter(allowedIds, userFilter);
+
         const query: AggregateQuery = {
           fields,
           groupBy: body['groupBy'] as string[] | undefined,
-          filter: body['filter'] as FilterExpression | undefined,
+          filter: combinedFilter,
           orderBy: body['orderBy'] as { field: string; direction: 'asc' | 'desc' }[] | undefined,
           limit: body['limit'] as number | undefined,
           offset: body['offset'] as number | undefined,
@@ -581,6 +631,7 @@ function generateAggregateRoute(
 function generateSearchRoute(
   obj: ObjectType,
   plural: string,
+  fgaType: string,
   deps: ApiDependencies,
 ): RestRoute {
   return {
@@ -588,11 +639,11 @@ function generateSearchRoute(
     pattern: `/api/v1/${plural}/search`,
     handler: async (req: RestRequest, ctx: ResolverContext): Promise<RestResponse> => {
       try {
-        const { requestContext } = ctx;
+        const { user, requestContext } = ctx;
         const typeName = obj.name;
 
         const q = typeof req.query['q'] === 'string' ? req.query['q'] : '';
-        if (!q) {
+        if (!q || q.trim().length === 0) {
           return {
             status: 400,
             body: {
@@ -604,6 +655,21 @@ function generateSearchRoute(
           };
         }
 
+        // Authorization: restrict search to authorized objects
+        const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
+        if (allowedIds.length === 0) {
+          const { offset, limit } = parsePagination(req.query);
+          return {
+            status: 200,
+            body: {
+              data: [],
+              pagination: { totalCount: 0, limit, offset, hasNextPage: false, hasPreviousPage: false },
+            },
+          };
+        }
+
+        const authFilter = buildAuthFilter(allowedIds);
+
         // Parse fields from comma-separated string
         const fieldsRaw = typeof req.query['fields'] === 'string' ? req.query['fields'] : undefined;
         const fields = fieldsRaw ? fieldsRaw.split(',').map((f) => f.trim()).filter((f) => f.length > 0) : undefined;
@@ -613,23 +679,52 @@ function generateSearchRoute(
         const searchQuery: SearchQuery = {
           query: q,
           fields,
+          filter: authFilter,
           limit,
           offset,
         };
 
         const result = await deps.objectManager.search(typeName, searchQuery, requestContext);
 
-        const hits = result.hits.map((hit) => ({
-          node: objectToRest(hit.object, obj),
-          score: hit.score,
-        }));
+        // Field-level redaction
+        const rawItems = result.hits.map((hit) => objectToRest(hit.object, obj));
+        const redactedItems = deps.authorizationService.redactFieldsBatch(
+          user.id,
+          user.roles,
+          typeName,
+          rawItems,
+        );
+
+        let hits = redactedItems.map((r: RedactionResult<Record<string, unknown>>, i: number) => {
+          const data = r.data as Record<string, unknown>;
+          data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+          data._consentRestricted = false;
+          return { node: data, score: result.hits[i]!.score };
+        });
+
+        // Consent filtering
+        let totalCount = result.totalCount;
+        if (deps.consentService) {
+          const getPrimaryId = (hit: { node: Record<string, unknown>; score: number }) => {
+            const primaryField = obj.fields.find(f => isPrimaryField(f));
+            return String(hit.node[primaryField?.name ?? 'id'] ?? '');
+          };
+          const consentResult = await deps.consentService.filterList(
+            hits,
+            getPrimaryId,
+            DEFAULT_CONSENT_PURPOSE as DataPurpose,
+            user.id,
+          );
+          hits = consentResult.edges;
+          totalCount = consentResult.totalCount;
+        }
 
         return {
           status: 200,
           body: {
             data: hits,
             pagination: {
-              totalCount: result.totalCount,
+              totalCount,
               limit,
               offset,
               hasNextPage: result.hasNextPage,
@@ -889,9 +984,46 @@ function generateObjectSetRoutes(deps: ApiDependencies): RestRoute[] {
               traceId: ctx.requestContext.traceId,
             });
           }
+          const { user } = ctx;
           const id = req.params['id']!;
+
+          // Look up the object set to determine the objectType for auth
+          const def = await deps.objectSetManager.get(id, ctx.requestContext);
+          if (!def) {
+            return createRestErrorResponse({
+              code: 'OBJECT_SET_NOT_FOUND',
+              category: 'not_found',
+              message: `Object set ${id} not found`,
+              retryable: false,
+              traceId: ctx.requestContext.traceId,
+            });
+          }
+
+          // Authorization: restrict results to authorized objects
+          const fgaType = toSnakeCase(def.objectType);
+          const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
+          if (allowedIds.length === 0) {
+            const { offset, limit } = parsePagination(req.query);
+            return {
+              status: 200,
+              body: {
+                data: [],
+                pagination: { totalCount: 0, limit, offset, hasNextPage: false, hasPreviousPage: false },
+              },
+            };
+          }
+
           const { offset, limit } = parsePagination(req.query);
-          const page = await deps.objectSetManager.execute(id, ctx.requestContext, { limit, offset });
+
+          // Inject auth filter into the object set's saved filter
+          const authFilter = buildAuthFilter(allowedIds, def.filter);
+          const page = await deps.objectManager.query(
+            def.objectType,
+            authFilter,
+            { limit, offset, orderBy: def.orderBy },
+            ctx.requestContext,
+          );
+
           return {
             status: 200,
             body: {

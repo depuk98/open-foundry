@@ -30,6 +30,8 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
   async get(ctx: RequestContext, id: string): Promise<ObjectSetDefinition | null> {
     const def = this.store.get(id);
     if (!def || def.tenantId !== ctx.tenantId) return null;
+    // Visibility: only the creator or anyone if isPublic
+    if (!def.isPublic && ctx.actorId && def.createdBy !== ctx.actorId) return null;
     return def;
   }
 
@@ -47,6 +49,8 @@ export class InMemoryObjectSetStore implements ObjectSetStore {
     for (const def of this.store.values()) {
       if (def.tenantId !== ctx.tenantId) continue;
       if (objectType && def.objectType !== objectType) continue;
+      // Visibility: only public sets or sets created by the current user
+      if (!def.isPublic && ctx.actorId && def.createdBy !== ctx.actorId) continue;
       results.push(def);
     }
     return results;

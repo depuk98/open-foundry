@@ -42,7 +42,7 @@ export class JdbcConnector implements Connector {
 
   private pool: PgPool | null = null;
   private paused = false;
-  private pauseResolve: (() => void) | null = null;
+  private pauseResolvers: (() => void)[] = [];
 
   // -- Lifecycle --
 
@@ -236,10 +236,8 @@ export class JdbcConnector implements Connector {
 
   async resume(): Promise<void> {
     this.paused = false;
-    if (this.pauseResolve) {
-      this.pauseResolve();
-      this.pauseResolve = null;
-    }
+    for (const resolve of this.pauseResolvers) resolve();
+    this.pauseResolvers = [];
   }
 
   // -- Internal helpers --
@@ -253,12 +251,12 @@ export class JdbcConnector implements Connector {
 
   /**
    * Wait if the connector is paused. Returns a promise that resolves
-   * when resume() is called. Enables cooperative backpressure.
+   * when resume() is called. Supports multiple concurrent waiters.
    */
   private async waitIfPaused(): Promise<void> {
     if (!this.paused) return;
     return new Promise<void>((resolve) => {
-      this.pauseResolve = resolve;
+      this.pauseResolvers.push(resolve);
     });
   }
 
@@ -320,5 +318,6 @@ export const jdbcPlugin: ConnectorPlugin = {
     version: "0.1.0",
     description: "JDBC connector for PostgreSQL source systems",
   },
-  factory: () => new JdbcConnector(),
+  // Config is applied via initialize() per the Connector interface contract.
+  factory: (_config) => new JdbcConnector(),
 };

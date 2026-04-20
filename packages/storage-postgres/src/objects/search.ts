@@ -54,6 +54,11 @@ export async function searchObjects(
   const params: unknown[] = [ctx.tenantId];
   const whereClauses = [`"_tenant_id" = $1`, `"_deleted_at" IS NULL`];
 
+  // Guard against empty search queries (ILIKE '%%' matches all rows)
+  if (!query.query || query.query.trim().length === 0) {
+    return { hits: [], totalCount: 0, hasNextPage: false };
+  }
+
   // Build ILIKE matching for search fields
   const searchPattern = `%${query.query}%`;
   params.push(searchPattern);
@@ -107,6 +112,9 @@ export async function searchObjects(
   const whereClause = whereClauses.join(' AND ');
   const scoreExpr = scoreParts.join(' + ');
 
+  // Save params for a potential count-only fallback query (before LIMIT/OFFSET are pushed)
+  const countParams = [...params];
+
   // Build pagination
   let paginationClause = '';
   if (query.limit !== undefined) {
@@ -126,7 +134,19 @@ export async function searchObjects(
   const result = await q.query(sql, params);
   const rows = result.rows as Record<string, unknown>[];
 
-  const totalCount = rows.length > 0 ? Number((rows[0] as Record<string, unknown>)['_total_count']) : 0;
+  // COUNT(*) OVER() is only present in returned rows. When offset is past
+  // all results, rows is empty and we lose the count. Fall back to a
+  // separate count query in that case.
+  let totalCount: number;
+  if (rows.length > 0) {
+    totalCount = Number((rows[0] as Record<string, unknown>)['_total_count']);
+  } else if ((query.offset ?? 0) > 0) {
+    const countSql = `SELECT COUNT(*) AS cnt FROM ${table} WHERE ${whereClause}`;
+    const countResult = await q.query(countSql, countParams);
+    totalCount = Number((countResult.rows[0] as Record<string, unknown>)['cnt']);
+  } else {
+    totalCount = 0;
+  }
   const offset = query.offset ?? 0;
   const limit = query.limit ?? totalCount;
 

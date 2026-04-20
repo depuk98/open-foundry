@@ -66,8 +66,10 @@ export function pgIdent(name: string): string {
     .replace(/([A-Z])/g, '_$1')
     .toLowerCase()
     .replace(/^_/, '');
-  // Quote to avoid reserved word conflicts
-  return `"${snake}"`;
+  // Escape embedded double-quotes per SQL standard (double them),
+  // then wrap in double-quotes to avoid reserved word conflicts.
+  const escaped = snake.replace(/"/g, '""');
+  return `"${escaped}"`;
 }
 
 /**

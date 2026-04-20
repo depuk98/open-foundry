@@ -656,6 +656,10 @@ describe('GraphQL API', () => {
 
     it('calls objectManager.aggregate with correct params', async () => {
       const deps = createMockDeps(parsed);
+      // Auth: allow aggregate to proceed by returning some authorized IDs
+      const listMock = deps.authorizationService.listObjects as ReturnType<typeof vi.fn>;
+      listMock.mockResolvedValue(['patient:p-1', 'patient:p-2']);
+
       const aggregateMock = vi.fn().mockResolvedValue({
         groups: [{ keys: {}, values: { count: 5 } }],
         totalGroups: 1,
@@ -679,12 +683,18 @@ describe('GraphQL API', () => {
       expect(callArgs[0]).toBe('Patient');
       expect(callArgs[1].fields).toEqual([{ field: '*', fn: 'count', alias: 'count' }]);
       expect(callArgs[1].groupBy).toEqual(['status']);
+      // Auth filter is automatically included
+      expect(callArgs[1].filter).toBeDefined();
       expect(result.groups).toHaveLength(1);
       expect(result.totalGroups).toBe(1);
     });
 
     it('converts GraphQL filter to SPI filter', async () => {
       const deps = createMockDeps(parsed);
+      // Auth: allow aggregate to proceed
+      const listMock = deps.authorizationService.listObjects as ReturnType<typeof vi.fn>;
+      listMock.mockResolvedValue(['patient:p-1']);
+
       const aggregateMock = vi.fn().mockResolvedValue({
         groups: [{ keys: {}, values: { count: 3 } }],
         totalGroups: 1,
@@ -706,9 +716,14 @@ describe('GraphQL API', () => {
       const callArgs = aggregateMock.mock.calls[0]!;
       const filter = callArgs[1].filter;
       expect(filter).toBeDefined();
-      expect(filter.field).toBe('status');
-      expect(filter.operator).toBe('eq');
-      expect(filter.value).toBe('ACTIVE');
+      // Filter combines auth ID filter with user filter
+      expect(filter.and).toBeDefined();
+      expect(filter.and).toHaveLength(2);
+      // The user filter is included in the combined filter
+      const userFilter = filter.and[1];
+      expect(userFilter.field).toBe('status');
+      expect(userFilter.operator).toBe('eq');
+      expect(userFilter.value).toBe('ACTIVE');
     });
   });
 

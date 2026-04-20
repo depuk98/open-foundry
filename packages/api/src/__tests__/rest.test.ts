@@ -544,6 +544,10 @@ describe('REST API', () => {
 
     it('calls objectManager.aggregate and returns result', async () => {
       const deps = createMockDeps(parsed);
+      // Auth: allow aggregate to proceed
+      const listMock = deps.authorizationService.listObjects as ReturnType<typeof vi.fn>;
+      listMock.mockResolvedValue(['patient:p-1', 'patient:p-2']);
+
       const aggregateMock = vi.fn().mockResolvedValue({
         groups: [{ keys: {}, values: { count: 5 } }],
         totalGroups: 1,
@@ -577,6 +581,10 @@ describe('REST API', () => {
 
     it('passes filter and pagination to aggregate query', async () => {
       const deps = createMockDeps(parsed);
+      // Auth: allow aggregate to proceed
+      const listMock = deps.authorizationService.listObjects as ReturnType<typeof vi.fn>;
+      listMock.mockResolvedValue(['patient:p-1']);
+
       const aggregateMock = vi.fn().mockResolvedValue({
         groups: [],
         totalGroups: 0,
@@ -599,7 +607,11 @@ describe('REST API', () => {
       await route.handler(req, ctx);
 
       const callArgs = aggregateMock.mock.calls[0]!;
-      expect(callArgs[1].filter).toEqual({ field: 'status', operator: 'eq', value: 'ACTIVE' });
+      // Filter now includes auth ID filter combined with user filter
+      expect(callArgs[1].filter).toBeDefined();
+      expect(callArgs[1].filter.and).toBeDefined();
+      const userFilter = callArgs[1].filter.and[1];
+      expect(userFilter).toEqual({ field: 'status', operator: 'eq', value: 'ACTIVE' });
       expect(callArgs[1].limit).toBe(10);
       expect(callArgs[1].offset).toBe(5);
     });

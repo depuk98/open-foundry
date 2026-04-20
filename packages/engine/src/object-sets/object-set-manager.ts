@@ -10,6 +10,7 @@ import type {
   ObjectSetDefinition,
   ObjectSetStore,
   ObjectPage,
+  AggregateQuery,
   AggregateResult,
   PlatformError,
 } from '@openfoundry/spi';
@@ -114,6 +115,17 @@ export class ObjectSetManager {
       throw error;
     }
 
-    return this.objectManager.aggregate(def.objectType, def.aggregation, ctx);
+    // Merge the object set's filter into the aggregation query so the
+    // aggregation is scoped to the same objects the set would return.
+    const aggregation: AggregateQuery = { ...def.aggregation };
+    if (def.filter) {
+      if (aggregation.filter) {
+        aggregation.filter = { and: [def.filter, aggregation.filter] };
+      } else {
+        aggregation.filter = def.filter;
+      }
+    }
+
+    return this.objectManager.aggregate(def.objectType, aggregation, ctx);
   }
 }

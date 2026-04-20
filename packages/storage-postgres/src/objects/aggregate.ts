@@ -46,12 +46,19 @@ export async function aggregateObjects(
     }
   }
 
-  // Aggregate functions
+  // Aggregate functions — allowlist to prevent SQL injection
+  const ALLOWED_FNS = new Set(['count', 'sum', 'avg', 'min', 'max']);
+
   for (const aggField of query.fields) {
+    const fnLower = aggField.fn.toLowerCase();
+    if (!ALLOWED_FNS.has(fnLower)) {
+      throw new Error(`Invalid aggregate function: ${aggField.fn}`);
+    }
+
     const alias = aggField.alias ?? `${aggField.fn}_${aggField.field}`;
     const aliasIdent = pgIdent(snakeCase(alias));
 
-    if (aggField.fn === 'count') {
+    if (fnLower === 'count') {
       if (aggField.field === '*') {
         selectParts.push(`COUNT(*) AS ${aliasIdent}`);
       } else {
@@ -59,7 +66,7 @@ export async function aggregateObjects(
       }
     } else {
       const col = pgIdent(snakeCase(aggField.field));
-      const fnUpper = aggField.fn.toUpperCase();
+      const fnUpper = fnLower.toUpperCase();
       selectParts.push(`${fnUpper}(${col}) AS ${aliasIdent}`);
     }
   }
@@ -94,10 +101,16 @@ export async function aggregateObjects(
     orderClause = ` ORDER BY ${orderParts.join(', ')}`;
   }
 
-  // First, get total group count (before LIMIT/OFFSET)
-  const countSql = `SELECT COUNT(*) AS cnt FROM (SELECT 1 FROM ${table} WHERE ${whereClause}${groupByClause}) AS _sub`;
-  const countResult = await q.query(countSql, baseParams);
-  const totalGroups = parseInt(String((countResult.rows[0] as Record<string, unknown>)['cnt']), 10);
+  // Total group count (before LIMIT/OFFSET).
+  // When no GROUP BY is used, there is always exactly one aggregate group.
+  let totalGroups: number;
+  if (query.groupBy && query.groupBy.length > 0) {
+    const countSql = `SELECT COUNT(*) AS cnt FROM (SELECT 1 FROM ${table} WHERE ${whereClause}${groupByClause}) AS _sub`;
+    const countResult = await q.query(countSql, baseParams);
+    totalGroups = parseInt(String((countResult.rows[0] as Record<string, unknown>)['cnt']), 10);
+  } else {
+    totalGroups = 1;
+  }
 
   // --- LIMIT / OFFSET ---
   let paginationClause = '';

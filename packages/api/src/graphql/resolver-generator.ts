@@ -390,6 +390,44 @@ function generateQueryResolvers(
   };
 }
 
+// ─── Auth helper ───
+
+/**
+ * Resolve authorized object IDs for a user+type via FGA listObjects.
+ * Returns the list of allowed IDs, or null if authorization returned empty
+ * (meaning no access at all).
+ */
+async function resolveAllowedIds(
+  deps: ApiDependencies,
+  userId: string,
+  fgaType: string,
+): Promise<string[]> {
+  const allowedObjects = await deps.authorizationService.listObjects(
+    `user:${userId}`,
+    'viewer',
+    fgaType,
+  );
+  return allowedObjects.map((o: string) => {
+    const parts = o.split(':');
+    return parts[parts.length - 1];
+  }).filter((id): id is string => id !== undefined && id !== '');
+}
+
+/**
+ * Build a combined filter that restricts to authorized IDs + optional user filter.
+ */
+function buildAuthFilter(
+  allowedIds: string[],
+  userFilter?: FilterExpression,
+): FilterExpression {
+  const idFilter: FilterExpression = {
+    field: '_id',
+    operator: 'in',
+    value: allowedIds,
+  };
+  return userFilter ? { and: [idFilter, userFilter] } : idFilter;
+}
+
 // ─── Aggregate resolvers ───
 
 function generateAggregateResolver(
@@ -399,6 +437,7 @@ function generateAggregateResolver(
 ): void {
   const typeName = obj.name;
   const lower = lowerFirst(typeName);
+  const fgaType = toSnakeCase(typeName);
 
   // fooAggregate(filter, groupBy, fields): AggregateResult!
   resolvers['Query']![`${lower}Aggregate`] = async (
@@ -411,10 +450,17 @@ function generateAggregateResolver(
     ctx: ResolverContext,
   ) => {
     try {
-      const { requestContext } = ctx;
+      const { user, requestContext } = ctx;
 
-      // Convert GraphQL filter to SPI filter
-      const filter = convertFilter(args.filter);
+      // Authorization: restrict aggregation to authorized objects
+      const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
+      if (allowedIds.length === 0) {
+        return { groups: [], totalGroups: 0 };
+      }
+
+      // Convert GraphQL filter to SPI filter and combine with auth filter
+      const userFilter = convertFilter(args.filter);
+      const combinedFilter = buildAuthFilter(allowedIds, userFilter);
 
       // Convert GraphQL aggregate fields to SPI AggregateField[]
       const fields: AggregateField[] = args.fields.map((f) => ({
@@ -426,7 +472,7 @@ function generateAggregateResolver(
       const query: AggregateQuery = {
         fields,
         groupBy: args.groupBy,
-        filter: filter ?? undefined,
+        filter: combinedFilter,
       };
 
       return deps.objectManager.aggregate(typeName, query, requestContext);
@@ -444,6 +490,7 @@ function generateSearchResolver(
   deps: ApiDependencies,
 ): void {
   const typeName = obj.name;
+  const fgaType = toSnakeCase(typeName);
 
   // searchFoos(query, fields, filter, first, after): SearchResult_Foo!
   resolvers['Query']![`search${typeName}s`] = async (
@@ -458,10 +505,28 @@ function generateSearchResolver(
     ctx: ResolverContext,
   ) => {
     try {
-      const { requestContext } = ctx;
+      const { user, requestContext } = ctx;
 
-      // Convert GraphQL filter to SPI filter
-      const filter = convertFilter(args.filter);
+      // Reject empty search queries
+      if (!args.query || args.query.trim().length === 0) {
+        throw createOpenFoundryError({
+          code: 'INVALID_ARGUMENT',
+          category: 'validation',
+          message: 'Search query must not be empty',
+          retryable: false,
+          traceId: requestContext.traceId,
+        });
+      }
+
+      // Authorization: restrict search to authorized objects
+      const allowedIds = await resolveAllowedIds(deps, user.id, fgaType);
+      if (allowedIds.length === 0) {
+        return { hits: [], totalCount: 0, hasNextPage: false };
+      }
+
+      // Convert GraphQL filter to SPI filter and combine with auth filter
+      const userFilter = convertFilter(args.filter);
+      const combinedFilter = buildAuthFilter(allowedIds, userFilter);
 
       // Resolve pagination: 'after' is an opaque cursor encoding an offset
       let offset = 0;
@@ -475,22 +540,49 @@ function generateSearchResolver(
       const searchQuery: SearchQuery = {
         query: args.query,
         fields: args.fields,
-        filter: filter ?? undefined,
+        filter: combinedFilter,
         limit: args.first ?? 20,
         offset,
       };
 
       const result = await deps.objectManager.search(typeName, searchQuery, requestContext);
 
-      // Map hits to GraphQL shape
-      const hits = result.hits.map((hit) => ({
-        node: objectToGraphQL(hit.object, obj),
-        score: hit.score,
-      }));
+      // Map hits to GraphQL shape with field-level redaction
+      const rawItems = result.hits.map((hit) => objectToGraphQL(hit.object, obj));
+      const redactedItems = deps.authorizationService.redactFieldsBatch(
+        user.id,
+        user.roles,
+        typeName,
+        rawItems,
+      );
+
+      let hits = redactedItems.map((r: RedactionResult<Record<string, unknown>>, i: number) => {
+        const data = r.data as Record<string, unknown>;
+        data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+        data._consentRestricted = false;
+        return { node: data, score: result.hits[i]!.score };
+      });
+
+      // Consent filtering
+      let totalCount = result.totalCount;
+      if (deps.consentService) {
+        const getPrimaryId = (hit: { node: Record<string, unknown>; score: number }) => {
+          const primaryField = obj.fields.find(f => isPrimaryField(f));
+          return String(hit.node[primaryField?.name ?? 'id'] ?? '');
+        };
+        const consentResult = await deps.consentService.filterList(
+          hits,
+          getPrimaryId,
+          DEFAULT_CONSENT_PURPOSE as DataPurpose,
+          user.id,
+        );
+        hits = consentResult.edges;
+        totalCount = consentResult.totalCount;
+      }
 
       return {
         hits,
-        totalCount: result.totalCount,
+        totalCount,
         hasNextPage: result.hasNextPage,
       };
     } catch (err) {
