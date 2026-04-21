@@ -17,6 +17,12 @@ export {
   type FoundryMetrics,
 } from "./metrics.js";
 
+// SDK lifecycle
+export { initTelemetry, shutdownTelemetry } from "./sdk.js";
+
+// Structured logging
+export { createLogger } from "./logger.js";
+
 // Context propagation
 export {
   extractContext,
