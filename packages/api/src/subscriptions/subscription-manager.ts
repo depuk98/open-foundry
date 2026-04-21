@@ -10,8 +10,9 @@ import type { PubSub } from 'graphql-subscriptions';
 import type { CloudEvent } from '@openfoundry/spi';
 import type { ObjectEventData, LinkEventData } from '@openfoundry/engine';
 import type { EventBus } from '@openfoundry/engine';
-import type { AuthenticatedUserInfo } from '../graphql/types.js';
-import { lowerFirst } from '../utils.js';
+import type { AuthenticatedUserInfo, ResolverContext } from '../graphql/types.js';
+import { lowerFirst, toSnakeCase } from '../utils.js';
+import { logger } from '../logger.js';
 
 // ─── Types ───
 
@@ -222,7 +223,7 @@ export class SubscriptionManager {
         this.pubsub.publish(mapped.topic, {
           [mapped.topic]: mapped.changeEvent,
         }).catch((err: unknown) => {
-          console.warn(`[PubSub] Failed to publish to ${mapped.topic}:`, err instanceof Error ? err.message : String(err));
+          logger.warn({ topic: mapped.topic, err: err instanceof Error ? err.message : String(err) }, 'PubSub publish failed');
         });
       }
       return;
@@ -243,8 +244,8 @@ export class SubscriptionManager {
             timestamp: event.time,
           };
           // Use a generic topic based on the objectId
-          this.pubsub.publish(link.topic, changeEvent).catch((err: unknown) => {
-            console.warn(`[PubSub] Failed to publish link event to ${link.topic}:`, err instanceof Error ? err.message : String(err));
+          this.pubsub.publish(link.topic, { [link.topic]: changeEvent }).catch((err: unknown) => {
+            logger.warn({ topic: link.topic, err: err instanceof Error ? err.message : String(err) }, 'PubSub link event publish failed');
           });
         }
       }
@@ -259,24 +260,37 @@ export class SubscriptionManager {
  *
  * Used for `fooChanged(id: ID!)` subscriptions.
  *
- * SECURITY TODO: No per-object authorization check. WebSocket connections are
- * authenticated, but events are not filtered by FGA permissions — a subscriber
- * can receive change events for any object ID they specify, even if they lack
- * read access. Fixing this requires passing the auth context (3rd GraphQL arg)
- * and calling FGA `check()` on each event, with an async-capable filter iterator.
+ * Authorization: Each emitted event is checked against FGA — subscribers
+ * only receive events for objects they have `viewer` access to.
  */
 export function createIdFilteredSubscription(
   pubsub: PubSub,
   topic: string,
-): { subscribe: (_parent: unknown, args: { id: string }) => AsyncIterator<unknown> } {
+): { subscribe: (_parent: unknown, args: { id: string }, ctx: ResolverContext) => AsyncIterator<unknown> } {
   return {
-    subscribe: (_parent: unknown, args: { id: string }) => {
+    subscribe: (_parent: unknown, args: { id: string }, ctx: ResolverContext) => {
       const baseIterator = pubsub.asyncIterator(topic);
-      return filterAsyncIterator(baseIterator, (payload: unknown) => {
+      const authzService = ctx?.deps?.authorizationService;
+      const userId = ctx?.user?.id;
+
+      return filterAsyncIteratorAsync(baseIterator, async (payload: unknown) => {
         const p = payload as Record<string, unknown>;
         const event = p[topic] as ChangeEvent | undefined;
         if (!event) return false;
-        return event.object.id === args.id;
+        if (event.object.id !== args.id) return false;
+
+        // Fail closed: deny events when authorization context is unavailable
+        if (!authzService || !userId) return false;
+
+        // Authorize: check viewer access on the specific object
+        const fgaType = toSnakeCase(event.object._type);
+        const allowed = await authzService.check(
+          `user:${userId}`,
+          'viewer',
+          `${fgaType}:${event.object.id}`,
+        );
+        if (!allowed) return false;
+        return true;
       });
     },
   };
@@ -287,29 +301,41 @@ export function createIdFilteredSubscription(
  *
  * Used for `foosChanged(filter: FooFilter)` subscriptions.
  *
- * SECURITY TODO: No per-object authorization or tenant isolation check.
- * All events for a type are delivered to any authenticated subscriber.
- * See createIdFilteredSubscription for details.
+ * Authorization: Each emitted event is checked against FGA — subscribers
+ * only receive events for objects they have `viewer` access to.
  */
 export function createFilteredSubscription(
   pubsub: PubSub,
   topic: string,
-): { subscribe: (_parent: unknown, args: { filter?: SubscriptionFilter }) => AsyncIterator<unknown> } {
+): { subscribe: (_parent: unknown, args: { filter?: SubscriptionFilter }, ctx: ResolverContext) => AsyncIterator<unknown> } {
   return {
-    subscribe: (_parent: unknown, args: { filter?: SubscriptionFilter }) => {
+    subscribe: (_parent: unknown, args: { filter?: SubscriptionFilter }, ctx: ResolverContext) => {
       const baseIterator = pubsub.asyncIterator(topic);
+      const authzService = ctx?.deps?.authorizationService;
+      const userId = ctx?.user?.id;
 
-      // If no filter, return all events for this type
-      if (!args.filter || Object.keys(args.filter).length === 0) {
-        return baseIterator;
-      }
-
-      // Filter events based on the filter criteria
-      return filterAsyncIterator(baseIterator, (payload: unknown) => {
+      return filterAsyncIteratorAsync(baseIterator, async (payload: unknown) => {
         const p = payload as Record<string, unknown>;
         const event = p[topic] as ChangeEvent | undefined;
         if (!event) return false;
-        return matchesFilter(event, args.filter!);
+
+        // Apply user-provided filters
+        if (args.filter && Object.keys(args.filter).length > 0) {
+          if (!matchesFilter(event, args.filter)) return false;
+        }
+
+        // Fail closed: deny events when authorization context is unavailable
+        if (!authzService || !userId) return false;
+
+        // Authorize: check viewer access on the specific object
+        const fgaType = toSnakeCase(event.object._type);
+        const allowed = await authzService.check(
+          `user:${userId}`,
+          'viewer',
+          `${fgaType}:${event.object.id}`,
+        );
+        if (!allowed) return false;
+        return true;
       });
     },
   };
@@ -336,11 +362,12 @@ function matchesFilter(event: ChangeEvent, filter: SubscriptionFilter): boolean 
 }
 
 /**
- * Wrap an AsyncIterator with a predicate filter.
+ * Wrap an AsyncIterator with an async predicate filter.
+ * Supports both sync and async predicates (e.g. FGA authorization checks).
  */
-function filterAsyncIterator<T>(
+function filterAsyncIteratorAsync<T>(
   iterator: AsyncIterator<T>,
-  predicate: (value: T) => boolean,
+  predicate: (value: T) => Promise<boolean>,
 ): AsyncIterator<T> {
   return {
     next(): Promise<IteratorResult<T>> {
@@ -352,11 +379,16 @@ function filterAsyncIterator<T>(
                 resolve(result);
                 return;
               }
-              if (predicate(result.value)) {
-                resolve(result);
-              } else {
-                getNext();
-              }
+              predicate(result.value).then(
+                (matches) => {
+                  if (matches) {
+                    resolve(result);
+                  } else {
+                    getNext();
+                  }
+                },
+                (err) => reject(err),
+              );
             },
             (err) => reject(err),
           );

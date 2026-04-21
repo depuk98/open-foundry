@@ -21,7 +21,7 @@ describe('loadDomainPacks', () => {
     const { parsed, spiSchema, packs } = await loadDomainPacks(DOMAIN_PACKS_DIR, ['core']);
 
     expect(packs).toHaveLength(1);
-    expect(packs[0].name).toBe('core');
+    expect(packs[0]!.name).toBe('core');
 
     // Core provides 6 custom scalars and interfaces
     expect(parsed.scalars.length).toBeGreaterThanOrEqual(6);
@@ -40,8 +40,8 @@ describe('loadDomainPacks', () => {
     const { parsed, spiSchema, packs } = await loadDomainPacks(DOMAIN_PACKS_DIR, ['core', 'nhs-acute']);
 
     expect(packs).toHaveLength(2);
-    expect(packs[0].name).toBe('core');
-    expect(packs[1].name).toBe('nhs-acute');
+    expect(packs[0]!.name).toBe('core');
+    expect(packs[1]!.name).toBe('nhs-acute');
 
     // NHS acute provides 5 object types
     expect(parsed.objectTypes).toHaveLength(5);
@@ -122,7 +122,7 @@ describe('loadDomainPacks', () => {
 
     // Should load core + all 3 domain packs
     expect(packs.length).toBeGreaterThanOrEqual(4);
-    expect(packs[0].name).toBe('core'); // core always first
+    expect(packs[0]!.name).toBe('core'); // core always first
 
     // Should have types from multiple packs
     const objNames = parsed.objectTypes.map(t => t.name);
@@ -133,7 +133,7 @@ describe('loadDomainPacks', () => {
 
   it('ensures core is loaded first even when specified later', async () => {
     const { packs } = await loadDomainPacks(DOMAIN_PACKS_DIR, ['nhs-acute', 'core']);
-    expect(packs[0].name).toBe('core');
+    expect(packs[0]!.name).toBe('core');
   });
 
   it('marks required fields correctly', async () => {

@@ -16,7 +16,8 @@
  */
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
-import type { OntologyObject, FilterExpression, DataPurpose, AggregateQuery, AggregateField, AggregateFunction, SearchQuery } from '@openfoundry/spi';
+import { DataPurpose } from '@openfoundry/spi';
+import type { OntologyObject, FilterExpression, AggregateQuery, AggregateField, AggregateFunction, SearchQuery } from '@openfoundry/spi';
 import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import { PubSub } from 'graphql-subscriptions';
@@ -262,7 +263,7 @@ export function generateResolvers(
   // registry integrates pack manifest discovery, pack actions won't
   // appear as GraphQL/REST mutations automatically.
   for (const action of schema.actionTypes) {
-    generateMutationResolver(action, schema, resolvers, deps, pubsub);
+    generateMutationResolver(action, schema, resolvers, deps);
   }
 
   // availableTools query (Section 5.7)
@@ -336,6 +337,7 @@ function generateQueryResolvers(
           args.id,
           DEFAULT_CONSENT_PURPOSE as DataPurpose,
           user.id,
+          requestContext.tenantId,
         );
         if (consentResult._consentRestricted) {
           gqlObj._consentRestricted = true;
@@ -457,6 +459,7 @@ function generateQueryResolvers(
           getPrimaryId,
           DEFAULT_CONSENT_PURPOSE as DataPurpose,
           user.id,
+          requestContext.tenantId,
         );
         items = consentResult.edges;
         totalCount = consentResult.totalCount;
@@ -699,6 +702,7 @@ function generateSearchResolver(
           getPrimaryId,
           DEFAULT_CONSENT_PURPOSE as DataPurpose,
           user.id,
+          requestContext.tenantId,
         );
         hits = consentResult.edges;
         totalCount = consentResult.totalCount;
@@ -722,7 +726,6 @@ function generateMutationResolver(
   schema: ParsedSchema,
   resolvers: ResolverMap,
   deps: ApiDependencies,
-  pubsub: PubSub,
 ): void {
   const fieldName = lowerFirst(action.name);
 
@@ -741,9 +744,21 @@ function generateMutationResolver(
         roles: user.roles,
       };
 
-      // Build ActionContext
+      // Build ActionContext — derive consent from action schema.
+      // If the action has a Patient-typed @param, use DIRECT_CARE purpose
+      // and the patient ID from input as consent subject.
+      const patientParam = action.fields.find(
+        f => isParamField(f) && f.type.name === 'Patient',
+      );
+      const consentSubjectId = patientParam
+        ? String(args.input[patientParam.name] ?? '')
+        : undefined;
       const actionCtx: ActionContext = {
         requestContext,
+        ...(consentSubjectId ? {
+          consentPurpose: DataPurpose.DIRECT_CARE,
+          consentSubjectId,
+        } : {}),
       };
 
       // Resolve manifest from registry — fail closed if not found
@@ -766,22 +781,9 @@ function generateMutationResolver(
         schema,
       );
 
-      // Publish change events for subscriptions
-      for (const affected of result.affectedObjects) {
-        const topic = `${lowerFirst(affected.type)}Changed`;
-        // CQ-18: Log errors from pubsub publish instead of silently swallowing
-        pubsub.publish(topic, {
-          [topic]: {
-            changeType: affected.changeType.toUpperCase(),
-            object: { id: affected.id, _type: affected.type },
-            previousValues: null,
-            causedBy: action.name,
-            timestamp: new Date().toISOString(),
-          },
-        }).catch((err: unknown) => {
-          console.warn(`[PubSub] Failed to publish to ${topic}:`, err instanceof Error ? err.message : String(err));
-        });
-      }
+      // Change events reach subscribers via the event bus path:
+      // ActionExecutor → eventPublisher → emitter → eventBus → SubscriptionManager → PubSub.
+      // No direct PubSub publish here to avoid duplicate delivery on the same pod.
 
       return {
         success: result.success,

@@ -27,7 +27,7 @@ import type {
   ChangeEvent,
 } from '../subscriptions/subscription-manager.js';
 import { generateResolvers } from '../graphql/resolver-generator.js';
-import type { ApiDependencies, AuthenticatedUserInfo } from '../graphql/types.js';
+import type { ApiDependencies, AuthenticatedUserInfo, ResolverContext } from '../graphql/types.js';
 
 // ─── Fixtures ───
 
@@ -176,6 +176,18 @@ function createMockDeps(schema: ParsedSchema): ApiDependencies {
     consentService: undefined,
     auditWriter: undefined,
     storage: {} as unknown as ApiDependencies['storage'],
+  };
+}
+
+function createMockContext(
+  deps: ApiDependencies,
+  user?: AuthenticatedUserInfo,
+): ResolverContext {
+  const u = user ?? createMockUser();
+  return {
+    requestContext: { tenantId: u.tenantId, actorId: u.id, traceId: 'test-trace' },
+    user: u,
+    deps,
   };
 }
 
@@ -451,12 +463,20 @@ describe('SubscriptionManager authentication', () => {
 });
 
 describe('ID-filtered subscriptions', () => {
+  let parsed: ParsedSchema;
+  let ctx: ResolverContext;
+
+  beforeEach(() => {
+    parsed = parseOdl(NHS_ACUTE_ODL);
+    ctx = createMockContext(createMockDeps(parsed));
+  });
+
   it('delivers events matching the subscribed object ID', async () => {
     const pubsub = new PubSub();
     const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
 
     // Subscribe filtering for patient p-1
-    const iterator = sub.subscribe(null, { id: 'p-1' });
+    const iterator = sub.subscribe(null, { id: 'p-1' }, ctx);
 
     // Set up listener
     const resultPromise = iterator.next();
@@ -483,7 +503,7 @@ describe('ID-filtered subscriptions', () => {
     const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
 
     // Subscribe filtering for patient p-1
-    const iterator = sub.subscribe(null, { id: 'p-1' });
+    const iterator = sub.subscribe(null, { id: 'p-1' }, ctx);
 
     // Start listening first, then publish events with microtask delays
     // so the filter iterator can process each event
@@ -519,14 +539,203 @@ describe('ID-filtered subscriptions', () => {
     const payload = result.value as Record<string, ChangeEvent>;
     expect(payload['patientChanged']!.object.id).toBe('p-1');
   });
+
+  it('filters out events when authorizationService denies access', async () => {
+    const pubsub = new PubSub();
+    const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
+
+    // Override authorizationService to deny access to p-1, allow p-2
+    const denyCtx = createMockContext(createMockDeps(parsed));
+    (denyCtx.deps.authorizationService.check as ReturnType<typeof vi.fn>)
+      .mockImplementation(async (_user: string, _rel: string, resource: string) =>
+        !resource.endsWith(':p-1'),
+      );
+
+    const iterator = sub.subscribe(null, { id: 'p-1' }, denyCtx);
+    const resultPromise = iterator.next();
+
+    // Publish event for p-1 — authz will deny it
+    await pubsub.publish('patientChanged', {
+      patientChanged: {
+        changeType: 'UPDATED',
+        object: { id: 'p-1', _type: 'Patient' },
+        previousValues: null,
+        causedBy: null,
+        timestamp: '2025-01-15T10:30:00Z',
+      } satisfies ChangeEvent,
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Now allow access by changing mock, and publish again
+    (denyCtx.deps.authorizationService.check as ReturnType<typeof vi.fn>)
+      .mockResolvedValue(true);
+
+    await pubsub.publish('patientChanged', {
+      patientChanged: {
+        changeType: 'UPDATED',
+        object: { id: 'p-1', _type: 'Patient' },
+        previousValues: null,
+        causedBy: null,
+        timestamp: '2025-01-15T10:31:00Z',
+      } satisfies ChangeEvent,
+    });
+
+    const result = await resultPromise;
+    const payload = result.value as Record<string, ChangeEvent>;
+    expect(payload['patientChanged']!.timestamp).toBe('2025-01-15T10:31:00Z');
+  });
+});
+
+describe('Subscription auth fail-closed', () => {
+  it('denies events when authorizationService is absent (ID-filtered)', async () => {
+    const pubsub = new PubSub();
+    const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
+
+    // Context with no authorizationService
+    const noAuthCtx: ResolverContext = {
+      requestContext: { tenantId: 'tenant-1', actorId: 'user-1', traceId: 'test' },
+      user: createMockUser(),
+      deps: { authorizationService: undefined } as unknown as ApiDependencies,
+    };
+
+    const iterator = sub.subscribe(null, { id: 'p-1' }, noAuthCtx);
+    const resultPromise = iterator.next();
+
+    // Publish matching event — should be denied (no authzService)
+    await pubsub.publish('patientChanged', {
+      patientChanged: {
+        changeType: 'UPDATED',
+        object: { id: 'p-1', _type: 'Patient' },
+        previousValues: null,
+        causedBy: null,
+        timestamp: '2025-01-15T10:30:00Z',
+      } satisfies ChangeEvent,
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Re-attach authzService and publish again — should pass
+    noAuthCtx.deps = createMockDeps(parseOdl(NHS_ACUTE_ODL));
+    // But the iterator captured the context at subscribe-time, so it still denies.
+    // Publish a second event and return the iterator to verify denial.
+    // Instead, use iterator.return to close and verify the first event was dropped.
+    await iterator.return!();
+
+    // Verify: the promise should resolve with done=true (iterator closed),
+    // not with the denied event
+    const result = await resultPromise;
+    expect(result.done).toBe(true);
+  });
+
+  it('denies events when userId is absent (ID-filtered)', async () => {
+    const pubsub = new PubSub();
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
+
+    // Context with no user
+    const noUserCtx: ResolverContext = {
+      requestContext: { tenantId: 'tenant-1', actorId: 'anon', traceId: 'test' },
+      user: undefined as unknown as AuthenticatedUserInfo,
+      deps: createMockDeps(parsed),
+    };
+
+    const iterator = sub.subscribe(null, { id: 'p-1' }, noUserCtx);
+    const resultPromise = iterator.next();
+
+    await pubsub.publish('patientChanged', {
+      patientChanged: {
+        changeType: 'UPDATED',
+        object: { id: 'p-1', _type: 'Patient' },
+        previousValues: null,
+        causedBy: null,
+        timestamp: '2025-01-15T10:30:00Z',
+      } satisfies ChangeEvent,
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await iterator.return!();
+
+    const result = await resultPromise;
+    expect(result.done).toBe(true);
+  });
+
+  it('denies events when authorizationService is absent (filtered)', async () => {
+    const pubsub = new PubSub();
+    const sub = createFilteredSubscription(pubsub, 'patientChanged');
+
+    const noAuthCtx: ResolverContext = {
+      requestContext: { tenantId: 'tenant-1', actorId: 'user-1', traceId: 'test' },
+      user: createMockUser(),
+      deps: { authorizationService: undefined } as unknown as ApiDependencies,
+    };
+
+    const iterator = sub.subscribe(null, {}, noAuthCtx);
+    const resultPromise = iterator.next();
+
+    await pubsub.publish('patientChanged', {
+      patientChanged: {
+        changeType: 'CREATED',
+        object: { id: 'p-1', _type: 'Patient' },
+        previousValues: null,
+        causedBy: null,
+        timestamp: '2025-01-15T10:30:00Z',
+      } satisfies ChangeEvent,
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await iterator.return!();
+
+    const result = await resultPromise;
+    expect(result.done).toBe(true);
+  });
+
+  it('denies events when userId is absent (filtered)', async () => {
+    const pubsub = new PubSub();
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const sub = createFilteredSubscription(pubsub, 'patientChanged');
+
+    const noUserCtx: ResolverContext = {
+      requestContext: { tenantId: 'tenant-1', actorId: 'anon', traceId: 'test' },
+      user: undefined as unknown as AuthenticatedUserInfo,
+      deps: createMockDeps(parsed),
+    };
+
+    const iterator = sub.subscribe(null, {}, noUserCtx);
+    const resultPromise = iterator.next();
+
+    await pubsub.publish('patientChanged', {
+      patientChanged: {
+        changeType: 'CREATED',
+        object: { id: 'p-1', _type: 'Patient' },
+        previousValues: null,
+        causedBy: null,
+        timestamp: '2025-01-15T10:30:00Z',
+      } satisfies ChangeEvent,
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await iterator.return!();
+
+    const result = await resultPromise;
+    expect(result.done).toBe(true);
+  });
 });
 
 describe('Filtered subscriptions (foosChanged)', () => {
+  let parsed: ParsedSchema;
+  let ctx: ResolverContext;
+
+  beforeEach(() => {
+    parsed = parseOdl(NHS_ACUTE_ODL);
+    ctx = createMockContext(createMockDeps(parsed));
+  });
+
   it('delivers all events when no filter is provided', async () => {
     const pubsub = new PubSub();
     const sub = createFilteredSubscription(pubsub, 'patientChanged');
 
-    const iterator = sub.subscribe(null, {});
+    const iterator = sub.subscribe(null, {}, ctx);
     const resultPromise = iterator.next();
 
     void pubsub.publish('patientChanged', {
@@ -549,7 +758,7 @@ describe('Filtered subscriptions (foosChanged)', () => {
     const pubsub = new PubSub();
     const sub = createFilteredSubscription(pubsub, 'patientChanged');
 
-    const iterator = sub.subscribe(null, { filter: { changeType: 'DELETED' } });
+    const iterator = sub.subscribe(null, { filter: { changeType: 'DELETED' } }, ctx);
 
     // Start listening first
     const resultPromise = iterator.next();
@@ -620,11 +829,12 @@ describe('Resolver generation with subscriptions', () => {
 
   it('fooChanged subscribe returns an async iterator', () => {
     const deps = createMockDeps(parsed);
+    const mockCtx = createMockContext(deps);
     const { resolvers } = generateResolvers(parsed, deps);
     const sub = resolvers['Subscription']!;
 
     const patientSub = sub['patientChanged'] as { subscribe: Function };
-    const iterator = patientSub.subscribe(null, { id: 'p-1' });
+    const iterator = patientSub.subscribe(null, { id: 'p-1' }, mockCtx);
 
     // AsyncIterator should have a next method
     expect(iterator.next).toBeTypeOf('function');
@@ -632,22 +842,24 @@ describe('Resolver generation with subscriptions', () => {
 
   it('foosChanged subscribe returns an async iterator', () => {
     const deps = createMockDeps(parsed);
+    const mockCtx = createMockContext(deps);
     const { resolvers } = generateResolvers(parsed, deps);
     const sub = resolvers['Subscription']!;
 
     const patientsSub = sub['patientsChanged'] as { subscribe: Function };
-    const iterator = patientsSub.subscribe(null, { filter: { changeType: 'UPDATED' } });
+    const iterator = patientsSub.subscribe(null, { filter: { changeType: 'UPDATED' } }, mockCtx);
 
     expect(iterator.next).toBeTypeOf('function');
   });
 
   it('fooChanged filters events by ID via PubSub', async () => {
     const deps = createMockDeps(parsed);
+    const mockCtx = createMockContext(deps);
     const { resolvers, pubsub } = generateResolvers(parsed, deps);
     const sub = resolvers['Subscription']!;
 
     const patientSub = sub['patientChanged'] as { subscribe: Function };
-    const iterator = patientSub.subscribe(null, { id: 'p-1' }) as AsyncIterator<unknown>;
+    const iterator = patientSub.subscribe(null, { id: 'p-1' }, mockCtx) as AsyncIterator<unknown>;
 
     // Start listening first
     const resultPromise = iterator.next();
@@ -684,6 +896,14 @@ describe('Resolver generation with subscriptions', () => {
 });
 
 describe('End-to-end: SubscriptionManager + subscription resolvers', () => {
+  let parsed: ParsedSchema;
+  let ctx: ResolverContext;
+
+  beforeEach(() => {
+    parsed = parseOdl(NHS_ACUTE_ODL);
+    ctx = createMockContext(createMockDeps(parsed));
+  });
+
   it('receives patient update event via full pipeline', async () => {
     const pubsub = new PubSub();
     const eventBus = new InMemorySubscribableEventBus();
@@ -697,7 +917,7 @@ describe('End-to-end: SubscriptionManager + subscription resolvers', () => {
 
     // Create subscription resolver
     const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
-    const iterator = sub.subscribe(null, { id: 'p-1' });
+    const iterator = sub.subscribe(null, { id: 'p-1' }, ctx);
 
     // Wait for the next event
     const resultPromise = iterator.next();
@@ -734,7 +954,7 @@ describe('End-to-end: SubscriptionManager + subscription resolvers', () => {
     manager.start();
 
     const sub = createIdFilteredSubscription(pubsub, 'patientChanged');
-    const iterator = sub.subscribe(null, { id: 'p-1' });
+    const iterator = sub.subscribe(null, { id: 'p-1' }, ctx);
 
     const resultPromise = iterator.next();
 

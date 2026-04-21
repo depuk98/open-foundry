@@ -18,9 +18,13 @@
  *   CEL_EVALUATOR_URL    — CEL gRPC sidecar address (default: localhost:50051)
  *   CORS_ALLOWED_ORIGINS — Comma-separated allowed origins (empty = deny all in prod)
  *   FHIR_BASE_URL        — Externally routable FHIR base URL for Bundle links
+ *   REDPANDA_BROKERS     — Comma-separated Kafka/Redpanda brokers (enables persistent events)
+ *   REDIS_URL            — Redis connection URL (enables distributed rate limiting)
  */
 
 import http from 'node:http';
+import { WebSocketServer } from 'ws';
+import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -28,21 +32,25 @@ import { GraphQLError } from 'graphql';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
-import { PostgresStorageProvider, PostgresAuditStore } from '@openfoundry/storage-postgres';
+import { PostgresStorageProvider, PostgresAuditStore, PostgresConsentStore } from '@openfoundry/storage-postgres';
 import {
   ObjectManager,
   LinkManager,
-  InMemoryEventBus,
   EngineEventEmitter,
+  InMemoryObjectSetStore,
+  ObjectSetManager,
 } from '@openfoundry/engine';
-import { ActionExecutor, CelClient } from '@openfoundry/actions';
-import type { SecurityLayer, CelEvaluator, ActionEventPublisher } from '@openfoundry/actions';
-import { AuthorizationService, OidcAuthenticator, AuditWriter, MemoryAuditStore } from '@openfoundry/security';
+import { ActionExecutor, CelClient, SideEffectExecutor } from '@openfoundry/actions';
+import type { SecurityLayer, CelEvaluator, ActionEventPublisher, EventBus as SideEffectEventBus, HttpClient as SideEffectHttpClient } from '@openfoundry/actions';
+import { AuthorizationService, OidcAuthenticator, AuditWriter, MemoryAuditStore, ConsentService, MemoryConsentStore } from '@openfoundry/security';
 import type { OpenFgaClientInterface } from '@openfoundry/security';
 import type { StorageProvider, RequestContext } from '@openfoundry/spi';
 import { createGraphQLServer, buildResolverContext } from './graphql/index.js';
 import { generateRestRoutes } from './rest/index.js';
 import { createFhirRouter } from './fhir/index.js';
+import { InMemorySubscribableEventBus, SubscriptionManager } from './subscriptions/index.js';
+import type { SubscribableEventBus } from './subscriptions/index.js';
+import { RedpandaEventBus } from './events/index.js';
 import type { ApiDependencies, ResolverContext } from './graphql/types.js';
 import type { RestRequest } from './rest/types.js';
 import {
@@ -54,9 +62,11 @@ import {
 } from './config.js';
 import type { ActionAuthzMapping } from './config.js';
 import { loadDomainPacks } from './schema-loader.js';
-import { SlidingWindowRateLimiter } from './governance/index.js';
-import type { RateLimitIdentity } from './governance/index.js';
+import { SlidingWindowRateLimiter, RedisRateLimiter } from './governance/index.js';
+import type { RateLimiter, RateLimitIdentity } from './governance/index.js';
 import { toSnakeCase } from './utils.js';
+import { metricsMiddleware, metricsEndpoint, startStorageHealthGauge } from './metrics.js';
+import { logger } from './logger.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
 
@@ -91,28 +101,57 @@ function parseDomainPacksEnv(raw?: string): string[] | undefined {
 async function main(): Promise<void> {
   const isDev = process.env['NODE_ENV'] !== 'production';
 
+  // ── OpenTelemetry ──
+  // Must be initialized before significant work starts so the global
+  // TracerProvider is registered for all getTracer()/withSpan() calls.
+  const { initTelemetry } = await import('@openfoundry/observability');
+  initTelemetry('openfoundry-api');
+
   // ── Validate production environment ──
   if (!isDev) {
     const missing = REQUIRED_PROD_VARS.filter((k) => !process.env[k]);
     if (missing.length > 0) {
-      console.error(`FATAL: Production mode requires env vars: ${missing.join(', ')}`);
+      logger.error(`FATAL: Production mode requires env vars: ${missing.join(', ')}`);
       process.exit(1);
     }
   }
 
   // ── Rate Limiter ──
-  const rateLimiter = new SlidingWindowRateLimiter();
+  // REDIS_URL → distributed rate limiting across pods; otherwise in-memory per-pod.
+  let rateLimiter: RateLimiter;
+  let redisClient: import('ioredis').Redis | undefined;
+  const redisUrl = process.env['REDIS_URL'];
+  if (redisUrl) {
+    // Dynamic import for optional dependency — cast needed for CJS/ESM interop
+    const ioredis = await import('ioredis');
+    const RedisClient = ioredis.default as unknown as new (url: string, opts: Record<string, unknown>) => import('ioredis').Redis;
+    redisClient = new RedisClient(redisUrl, {
+      // Fail fast: rate limiting is QoS, not a security boundary.
+      // Default ioredis retries 20 times with offline queue, stalling requests for seconds.
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      connectTimeout: 3_000,
+      commandTimeout: 1_000,
+    });
+    rateLimiter = new RedisRateLimiter(redisClient);
+    logger.info(`Rate limiter: Redis @ ${redisUrl.replace(/\/\/.*@/, '//<redacted>@')}`);
+  } else {
+    rateLimiter = new SlidingWindowRateLimiter();
+    if (!isDev) {
+      logger.warn('WARNING: Rate limiter is in-memory — limits are per-pod. Set REDIS_URL for distributed rate limiting.');
+    }
+  }
 
   // ── Storage ──
   let storage: StorageProvider;
   if (!isDev && process.env['POSTGRES_URL']) {
     const config = parsePostgresUrl(process.env['POSTGRES_URL']);
     storage = new PostgresStorageProvider(config);
-    console.info(`Storage: PostgreSQL @ ${config.host}:${config.port}/${config.database}`);
+    logger.info(`Storage: PostgreSQL @ ${config.host}:${config.port}/${config.database}`);
   } else {
     storage = new MemoryStorageProvider();
     if (isDev) {
-      console.warn('Storage: in-memory (development mode)');
+      logger.warn('Storage: in-memory (development mode)');
     }
   }
 
@@ -121,21 +160,37 @@ async function main(): Promise<void> {
   // ([{"name":"nhs-acute","version":"0.2.0"}]). Handle both formats.
   const packNames = parseDomainPacksEnv(process.env['DOMAIN_PACKS']);
   const { parsed: schema, spiSchema, packs, manifestRegistry, fieldPermissions } = await loadDomainPacks(undefined, packNames);
-  console.info(
+  logger.info(
     `Schema: loaded ${packs.length} domain pack(s) — ` +
     `${schema.objectTypes.length} object types, ` +
     `${schema.linkTypes.length} link types, ` +
     `${schema.enums.length} enums`,
   );
+  if (schema.objectTypes.length === 0) {
+    logger.warn('WARNING: No object types loaded — check DOMAIN_PACKS configuration.');
+  }
 
   // Apply schema to storage (creates tables/indexes in Postgres, registers types in memory)
   const bootCtx: RequestContext = { tenantId: 'system', actorId: 'boot' };
   await storage.applySchema(bootCtx, spiSchema);
 
   // ── Engine ──
-  const eventBus = new InMemoryEventBus();
-  if (!isDev) {
-    console.warn('WARNING: EventBus is in-memory — events will not survive restarts. Set REDPANDA_BROKERS to enable persistent streaming.');
+  // REDPANDA_BROKERS → persistent event streaming via Kafka protocol;
+  // otherwise in-memory (events lost on restart).
+  let eventBus: SubscribableEventBus;
+  const redpandaBrokers = process.env['REDPANDA_BROKERS'];
+  if (redpandaBrokers) {
+    const rpBus = new RedpandaEventBus({
+      brokers: redpandaBrokers.split(',').map(s => s.trim()),
+    });
+    await rpBus.connect();
+    eventBus = rpBus;
+    logger.info(`EventBus: Redpanda/Kafka @ ${redpandaBrokers}`);
+  } else {
+    eventBus = new InMemorySubscribableEventBus();
+    if (!isDev) {
+      logger.warn('WARNING: EventBus is in-memory — events will not survive restarts. Set REDPANDA_BROKERS to enable persistent streaming.');
+    }
   }
   const emitter = new EngineEventEmitter(eventBus);
   const objectManager = new ObjectManager({ storage, schema, eventEmitter: emitter });
@@ -159,7 +214,7 @@ async function main(): Promise<void> {
       process.env['OPENFGA_URL'],
       process.env['OPENFGA_STORE_ID'],
     );
-    console.info(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
+    logger.info(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
   } else {
     // Dev stub: allow everything
     fgaClient = {
@@ -169,7 +224,7 @@ async function main(): Promise<void> {
       deleteTuples: async () => ({}),
     };
     if (isDev) {
-      console.warn('Authorization: allow-all stub (development mode)');
+      logger.warn('Authorization: allow-all stub (development mode)');
     }
   }
   const authorizationService = new AuthorizationService(fgaClient, fieldPermissions);
@@ -180,11 +235,11 @@ async function main(): Promise<void> {
     .replace(/^grpc:\/\//, '');
   if (!isDev) {
     cel = new CelClient({ address: celAddress });
-    console.info(`CEL evaluator: gRPC @ ${celAddress}`);
+    logger.info(`CEL evaluator: gRPC @ ${celAddress}`);
   } else {
     // Dev stub: always evaluate to true
     cel = { async evaluate() { return { value: true }; } };
-    console.warn('CEL evaluator: allow-all stub (development mode)');
+    logger.warn('CEL evaluator: allow-all stub (development mode)');
   }
 
   // ── Security Layer (for action pipeline) ──
@@ -206,9 +261,25 @@ async function main(): Promise<void> {
   // Adapt return type: security AuditWriter returns AuditRecord, action pipeline expects void
   const auditWriter = { async write(record: Parameters<typeof securityAuditWriter.write>[0]) { await securityAuditWriter.write(record); } };
   if (storage instanceof PostgresStorageProvider) {
-    console.info('Audit: PostgreSQL (persistent)');
+    logger.info('Audit: PostgreSQL (persistent)');
   } else {
-    console.warn('Audit: in-memory (development mode)');
+    logger.warn('Audit: in-memory (development mode)');
+  }
+
+  // ── Consent Service (Section 7.3) ──
+  // PostgresConsentStore accepts a constructor-level default tenantId but all
+  // methods also accept per-call tenantId, threaded from RequestContext by each
+  // API layer (GraphQL, REST, FHIR, Actions).
+  const consentStore = (storage instanceof PostgresStorageProvider)
+    ? new PostgresConsentStore(storage.pool)
+    : new MemoryConsentStore();
+  const consentService = new ConsentService(consentStore, authorizationService, {
+    directCareExemptionEnabled: true,
+  });
+  if (storage instanceof PostgresStorageProvider) {
+    logger.info('Consent: PostgreSQL (persistent)');
+  } else {
+    logger.warn('Consent: in-memory (development mode)');
   }
 
   // ── Action Executor ──
@@ -227,17 +298,44 @@ async function main(): Promise<void> {
       else if (changeType === 'deleted') await emitter.emitLinkDeleted(ctx, linkType, linkId, fromId, toId, 1, eventCause);
     },
   };
-  const actionExecutor = new ActionExecutor({ storage, security, cel, auditWriter, eventPublisher: actionEventPublisher });
+  // ── Side-effect handler (webhooks + CloudEvents after action commit) ──
+  const sideEffectHttpClient: SideEffectHttpClient = {
+    async post(url, body, options) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? 10_000);
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...options?.headers },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        return { status: resp.status };
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  };
+  const sideEffectBus: SideEffectEventBus = {
+    async emit(event) {
+      await eventBus.publish(event as unknown as import('@openfoundry/spi').CloudEvent);
+    },
+  };
+  const sideEffectHandler = new SideEffectExecutor({
+    httpClient: sideEffectHttpClient,
+    eventBus: sideEffectBus,
+  });
 
-  // ── Consent Service ──
-  // ConsentService is not yet implemented — all consent checks are bypassed.
-  // This MUST be wired before processing real patient data in regulated environments.
-  if (!isDev) {
-    console.warn(
-      'WARNING: ConsentService is not configured. Patient consent preferences are NOT enforced. ' +
-      'This deployment is NOT suitable for regulated clinical data without a consent store.',
-    );
-  }
+  const actionExecutor = new ActionExecutor({
+    storage, security, cel, auditWriter,
+    eventPublisher: actionEventPublisher,
+    consentManager: consentService,
+    sideEffectHandler,
+  });
+
+  // ── Object Sets ──
+  const objectSetStore = new InMemoryObjectSetStore();
+  const objectSetManager = new ObjectSetManager(objectSetStore, objectManager);
 
   // ── API Dependencies ──
   const deps: ApiDependencies = {
@@ -247,8 +345,10 @@ async function main(): Promise<void> {
     actionExecutor,
     authorizationService,
     authenticator,
+    consentService,
     storage,
     manifestRegistry,
+    objectSetManager,
   };
 
   // ── Express + HTTP Server ──
@@ -263,9 +363,86 @@ async function main(): Promise<void> {
 
   const httpServer = http.createServer(app);
 
-  // ── GraphQL (Apollo Server) ──
-  const { server: apolloServer } = createGraphQLServer({ schema, deps });
+  // ── GraphQL (Apollo Server + WebSocket Subscriptions) ──
+  // Single executable schema shared by both Apollo (HTTP) and graphql-ws (WS)
+  // transports. This guarantees mutations and subscriptions use the same PubSub.
+  const { server: apolloServer, pubsub, executableSchema } = createGraphQLServer({ schema, deps, isDev });
+
+  // WebSocket server for GraphQL subscriptions (graphql-ws protocol)
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path: '/graphql',
+    maxPayload: 64 * 1024, // 64 KB — GraphQL subscription payloads are small
+  });
+  const subscriptionManager = new SubscriptionManager({
+    pubsub,
+    eventBus,
+    authenticate: async (connectionParams) => {
+      const token = connectionParams?.['Authorization'] ?? connectionParams?.['authorization'];
+      if (!token || typeof token !== 'string') {
+        return { authenticated: false, error: 'Missing Authorization in connection params' };
+      }
+      try {
+        const user = await extractUser(
+          { headers: { authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } } as import('express').Request,
+          authenticator,
+          isDev,
+        );
+        return { authenticated: true, user };
+      } catch {
+        return { authenticated: false, error: 'Invalid token' };
+      }
+    },
+  });
+
+  // Per-connection subscription tracking — prevents subscription-flood DoS.
+  const MAX_SUBSCRIPTIONS_PER_CONNECTION = 50;
+  const subscriptionCounts = new WeakMap<object, number>();
+
+  const wsCleanup = useServer(
+    {
+      schema: executableSchema,
+      context: async (ctx) => {
+        const params = (ctx.connectionParams ?? {}) as Record<string, unknown>;
+        const authResult = await subscriptionManager.authenticateConnection(params);
+        if (!authResult.authenticated) {
+          throw new Error(authResult.error);
+        }
+        return buildResolverContext(authResult.user, deps);
+      },
+      onSubscribe: (ctx) => {
+        const key = (ctx as { extra?: object }).extra ?? ctx;
+        const count = subscriptionCounts.get(key) ?? 0;
+        if (count >= MAX_SUBSCRIPTIONS_PER_CONNECTION) {
+          return [new GraphQLError('Subscription limit exceeded', {
+            extensions: { code: 'RATE_LIMITED' },
+          })];
+        }
+        subscriptionCounts.set(key, count + 1);
+        return undefined; // proceed normally
+      },
+      onComplete: (ctx) => {
+        const key = (ctx as { extra?: object }).extra ?? ctx;
+        const count = subscriptionCounts.get(key) ?? 1;
+        subscriptionCounts.set(key, Math.max(0, count - 1));
+      },
+    },
+    wsServer as never,
+  );
+
+  subscriptionManager.start();
+
   apolloServer.addPlugin(ApolloServerPluginDrainHttpServer({ httpServer }) as never);
+  apolloServer.addPlugin({
+    async serverWillStart() {
+      return {
+        async drainServer() {
+          subscriptionManager.stop();
+          await wsCleanup.dispose();
+        },
+      };
+    },
+  });
   await apolloServer.start();
 
   // Security headers (disable CSP for GraphQL playground in dev)
@@ -275,6 +452,7 @@ async function main(): Promise<void> {
   const corsOrigins = process.env['CORS_ALLOWED_ORIGINS']?.split(',').map(s => s.trim()).filter(Boolean);
   if (!isDev && (!corsOrigins || corsOrigins.length === 0)) {
     // Production: deny all cross-origin requests when not configured
+    logger.warn('WARNING: CORS_ALLOWED_ORIGINS not set — all cross-origin requests will be denied. Set CORS_ALLOWED_ORIGINS if a frontend needs API access.');
     app.use(cors({ origin: false }));
   } else if (!isDev) {
     app.use(cors({ origin: corsOrigins, credentials: true }));
@@ -286,19 +464,40 @@ async function main(): Promise<void> {
 
   // Pre-auth IP-based rate limiter: protects against unauthenticated floods
   // (auth+JWKS work is expensive; this gate runs before identity extraction)
-  const ipRateLimiter = new SlidingWindowRateLimiter({
-    principal: { windowMs: 60_000, maxRequests: 300 },
-  });
-  app.use((req, res, next) => {
-    const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-    const result = ipRateLimiter.check({ tenantId: 'global', principalId: ip });
-    if (!result.allowed) {
-      res.setHeader('Retry-After', String(Math.ceil((result.resetAt - Date.now()) / 1000)));
-      res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many requests', retryable: true } });
-      return;
+  // Only per-IP (principal) limiting — no global tenant cap for unauthenticated traffic.
+  // Explicit undefined suppresses defaults from shallow merge in both limiter constructors.
+  const ipLimiterConfig = { tenant: undefined, principal: { windowMs: 60_000, maxRequests: 300 }, clientApp: undefined };
+  const ipRateLimiter: RateLimiter = redisClient
+    ? new RedisRateLimiter(redisClient, { config: ipLimiterConfig, keyPrefix: 'rl:ip:' })
+    : new SlidingWindowRateLimiter(ipLimiterConfig);
+  app.use(async (req, res, next) => {
+    try {
+      const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+      const result = await ipRateLimiter.check({ tenantId: 'global', principalId: ip });
+      if (!result.allowed) {
+        res.setHeader('Retry-After', String(Math.ceil((result.resetAt - Date.now()) / 1000)));
+        res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many requests', retryable: true } });
+        return;
+      }
+    } catch (err) {
+      // Fail open: rate limiter error should not block requests
+      logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'IP rate limiter error, failing open');
     }
     next();
   });
+
+  // ── Prometheus metrics ──
+  app.use(metricsMiddleware);
+  // Block external access to /metrics — Prometheus ServiceMonitor scrapes pod
+  // directly (bypassing ingress). Requests through ingress carry X-Forwarded-For.
+  app.get('/metrics', (req, res, next) => {
+    if (!isDev && req.headers['x-forwarded-for']) {
+      res.status(404).end();
+      return;
+    }
+    next();
+  }, metricsEndpoint);
+  const stopHealthGauge = startStorageHealthGauge(storage);
 
   // ── Health check ──
   // /health — used by readiness probe; returns 503 when storage is degraded
@@ -313,7 +512,7 @@ async function main(): Promise<void> {
         storage: { healthy: storageHealth.healthy },
       });
     } catch (err) {
-      console.error('Health check failed:', err instanceof Error ? err.message : 'unknown');
+      logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'Health check failed');
       res.status(503).json({ status: 'unhealthy', service: 'api-gateway' });
     }
   });
@@ -335,7 +534,7 @@ async function main(): Promise<void> {
           const user = await extractUser(req, authenticator, isDev);
 
           // Rate limit check
-          const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+          const rlResult = await rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
           if (!rlResult.allowed) {
             throw new GraphQLError(`Rate limit exceeded (by ${rlResult.exceededBy})`, {
               extensions: {
@@ -373,7 +572,7 @@ async function main(): Promise<void> {
         const user = await extractUser(req, authenticator, isDev);
 
         // Rate limit check
-        const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+        const rlResult = await rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
         if (!rlResult.allowed) {
           res.setHeader('Retry-After', String(Math.ceil((rlResult.resetAt - Date.now()) / 1000)));
           res.status(429).json({ error: { code: 'RATE_LIMITED', message: `Rate limit exceeded (by ${rlResult.exceededBy})`, retryable: true } });
@@ -396,7 +595,7 @@ async function main(): Promise<void> {
           res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } });
           return;
         }
-        console.error('REST handler error:', err instanceof Error ? err.message : 'unknown');
+        logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'REST handler error');
         res.status(500).json({
           error: {
             code: 'INTERNAL_ERROR',
@@ -414,6 +613,9 @@ async function main(): Promise<void> {
 
   // ── FHIR at /fhir/* ──
   const fhirBaseUrl = process.env['FHIR_BASE_URL'] ?? `http://localhost:${PORT}/fhir`;
+  if (!isDev && !process.env['FHIR_BASE_URL']) {
+    logger.warn('WARNING: FHIR_BASE_URL not set — Bundle fullUrl links will use http://localhost. Set FHIR_BASE_URL to the externally routable address.');
+  }
   const fhirHandler = createFhirRouter({ deps, baseUrl: fhirBaseUrl });
   app.all('/fhir/*', async (req, res) => {
     try {
@@ -421,7 +623,7 @@ async function main(): Promise<void> {
       const user = await extractUser(req, authenticator, isDev);
 
       // Rate limit check
-      const rlResult = rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+      const rlResult = await rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
       if (!rlResult.allowed) {
         res.setHeader('Retry-After', String(Math.ceil((rlResult.resetAt - Date.now()) / 1000)));
         res.status(429).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'throttled', diagnostics: 'Rate limit exceeded' }] });
@@ -446,21 +648,52 @@ async function main(): Promise<void> {
         res.status(401).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login', diagnostics: 'Authentication required' }] });
         return;
       }
-      console.error('FHIR handler error:', err instanceof Error ? err.message : 'unknown');
+      logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'FHIR handler error');
       res.status(500).json({ resourceType: 'OperationOutcome', issue: [{ severity: 'fatal', code: 'exception', diagnostics: 'Internal server error' }] });
     }
   });
 
   // ── Graceful shutdown ──
+  const SHUTDOWN_TIMEOUT_MS = 5_000;
+
   async function shutdown() {
-    console.info('Shutting down...');
+    logger.info('Shutting down...');
+    stopHealthGauge();
+    subscriptionManager.stop();
     await apolloServer.stop();
     if (cel instanceof CelClient) {
       cel.close();
     }
+    // Disconnect persistent event bus (Redpanda/Kafka) with timeout
+    if (eventBus instanceof RedpandaEventBus) {
+      try {
+        await Promise.race([
+          eventBus.disconnect(),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), SHUTDOWN_TIMEOUT_MS)),
+        ]);
+        logger.info('EventBus: disconnected');
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'EventBus disconnect error');
+      }
+    }
+    // Close Redis connection (distributed rate limiting) with timeout
+    if (redisClient) {
+      try {
+        await Promise.race([
+          redisClient.quit(),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), SHUTDOWN_TIMEOUT_MS)),
+        ]);
+        logger.info('Redis: disconnected');
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'Redis disconnect error');
+      }
+    }
     if (storage instanceof PostgresStorageProvider) {
       await storage.close();
     }
+    // Flush pending OTEL spans before exit
+    const { shutdownTelemetry } = await import('@openfoundry/observability');
+    await shutdownTelemetry();
     httpServer.close();
     process.exit(0);
   }
@@ -473,10 +706,12 @@ async function main(): Promise<void> {
   });
 
   const mode = isDev ? 'DEVELOPMENT' : 'PRODUCTION';
-  console.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT}`);
-  console.info(`  GraphQL:  http://localhost:${PORT}/graphql`);
-  console.info(`  REST:     http://localhost:${PORT}/api/v1/`);
-  console.info(`  FHIR:     http://localhost:${PORT}/fhir/`);
+  logger.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT}`);
+  logger.info(`  GraphQL:  http://localhost:${PORT}/graphql`);
+  logger.info(`  WS Subs:  ws://localhost:${PORT}/graphql`);
+  logger.info(`  REST:     http://localhost:${PORT}/api/v1/`);
+  logger.info(`  FHIR:     http://localhost:${PORT}/fhir/`);
+  logger.info(`  Metrics:  http://localhost:${PORT}/metrics`);
 }
 
 /**
@@ -514,7 +749,18 @@ function deriveActionAuthzMappings(
   return mappings;
 }
 
+// Fatal error handlers — log and exit rather than silently dying.
+// Must be registered before main() so they catch errors during startup too.
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'Uncaught exception');
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled rejection');
+  process.exit(1);
+});
+
 main().catch((err) => {
-  console.error('Failed to start server:', err);
+  logger.error({ err }, 'Failed to start server');
   process.exit(1);
 });

@@ -54,12 +54,22 @@ const DEFAULT_CONFIG: RateLimitConfig = {
 };
 
 /**
+ * Abstract rate limiter interface.
+ *
+ * Implemented by SlidingWindowRateLimiter (in-memory, per-pod) and
+ * RedisRateLimiter (distributed, shared across pods).
+ */
+export interface RateLimiter {
+  check(identity: RateLimitIdentity): RateLimitResult | Promise<RateLimitResult>;
+}
+
+/**
  * In-memory sliding-window rate limiter.
  *
- * Production deployments should swap this for a Redis-backed implementation
- * via the RateLimiter interface.
+ * Suitable for single-pod deployments. For distributed rate limiting
+ * across replicas, use RedisRateLimiter with REDIS_URL.
  */
-export class SlidingWindowRateLimiter {
+export class SlidingWindowRateLimiter implements RateLimiter {
   private readonly buckets = new Map<string, BucketEntry>();
   private readonly config: RateLimitConfig;
   private lastCleanup = Date.now();

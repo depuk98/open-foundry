@@ -44,6 +44,9 @@ const schema: ParsedSchema = {
 
 function mockDeps(): ApiDependencies {
   return {
+    schema: schema,
+    authenticator: {} as ApiDependencies['authenticator'],
+    storage: {} as ApiDependencies['storage'],
     objectManager: {
       query: vi.fn().mockResolvedValue({ items: [], totalCount: 0, hasNextPage: false }),
       get: vi.fn(),
@@ -63,7 +66,6 @@ function mockDeps(): ApiDependencies {
       ),
       getVisibleFields: vi.fn().mockReturnValue(undefined),
     } as unknown as ApiDependencies['authorizationService'],
-    schemaRegistry: {} as ApiDependencies['schemaRegistry'],
     actionExecutor: {} as ApiDependencies['actionExecutor'],
   };
 }

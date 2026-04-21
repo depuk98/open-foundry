@@ -478,6 +478,7 @@ describe('REST API', () => {
             _toId: 'w-1',
             _version: 1,
             _createdAt: '2025-01-01T00:00:00Z',
+            _updatedAt: '2025-01-01T00:00:00Z',
           },
         ],
         totalCount: 1,

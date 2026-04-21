@@ -81,7 +81,13 @@ function createMockDeps(): ApiDependencies {
       update: vi.fn(),
       delete: vi.fn(),
     } as unknown as ApiDependencies['objectManager'],
-    linkManager: {} as unknown as ApiDependencies['linkManager'],
+    linkManager: {
+      getLinks: vi.fn().mockResolvedValue({ items: [], totalCount: 0, hasNextPage: false }),
+      createLink: vi.fn(),
+      updateLink: vi.fn(),
+      deleteLink: vi.fn(),
+      traverse: vi.fn(),
+    } as unknown as ApiDependencies['linkManager'],
     actionExecutor: {
       execute: vi.fn(),
     } as unknown as ApiDependencies['actionExecutor'],
@@ -366,14 +372,25 @@ describe('FHIR R4 read-only facade', () => {
     });
   });
 
-  describe('Encounter search', () => {
-    it('returns encounters for a patient', async () => {
+  describe('Encounter search (synthesized from AdmittedTo links)', () => {
+    it('returns encounters synthesized from AdmittedTo links', async () => {
       const deps = createMockDeps();
-      const enc1 = createEncounterObject('enc-1', 'p-1');
-      const enc2 = createEncounterObject('enc-2', 'p-1');
+      // Mock AdmittedTo links (Patient → Ward)
+      const link1 = {
+        _tenantId: 'tenant-1', _type: 'AdmittedTo', _id: 'link-1',
+        _fromType: 'Patient', _fromId: 'p-1', _toType: 'Ward', _toId: 'ward-1',
+        _version: 1, _createdAt: '2025-06-01T09:00:00Z', _updatedAt: '2025-06-01T09:00:00Z',
+        admissionDate: '2025-06-01T09:00:00Z', reason: 'Emergency',
+      };
+      const link2 = {
+        _tenantId: 'tenant-1', _type: 'AdmittedTo', _id: 'link-2',
+        _fromType: 'Patient', _fromId: 'p-1', _toType: 'Ward', _toId: 'ward-2',
+        _version: 1, _createdAt: '2025-05-15T10:00:00Z', _updatedAt: '2025-05-15T10:00:00Z',
+        admissionDate: '2025-05-15T10:00:00Z', _deletedAt: '2025-05-20T12:00:00Z',
+      };
 
-      (deps.objectManager.query as ReturnType<typeof vi.fn>)
-        .mockResolvedValue({ items: [enc1, enc2], totalCount: 2, hasNextPage: false });
+      (deps.linkManager.getLinks as ReturnType<typeof vi.fn>)
+        .mockResolvedValue({ items: [link1, link2], totalCount: 2, hasNextPage: false });
 
       const router = createFhirRouter({ deps });
       const res = await router(fhirGet('Encounter', { patient: 'Patient/p-1' }));
@@ -387,6 +404,10 @@ describe('FHIR R4 read-only facade', () => {
       expect(encounter.resourceType).toBe('Encounter');
       expect(encounter.subject!.reference).toBe('Patient/p-1');
       expect(encounter.meta!.profile).toContain(NHS_ENCOUNTER_PROFILE);
+      expect(encounter.status).toBe('in-progress'); // Active (no _deletedAt)
+
+      const discharged = bundle.entry![1]!.resource as FhirEncounter;
+      expect(discharged.status).toBe('finished'); // Discharged (_deletedAt set)
     });
 
     it('requires patient parameter', async () => {

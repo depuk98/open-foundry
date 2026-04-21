@@ -17,6 +17,7 @@ import { parse as parseYaml } from 'yaml';
 import { parseOdl } from '@openfoundry/odl';
 import type { ParsedSchema, ObjectType, LinkType } from '@openfoundry/odl';
 import { parseActionManifest } from '@openfoundry/actions';
+import { logger } from './logger.js';
 import type { ActionManifest } from '@openfoundry/actions';
 import type { OntologySchema, ObjectTypeDefinition, LinkTypeDefinition, PropertyDefinition, IndexDefinition } from '@openfoundry/spi';
 import type { FieldPermissionConfig } from '@openfoundry/security';
@@ -146,7 +147,7 @@ function loadPackActions(
   for (const file of actionFiles) {
     const filePath = resolve(packDir, file);
     if (!existsSync(filePath)) {
-      console.warn(`Schema loader: action file '${file}' not found in ${packDir}, skipping`);
+      logger.warn(`Schema loader: action file '${file}' not found in ${packDir}, skipping`);
       continue;
     }
     const yamlContent = readFileSync(filePath, 'utf-8');
@@ -216,7 +217,7 @@ function validateFieldPermissions(
   for (const config of configs) {
     const objType = objectTypes.get(config.objectType);
     if (!objType) {
-      console.warn(
+      logger.warn(
         `Field permissions: unknown object type "${config.objectType}". ` +
         `Known types: ${[...objectTypes.keys()].join(', ')}`,
       );
@@ -237,7 +238,7 @@ function validateFieldPermissions(
     // Validate alwaysVisible
     for (const f of config.alwaysVisible) {
       if (f !== 'id' && !storedFields.has(f)) {
-        console.warn(
+        logger.warn(
           `Field permissions [${config.objectType}]: alwaysVisible field "${f}" not in schema. ` +
           `Valid: ${[...storedFields].join(', ')}`,
         );
@@ -248,7 +249,7 @@ function validateFieldPermissions(
     for (const [relation, fields] of Object.entries(config.fieldsByRelation)) {
       for (const f of fields) {
         if (!storedFields.has(f)) {
-          console.warn(
+          logger.warn(
             `Field permissions [${config.objectType}].${relation}: field "${f}" not in schema. ` +
             `Valid: ${[...storedFields].join(', ')}`,
           );
@@ -446,7 +447,7 @@ export async function loadDomainPacks(
   for (const name of names) {
     const packDir = resolve(dir, name);
     if (!existsSync(resolve(packDir, 'pack.yaml'))) {
-      console.warn(`Schema loader: pack '${name}' not found at ${packDir}, skipping`);
+      logger.warn(`Schema loader: pack '${name}' not found at ${packDir}, skipping`);
       continue;
     }
 

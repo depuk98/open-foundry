@@ -10,6 +10,7 @@
  *   GET /fhir/Patient?name=value                         → search
  *   GET /fhir/Patient?birthdate=value                    → search
  *   GET /fhir/Encounter?patient=Patient/{id}             → search
+ *   GET /fhir/metadata                                   → CapabilityStatement
  *   POST/PUT/DELETE any → 405 Method Not Allowed
  *
  * All endpoints pass through the same security pipeline
@@ -25,6 +26,7 @@ import type {
   FhirOperationOutcome,
 } from './types.js';
 import { mapPatientToFhir, mapEncounterToFhir } from './mappers.js';
+import { logger } from '../logger.js';
 
 // ─── Request / Response types ───
 
@@ -41,7 +43,7 @@ export interface FhirRequest {
 export interface FhirResponse {
   status: number;
   headers: Record<string, string>;
-  body: FhirResource | FhirBundle | FhirOperationOutcome;
+  body: FhirResource | FhirBundle | FhirOperationOutcome | { resourceType: string; [key: string]: unknown };
 }
 
 // ─── Configuration ───
@@ -83,6 +85,9 @@ export function createFhirRouter(config: FhirRouterConfig) {
     }
 
     switch (resourceType) {
+      case 'metadata':
+        return handleCapabilityStatement(baseUrl);
+
       case 'Patient':
         if (resourceId) {
           return handlePatientRead(deps, req, resourceId);
@@ -142,6 +147,7 @@ async function handlePatientRead(
         id,
         DataPurpose.DIRECT_CARE,
         req.user.id,
+        req.user.tenantId,
       );
       if (consent._consentRestricted) {
         return operationOutcome(403, 'forbidden', 'Consent denied for this patient');
@@ -156,7 +162,7 @@ async function handlePatientRead(
       body: patient,
     };
   } catch (err) {
-    console.error('FHIR Patient read error:', err instanceof Error ? err.message : 'unknown');
+    logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'FHIR Patient read error');
     return operationOutcome(500, 'exception', 'Internal server error');
   }
 }
@@ -240,6 +246,7 @@ async function handlePatientSearch(
         (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
         DataPurpose.DIRECT_CARE,
         req.user.id,
+        req.user.tenantId,
       );
       consentFiltered = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
     }
@@ -265,7 +272,7 @@ async function handlePatientSearch(
       body: bundle,
     };
   } catch (err) {
-    console.error('FHIR Patient search error:', err instanceof Error ? err.message : 'unknown');
+    logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'FHIR Patient search error');
     return operationOutcome(500, 'exception', 'Internal server error');
   }
 }
@@ -305,43 +312,50 @@ async function handleEncounterSearch(
       return operationOutcome(403, 'forbidden', `Access denied to Patient ${patientId}`);
     }
 
-    // Query encounters linked to this patient.
-    // TODO: NHS acute schema has no 'Encounter' ODL type — admissions are modeled
-    // as AdmittedTo links (Patient→Ward). This query will return empty until either
-    // an Encounter object type is added to the domain pack, or this handler is
-    // remapped to query AdmittedTo links and synthesize Encounter resources.
-    const filter: FieldPredicate = { field: 'patientId', operator: 'eq', value: patientId };
-
-    const page = await deps.objectManager.query(
-      'Encounter',
-      filter,
+    // Synthesize FHIR Encounters from AdmittedTo links (Patient→Ward).
+    // The NHS acute schema models admissions as AdmittedTo links, not a
+    // separate Encounter object type.
+    const linkPage = await deps.linkManager.getLinks(
+      patientId,
+      'AdmittedTo',
+      'outbound',
       { limit: 100, offset: 0 },
       ctx,
     );
 
-    // Field-level redaction
-    const redacted = deps.authorizationService.redactFieldsBatch(
-      req.user.id,
-      req.user.roles,
-      'Encounter',
-      page.items as unknown as Record<string, unknown>[],
-    );
+    // Convert links to OntologyObject-shaped records for the mapper.
+    // AdmittedTo link properties: admissionDate, expectedDischarge, reason.
+    const encounterObjects = linkPage.items.map(link => ({
+      _tenantId: link._tenantId,
+      _type: 'Encounter',
+      _id: link._id,
+      _version: link._version,
+      _createdAt: link._createdAt,
+      _updatedAt: link._updatedAt,
+      patientId,
+      admissionDate: link.admissionDate,
+      expectedDischarge: link.expectedDischarge,
+      reason: link.reason,
+      wardId: link._toId,
+      // Derive status: if link is soft-deleted, the patient was discharged
+      status: link._deletedAt ? 'DISCHARGED' : 'ACTIVE',
+      dischargedAt: link._deletedAt ?? undefined,
+    })) as unknown as Record<string, unknown>[];
 
-    // Consent filtering.
-    // NOTE: Consent is applied after storage pagination. If the storage layer
-    // returns a full page and consent removes items, the response may contain
-    // fewer entries than the requested limit. This is a known architectural
-    // limitation — addressing it requires push-down filtering into the storage
-    // layer (deferred post-MVP).
-    let filteredItems = redacted;
+    // Consent filtering on the patient (the consent subject).
+    // NOTE: Consent is applied after storage pagination — see Patient search.
+    let filteredItems: { data: Record<string, unknown> }[];
     if (deps.consentService) {
       const consentResult = await deps.consentService.filterList(
-        redacted.map((r: { data: Record<string, unknown> }) => r.data),
-        (item: Record<string, unknown>) => String(item._id ?? item.id ?? ''),
+        encounterObjects,
+        () => patientId,
         DataPurpose.DIRECT_CARE,
         req.user.id,
+        req.user.tenantId,
       );
-      filteredItems = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item, _redactedFields: [] as string[] }));
+      filteredItems = consentResult.edges.map((item: Record<string, unknown>) => ({ data: item }));
+    } else {
+      filteredItems = encounterObjects.map(obj => ({ data: obj }));
     }
 
     const entries = filteredItems.map((r: { data: Record<string, unknown> }) => {
@@ -365,7 +379,7 @@ async function handleEncounterSearch(
       body: bundle,
     };
   } catch (err) {
-    console.error('FHIR Encounter search error:', err instanceof Error ? err.message : 'unknown');
+    logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'FHIR Encounter search error');
     return operationOutcome(500, 'exception', 'Internal server error');
   }
 }
@@ -445,6 +459,58 @@ function methodNotAllowed(method: string): FhirResponse {
           severity: 'error',
           code: 'not-supported',
           diagnostics: `Method ${method} is not allowed. This FHIR endpoint is read-only.`,
+        },
+      ],
+    },
+  };
+}
+
+// ─── CapabilityStatement (GET /fhir/metadata) ───
+
+function handleCapabilityStatement(baseUrl: string): FhirResponse {
+  return {
+    status: 200,
+    headers: fhirHeaders(),
+    body: {
+      resourceType: 'CapabilityStatement',
+      id: 'openfoundry',
+      status: 'active',
+      date: new Date().toISOString().split('T')[0],
+      kind: 'instance',
+      fhirVersion: '4.0.1',
+      format: ['json'],
+      implementation: {
+        description: 'Open Foundry FHIR R4 read-only facade',
+        url: baseUrl || undefined,
+      },
+      rest: [
+        {
+          mode: 'server',
+          resource: [
+            {
+              type: 'Patient',
+              profile: 'https://fhir.nhs.uk/StructureDefinition/NHSDigital-Patient',
+              interaction: [
+                { code: 'read' },
+                { code: 'search-type' },
+              ],
+              searchParam: [
+                { name: 'identifier', type: 'token' },
+                { name: 'name', type: 'string' },
+                { name: 'birthdate', type: 'date' },
+              ],
+            },
+            {
+              type: 'Encounter',
+              profile: 'https://fhir.nhs.uk/StructureDefinition/NHSDigital-Encounter',
+              interaction: [
+                { code: 'search-type' },
+              ],
+              searchParam: [
+                { name: 'patient', type: 'reference' },
+              ],
+            },
+          ],
         },
       ],
     },

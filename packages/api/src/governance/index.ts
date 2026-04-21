@@ -7,11 +7,13 @@
 
 export {
   SlidingWindowRateLimiter,
+  type RateLimiter,
   type RateLimitConfig,
   type RateLimitWindow,
   type RateLimitIdentity,
   type RateLimitResult,
 } from './rate-limiter.js';
+export { RedisRateLimiter, type RedisRateLimiterConfig } from './redis-rate-limiter.js';
 
 export {
   QueryComplexityAnalyzer,

@@ -16,7 +16,8 @@
  */
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
-import type { OntologyObject, FilterExpression, DataPurpose, AggregateQuery, AggregateField, AggregateFunction, SearchQuery, ObjectSetDefinition } from '@openfoundry/spi';
+import { DataPurpose } from '@openfoundry/spi';
+import type { OntologyObject, FilterExpression, AggregateQuery, AggregateField, AggregateFunction, SearchQuery, ObjectSetDefinition } from '@openfoundry/spi';
 import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import type { ApiDependencies, ResolverContext } from '../graphql/types.js';
@@ -33,6 +34,10 @@ function pluralize(s: string): string {
 
 function isPrimaryField(field: FieldDefinition): boolean {
   return field.directives.some(d => d.kind === 'primary');
+}
+
+function isParamField(field: FieldDefinition): boolean {
+  return field.directives.some(d => d.kind === 'param');
 }
 
 /**
@@ -300,6 +305,7 @@ function generateListRoute(
             getPrimaryId,
             DEFAULT_CONSENT_PURPOSE as DataPurpose,
             user.id,
+            requestContext.tenantId,
           );
           items = consentResult.edges;
           totalCount = consentResult.totalCount;
@@ -390,6 +396,7 @@ function generateGetByIdRoute(
             id,
             DEFAULT_CONSENT_PURPOSE as DataPurpose,
             user.id,
+            requestContext.tenantId,
           );
           if (consentResult._consentRestricted) {
             restObj._consentRestricted = true;
@@ -575,6 +582,7 @@ function generateHistoryRoute(
             getPrimaryId,
             DEFAULT_CONSENT_PURPOSE as DataPurpose,
             user.id,
+            requestContext.tenantId,
           );
           items = consentResult.edges;
         }
@@ -783,6 +791,7 @@ function generateSearchRoute(
             getPrimaryId,
             DEFAULT_CONSENT_PURPOSE as DataPurpose,
             user.id,
+            requestContext.tenantId,
           );
           hits = consentResult.edges;
           totalCount = consentResult.totalCount;
@@ -832,8 +841,20 @@ function generateActionRoute(
           roles: user.roles,
         };
 
+        // Derive consent from action schema — if the action has a
+        // Patient-typed @param, use DIRECT_CARE and the patient ID.
+        const patientParam = action.fields.find(
+          f => isParamField(f) && f.type.name === 'Patient',
+        );
+        const consentSubjectId = patientParam
+          ? String(input[patientParam.name] ?? '')
+          : undefined;
         const actionCtx: ActionContext = {
           requestContext,
+          ...(consentSubjectId ? {
+            consentPurpose: DataPurpose.DIRECT_CARE,
+            consentSubjectId,
+          } : {}),
         };
 
         // Resolve manifest from registry — fail closed if not found
@@ -1033,7 +1054,7 @@ function generateObjectSetRoutes(schema: ParsedSchema, deps: ApiDependencies): R
           }
           const id = req.params['id']!;
           await deps.objectSetManager.delete(id, ctx.requestContext);
-          return { status: 200, body: { data: { success: true } } };
+          return { status: 204, body: {} };
         } catch (err) {
           return wrapErrorToRest(err, ctx.requestContext.traceId);
         }
@@ -1132,6 +1153,7 @@ function generateObjectSetRoutes(schema: ParsedSchema, deps: ApiDependencies): R
               getPrimaryId,
               DEFAULT_CONSENT_PURPOSE as DataPurpose,
               user.id,
+              ctx.requestContext.tenantId,
             );
             items = consentResult.edges;
             totalCount = consentResult.totalCount;
