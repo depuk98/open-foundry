@@ -11,7 +11,7 @@
  * - Tenant isolation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { traverse } from '../links/traversal.js';
 import type { Pool } from 'pg';
 import type {
@@ -240,7 +240,6 @@ describe('traverse()', () => {
           };
         }
         // Return objects for all three wards
-        const id = sql.includes('ward-1') ? 'ward-1' : sql.includes('ward-2') ? 'ward-2' : 'ward-3';
         return {
           rows: [
             makeObjectRow('Ward', 'ward-1'),
@@ -311,7 +310,7 @@ describe('traverse()', () => {
   describe('multi-step traversal', () => {
     it('breaks traversal when frontier becomes empty', async () => {
       let queryCount = 0;
-      const pool = createMockPool((sql) => {
+      const pool = createMockPool((_sql) => {
         queryCount++;
         // First step returns links, second step returns no links
         if (queryCount === 1) {

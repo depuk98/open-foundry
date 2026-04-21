@@ -890,22 +890,32 @@ export class MemoryStorageProvider implements StorageProvider {
     path: TraversalPath,
     options?: TraversalOptions,
   ): Promise<TraversalResult> {
-    // TODO: Traversal inconsistencies with Postgres provider:
-    // 1. No max depth enforcement (Postgres caps at 10 steps)
-    // 2. No MAX_TRAVERSAL_NODES guard (Postgres caps at 10,000)
-    // 3. Neither provider uses TraversalStep.maxDepth (SPI field is ignored)
+    // Match Postgres traversal safety limits (PERF-03)
+    const MAX_TRAVERSAL_DEPTH = 10;
+    const MAX_TRAVERSAL_NODES = 10_000;
+
+    if (path.steps.length > MAX_TRAVERSAL_DEPTH) {
+      throw new Error(`Traversal depth ${path.steps.length} exceeds maximum of ${MAX_TRAVERSAL_DEPTH}`);
+    }
+
     const includeDeleted = options?.includeDeleted ?? false;
     const collectedEdges = new Map<string, OntologyLink>();
+    let totalNodesSeen = 0;
 
     // Start with the set of current object IDs
     let currentIds = new Set<string>([startId]);
     let stepNodes = new Map<string, OntologyObject>();
 
     for (const step of path.steps) {
+      if (currentIds.size === 0) break;
+      if (totalNodesSeen >= MAX_TRAVERSAL_NODES) break;
+
       const nextIds = new Set<string>();
       stepNodes = new Map<string, OntologyObject>();
 
       for (const objectId of currentIds) {
+        if (totalNodesSeen >= MAX_TRAVERSAL_NODES) break;
+
         const links = Array.from(this._links.values()).filter((link) => {
           if (link._tenantId !== ctx.tenantId) return false;
           if (link._type !== step.linkType) return false;
@@ -915,6 +925,8 @@ export class MemoryStorageProvider implements StorageProvider {
         });
 
         for (const link of links) {
+          if (totalNodesSeen >= MAX_TRAVERSAL_NODES) break;
+
           const targetId = step.direction === 'outbound' ? link._toId : link._fromId;
           const targetType = step.direction === 'outbound' ? link._toType : link._fromType;
 
@@ -929,7 +941,11 @@ export class MemoryStorageProvider implements StorageProvider {
           }
 
           collectedEdges.set(`${link._type}:${link._id}`, link);
-          stepNodes.set(`${targetType}:${targetId}`, targetObj);
+          const nodeKey = `${targetType}:${targetId}`;
+          if (!stepNodes.has(nodeKey)) {
+            stepNodes.set(nodeKey, targetObj);
+            totalNodesSeen++;
+          }
           nextIds.add(targetId);
         }
       }
@@ -1019,7 +1035,7 @@ export class MemoryStorageProvider implements StorageProvider {
       supportsGeoQueries: false,
       supportsGraphTraversal: true,
       supportsBulkMutations: true,
-      maxTraversalDepth: 100,
+      maxTraversalDepth: 10,
       replicationSupport: 'NONE',
     };
   }

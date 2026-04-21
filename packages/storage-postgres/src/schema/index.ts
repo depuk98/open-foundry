@@ -15,12 +15,14 @@ import { generateObjectTableDDL } from './ddl-objects.js';
 import { generateLinkTableDDL } from './ddl-links.js';
 import { generateAllGraphDDL } from './ddl-graph.js';
 import { generateAuditDDL } from './ddl-audit.js';
+import { generateConsentDDL } from './ddl-consent.js';
 import { generateLineageDDL } from './ddl-lineage.js';
 
 export { generateObjectTableDDL } from './ddl-objects.js';
 export { generateLinkTableDDL } from './ddl-links.js';
 export { generateAllGraphDDL, generateGraphSetupDDL, generateNodeLabelDDL, generateEdgeLabelDDL } from './ddl-graph.js';
 export { generateAuditDDL } from './ddl-audit.js';
+export { generateConsentDDL } from './ddl-consent.js';
 export { generateLineageDDL } from './ddl-lineage.js';
 export { pgType, pgIdent, snakeCase, pgIndexMethod } from './type-mapping.js';
 
@@ -36,6 +38,8 @@ export interface DDLGenerationOptions {
   includeAudit?: boolean;
   /** Whether to include lineage DDL. Default: true. */
   includeLineage?: boolean;
+  /** Whether to include consent DDL. Default: true. */
+  includeConsent?: boolean;
 }
 
 /**
@@ -50,6 +54,8 @@ export interface GeneratedDDL {
   graph: string[];
   /** DDL for audit schema and tables. */
   audit: string[];
+  /** DDL for consent schema and tables. */
+  consent: string[];
   /** DDL for lineage schema and tables. */
   lineage: string[];
   /** All statements in execution order. */
@@ -68,6 +74,7 @@ export function generateDDL(
     includeGraph = true,
     includeAudit = true,
     includeLineage = true,
+    includeConsent = true,
   } = options;
 
   const result: GeneratedDDL = {
@@ -75,6 +82,7 @@ export function generateDDL(
     linkTables: [],
     graph: [],
     audit: [],
+    consent: [],
     lineage: [],
     all: [],
   };
@@ -99,18 +107,24 @@ export function generateDDL(
     result.audit.push(...generateAuditDDL());
   }
 
+  // Consent
+  if (includeConsent) {
+    result.consent.push(...generateConsentDDL());
+  }
+
   // Lineage
   if (includeLineage) {
     result.lineage.push(...generateLineageDDL());
   }
 
   // Combine all in execution order:
-  // 1. Audit + lineage schemas first (schema creation)
+  // 1. Audit + consent + lineage schemas first (schema creation)
   // 2. Object tables
   // 3. Link tables
   // 4. Graph setup (AGE last, as it requires extension)
   result.all = [
     ...result.audit,
+    ...result.consent,
     ...result.lineage,
     ...result.objectTables,
     ...result.linkTables,

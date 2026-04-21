@@ -71,10 +71,10 @@ describeWithPg('PostgresAuditStore (integration)', () => {
 
     const results = await store.query({ actorId: 'audit-test-1' });
     expect(results).toHaveLength(1);
-    expect(results[0].id).toBe(record.id);
-    expect(results[0].actor.id).toBe('audit-test-1');
-    expect(results[0].actor.roles).toEqual(['admin']);
-    expect(results[0].detail.result).toBe('success');
+    expect(results[0]!.id).toBe(record.id);
+    expect(results[0]!.actor.id).toBe('audit-test-1');
+    expect(results[0]!.actor.roles).toEqual(['admin']);
+    expect(results[0]!.detail.result).toBe('success');
   });
 
   it('queries by objectType and objectId', async () => {
@@ -86,8 +86,8 @@ describeWithPg('PostgresAuditStore (integration)', () => {
 
     const results = await store.query({ objectType: 'Ward', objectId: 'w-audit-test' });
     expect(results.length).toBeGreaterThanOrEqual(1);
-    expect(results[0].operation.objectType).toBe('Ward');
-    expect(results[0].operation.objectId).toBe('w-audit-test');
+    expect(results[0]!.operation.objectType).toBe('Ward');
+    expect(results[0]!.operation.objectId).toBe('w-audit-test');
   });
 
   it('queries by traceId', async () => {
@@ -97,7 +97,7 @@ describeWithPg('PostgresAuditStore (integration)', () => {
 
     const results = await store.query({ traceId });
     expect(results).toHaveLength(1);
-    expect(results[0].traceId).toBe(traceId);
+    expect(results[0]!.traceId).toBe(traceId);
   });
 
   it('queries by time range', async () => {
@@ -119,8 +119,8 @@ describeWithPg('PostgresAuditStore (integration)', () => {
 
     const results = await store.query({ actorId: 'audit-test-optype', operationType: 'action' });
     expect(results).toHaveLength(1);
-    expect(results[0].operation.actionType).toBe('AdmitPatient');
-    expect(results[0].operation.actionId).toBe('act-001');
+    expect(results[0]!.operation.actionType).toBe('AdmitPatient');
+    expect(results[0]!.operation.actionId).toBe('act-001');
   });
 
   it('stores and retrieves detail with before/after snapshots', async () => {
@@ -136,8 +136,8 @@ describeWithPg('PostgresAuditStore (integration)', () => {
 
     const results = await store.query({ actorId: 'audit-test-detail' });
     expect(results).toHaveLength(1);
-    expect(results[0].detail.before).toEqual({ status: 'ACTIVE', ward: 'Cardiology' });
-    expect(results[0].detail.after).toEqual({ status: 'DISCHARGED', ward: null });
+    expect(results[0]!.detail.before).toEqual({ status: 'ACTIVE', ward: 'Cardiology' });
+    expect(results[0]!.detail.after).toEqual({ status: 'DISCHARGED', ward: null });
   });
 
   it('returns empty array for unmatched filter', async () => {

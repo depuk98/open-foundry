@@ -161,7 +161,10 @@ export class PostgresStorageProvider implements StorageProvider {
   private _dataSchema: string;
   private _schemas = new Map<number, OntologySchema>();
   private _currentSchemaVersion = 0;
-  private _idempotencyCache = new Map<string, BulkMutationResult>();
+  private _idempotencyCache = new Map<string, { result: BulkMutationResult; expiresAt: number }>();
+  private _idempotencyCacheTimer: ReturnType<typeof setInterval> | null = null;
+  /** Idempotency cache TTL in milliseconds. Entries older than this are evicted. */
+  private static readonly IDEMPOTENCY_TTL_MS = 5 * 60_000; // 5 minutes
 
   private _defaultIsolationLevel: string;
 
@@ -174,9 +177,22 @@ export class PostgresStorageProvider implements StorageProvider {
       password: config.password,
       max: config.maxPoolSize ?? 10,
       ssl: config.ssl || undefined,
+      // Production-safe timeouts: prevent hung connections and pool exhaustion.
+      connectionTimeoutMillis: 5_000,    // fail fast if Postgres unreachable
+      idleTimeoutMillis: 30_000,         // release idle connections after 30s
+      statement_timeout: 30_000,         // kill queries running longer than 30s
     } satisfies PoolConfig);
     this._dataSchema = config.dataSchema ?? 'public';
     this._defaultIsolationLevel = config.defaultIsolationLevel ?? 'READ COMMITTED';
+
+    // Periodically evict expired idempotency cache entries
+    this._idempotencyCacheTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this._idempotencyCache) {
+        if (entry.expiresAt <= now) this._idempotencyCache.delete(key);
+      }
+    }, 60_000);
+    this._idempotencyCacheTimer.unref(); // Don't prevent process exit
   }
 
   /** Expose pool for testing / direct access. */
@@ -186,6 +202,7 @@ export class PostgresStorageProvider implements StorageProvider {
 
   /** Gracefully shut down the connection pool. */
   async close(): Promise<void> {
+    if (this._idempotencyCacheTimer) clearInterval(this._idempotencyCacheTimer);
     await this._pool.end();
   }
 
@@ -204,8 +221,14 @@ export class PostgresStorageProvider implements StorageProvider {
       )
     `);
 
-    // Compute DDL checksum for drift detection (SHA-256, truncated to 16 hex chars)
-    const ddlText = ddl.all.join('\n');
+    // Compute DDL checksum from ontology-specific DDL only.
+    // Platform DDL (consent) is excluded because it's applied idempotently
+    // and wasn't part of earlier schema versions' checksums.
+    const checksumParts = [
+      ...ddl.audit, ...ddl.lineage,
+      ...ddl.objectTables, ...ddl.linkTables, ...ddl.graph,
+    ];
+    const ddlText = checksumParts.join('\n');
     const checksum = createHash('sha256').update(ddlText).digest('hex').slice(0, 16);
 
     // Check if this version is already applied (cheap check before acquiring lock)
@@ -221,6 +244,12 @@ export class PostgresStorageProvider implements StorageProvider {
           `Expected ${storedChecksum}, got ${checksum}. ` +
           `Increment schema version or resolve the drift before deploying.`,
         );
+      }
+      // Schema version already applied — still run platform DDL (consent)
+      // for upgrades that add new platform tables/columns. These statements
+      // are idempotent (IF NOT EXISTS, ADD COLUMN IF NOT EXISTS).
+      for (const stmt of ddl.consent) {
+        await this._pool.query(stmt);
       }
       this._currentSchemaVersion = schema.version;
       this._schemas.set(schema.version, schema);
@@ -250,6 +279,10 @@ export class PostgresStorageProvider implements StorageProvider {
             `Increment schema version or resolve the drift before deploying.`,
           );
         }
+        // Platform DDL under advisory lock for concurrent startup safety
+        for (const stmt of ddl.consent) {
+          await client.query(stmt);
+        }
         await client.query('COMMIT');
         this._currentSchemaVersion = schema.version;
         this._schemas.set(schema.version, schema);
@@ -257,7 +290,14 @@ export class PostgresStorageProvider implements StorageProvider {
         return { success: true, fromVersion, toVersion: schema.version, appliedAt: now };
       }
 
-      // Execute all DDL statements on the same client
+      // Apply platform DDL (consent) under the advisory lock before ontology DDL.
+      // Serializes concurrent startup so only one pod creates the schema/tables.
+      for (const stmt of ddl.consent) {
+        await client.query(stmt);
+      }
+
+      // Execute ontology DDL statements (ddl.all includes consent which is
+      // idempotent, so running it again is harmless)
       for (const stmt of ddl.all) {
         await client.query(stmt);
       }
@@ -339,7 +379,7 @@ export class PostgresStorageProvider implements StorageProvider {
     // Idempotency check — scoped by tenant to prevent cross-tenant cache hits
     const cacheKey = `${ctx.tenantId}:${request.idempotencyKey}`;
     const cached = this._idempotencyCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
 
     let accepted = 0;
     let failed = 0;
@@ -375,7 +415,10 @@ export class PostgresStorageProvider implements StorageProvider {
     }
 
     const result: BulkMutationResult = { accepted, failed, errors };
-    this._idempotencyCache.set(cacheKey, result);
+    this._idempotencyCache.set(cacheKey, {
+      result,
+      expiresAt: Date.now() + PostgresStorageProvider.IDEMPOTENCY_TTL_MS,
+    });
     return result;
   }
 

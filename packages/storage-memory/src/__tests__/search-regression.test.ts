@@ -75,7 +75,7 @@ describe('aggregate — function validation', () => {
     await provider.createObject(ctx, 'Item', { title: 'A', price: 5 });
     await provider.createObject(ctx, 'Item', { title: 'B', price: 15 });
     const result = await provider.aggregateObjects(ctx, 'Item', {
-      fields: [{ field: 'price', fn: 'SUM' }],
+      fields: [{ field: 'price', fn: 'SUM' as unknown as 'sum' }],
     });
     expect(result.groups).toHaveLength(1);
     // Alias uses original fn casing in key
@@ -86,7 +86,7 @@ describe('aggregate — function validation', () => {
     await provider.createObject(ctx, 'Item', { title: 'A', price: 10 });
     await expect(
       provider.aggregateObjects(ctx, 'Item', {
-        fields: [{ field: 'price', fn: 'INVALID_FN' }],
+        fields: [{ field: 'price', fn: 'INVALID_FN' as unknown as 'sum' }],
       }),
     ).rejects.toThrow('Invalid aggregate function');
   });

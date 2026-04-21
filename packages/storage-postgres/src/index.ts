@@ -19,6 +19,7 @@ export {
   generateNodeLabelDDL,
   generateEdgeLabelDDL,
   generateAuditDDL,
+  generateConsentDDL,
   generateLineageDDL,
   pgType,
   pgIdent,
@@ -63,6 +64,10 @@ export {
 // ─── Audit ───
 export { PostgresAuditStore } from './audit/postgres-audit-store.js';
 export type { AuditQueryFilter as PostgresAuditQueryFilter } from './audit/postgres-audit-store.js';
+
+// ─── Consent ───
+export { PostgresConsentStore } from './consent/postgres-consent-store.js';
+export type { ConsentStoreInterface } from './consent/postgres-consent-store.js';
 
 // ─── Transactions ───
 export { PgTransaction, resolveQueryable } from './transactions/index.js';

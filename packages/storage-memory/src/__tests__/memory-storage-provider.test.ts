@@ -518,6 +518,28 @@ describe('MemoryStorageProvider', () => {
       expect(result.nodes).toHaveLength(1);
       expect(result.nodes[0]!.name).toBe('Alpha');
     });
+
+    it('throws when path exceeds MAX_TRAVERSAL_DEPTH (10)', async () => {
+      const steps = Array.from({ length: 11 }, () => ({
+        linkType: 'AssignedTo',
+        direction: 'outbound' as const,
+      }));
+
+      await expect(
+        provider.traverse(tenantA, 'start-id', { steps }),
+      ).rejects.toThrow(/exceeds maximum of 10/);
+    });
+
+    it('allows path at exactly MAX_TRAVERSAL_DEPTH (10)', async () => {
+      const steps = Array.from({ length: 10 }, () => ({
+        linkType: 'AssignedTo',
+        direction: 'outbound' as const,
+      }));
+
+      // Should not throw — returns empty because no links found at depth
+      const result = await provider.traverse(tenantA, 'start-id', { steps });
+      expect(result.nodes).toHaveLength(0);
+    });
   });
 
   // ─── Transactions ───
@@ -722,7 +744,7 @@ describe('MemoryStorageProvider', () => {
 
   describe('ensureIndex', () => {
     it('succeeds without error', async () => {
-      await expect(provider.ensureIndex(tenantA, 'Patient', 'name', 'BTREE')).resolves.toBeUndefined();
+      await expect(provider.ensureIndex(tenantA, 'Patient', { field: 'name', indexType: 'BTREE' })).resolves.toBeUndefined();
     });
   });
 });

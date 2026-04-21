@@ -17,7 +17,10 @@ import type {
   ObjectPage,
   DateTime,
 } from '@openfoundry/spi';
+import { createLogger } from '@openfoundry/observability';
 import { snakeCase, pgIdent, fieldCol } from '../schema/type-mapping.js';
+
+const logger = createLogger('storage-postgres');
 import { filterToSql } from './filter-to-sql.js';
 import { PgTransaction, resolveQueryable } from '../transactions/index.js';
 
@@ -432,7 +435,7 @@ async function ageQuery(q: Pool | import('pg').PoolClient, cypher: string): Prom
     // AGE might not be available (e.g., in tests without AGE extension).
     // Log but don't fail — graceful degradation for graph operations.
     if (process.env.NODE_ENV !== 'test') {
-      console.warn('[AGE] Graph operation failed:', err instanceof Error ? err.message : String(err));
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'AGE graph operation failed');
     }
   }
 }

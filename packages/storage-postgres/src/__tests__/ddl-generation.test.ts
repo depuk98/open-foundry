@@ -425,9 +425,11 @@ describe('generateDDL', () => {
     expect(result.linkTables.length).toBeGreaterThan(0);
     expect(result.graph.length).toBeGreaterThan(0);
     expect(result.audit.length).toBeGreaterThan(0);
+    expect(result.consent.length).toBeGreaterThan(0);
     expect(result.lineage.length).toBeGreaterThan(0);
     expect(result.all.length).toBe(
       result.audit.length +
+      result.consent.length +
       result.lineage.length +
       result.objectTables.length +
       result.linkTables.length +
@@ -453,15 +455,17 @@ describe('generateDDL', () => {
     }
   });
 
-  it('respects options to exclude graph, audit, lineage', () => {
+  it('respects options to exclude graph, audit, consent, lineage', () => {
     const result = generateDDL(nhsSchema, {
       includeGraph: false,
       includeAudit: false,
+      includeConsent: false,
       includeLineage: false,
     });
 
     expect(result.graph).toHaveLength(0);
     expect(result.audit).toHaveLength(0);
+    expect(result.consent).toHaveLength(0);
     expect(result.lineage).toHaveLength(0);
     expect(result.all.length).toBe(
       result.objectTables.length + result.linkTables.length
