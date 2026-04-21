@@ -50,7 +50,10 @@ export class OidcAuthenticator {
   configure(config: OidcConfig): void {
     this.issuer = config.issuer;
     this.audience = config.clientId;
-    this.jwks = createRemoteJWKSet(new URL(config.jwksUri));
+    this.jwks = createRemoteJWKSet(new URL(config.jwksUri), {
+      timeoutDuration: 5_000,   // fail fast if OIDC provider unreachable
+      cooldownDuration: 30_000, // cache JWKS for 30s before re-fetching
+    });
     this.tenantClaim = config.tenantClaim ?? "tenant_id";
     this.defaultTenantId = config.defaultTenantId ?? null;
 
