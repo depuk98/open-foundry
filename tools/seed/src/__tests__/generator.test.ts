@@ -226,7 +226,6 @@ describe('Seed Generator — ward occupancy does not exceed capacity', () => {
 describe('Seed Generator — all occupied beds have a patient link', () => {
   it('every OCCUPIED bed appears in an OccupiesBed link', () => {
     const occupiedBeds = data.beds.filter(b => b.status === 'OCCUPIED');
-    const linkedBedIds = new Set(data.links.occupiesBed.map(l => l.toId));
 
     // We can only link as many beds as we have active patients
     const activeCount = data.patients.filter(p => p.status === 'ACTIVE').length;
@@ -243,7 +242,6 @@ describe('Seed Generator — all occupied beds have a patient link', () => {
 
 describe('Seed Generator — all active patients have a ward link', () => {
   it('active patients are admitted to wards (up to total ward capacity)', () => {
-    const admittedPatientIds = new Set(data.links.admittedTo.map(l => l.fromId));
     const totalCapacity = data.wards.reduce((s, w) => s + w.capacity, 0);
     const activePatients = data.patients.filter(p => p.status === 'ACTIVE');
 
@@ -273,6 +271,6 @@ describe('Seed Generator — deterministic output', () => {
     const data1 = generate({ ...DEFAULT_CONFIG, patientCount: 100, wardCount: 5, bedCount: 20, consultantCount: 10, seed: 42 });
     const data2 = generate({ ...DEFAULT_CONFIG, patientCount: 100, wardCount: 5, bedCount: 20, consultantCount: 10, seed: 99 });
     // Very unlikely to produce same first patient name
-    expect(data1.patients[0].nhsNumber).not.toBe(data2.patients[0].nhsNumber);
+    expect(data1.patients[0]!.nhsNumber).not.toBe(data2.patients[0]!.nhsNumber);
   });
 });

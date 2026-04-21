@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
-import type { RequestContext, OntologySchema, ObjectPage, AggregateResult } from '@openfoundry/spi';
+import type { RequestContext, OntologySchema } from '@openfoundry/spi';
 import type { ParsedSchema } from '@openfoundry/odl';
 import { ObjectManager } from '../objects/object-manager.js';
 import { EngineEventEmitter } from '../events/event-emitter.js';

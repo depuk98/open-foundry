@@ -17,7 +17,6 @@ describe('NHS Number — checksum', () => {
     // Need: 11 - (sum%11) = 10, so sum%11 = 1
     // 100000000: 1*10 = 10, 10%11 = 10, 11-10=1 -> no
     // Try brute force a known case
-    const rng = createRng(999);
     // Just verify the null path exists by checking many numbers
     let foundNull = false;
     for (let i = 0; i < 1000; i++) {

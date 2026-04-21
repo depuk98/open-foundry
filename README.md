@@ -196,11 +196,11 @@ helm install openfoundry deploy/helm/openfoundry \
 
 ## Test Coverage
 
-1,845 tests across all packages:
+1,848 tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,747 | Always run |
+| Unit tests | 1,750 | Always run |
 | Postgres integration tests | 98 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -239,14 +239,15 @@ These items are specified in the full technical spec but intentionally deferred 
 | Production runtime wiring | Fully wired: Postgres/FGA/CEL/OIDC in prod, stubs in dev; domain packs loaded at boot | Complete |
 | Schema Registry persistence | In-memory only | Schemas lost on restart |
 | Audit Trail persistence | PostgresAuditStore wired in prod mode | Complete |
-| Consent service | Interface present, not wired; startup warns | Patient consent preferences not enforced |
+| Consent service | PostgresConsentStore in prod, MemoryConsentStore in dev; direct care exemption enabled | Complete |
 | Event bus (persistent) | InMemoryEventBus in prod (warns at startup) | Events lost on restart; needs Kafka/RedPanda |
 | Rate limiting (distributed) | In-memory per-pod | Effective limit scales with replica count; needs Redis |
-| Prometheus metrics endpoint | ServiceMonitor/PrometheusRule templates exist (disabled) | Requires prom-client middleware |
+| Prometheus metrics endpoint | `/metrics` via prom-client; ServiceMonitor/PrometheusRule templates gated (default off) | Complete |
 | Helm HA configuration | HPA, PDB, anti-affinity, resource limits configured | Complete |
 | Link event publishing | Routes link effects through `publishLinkChange()` | Complete |
 | `ROLLBACK_ALL` compensation | Handles both object and link effects | Complete |
-| Traversal `maxDepth` / guards | Memory provider lacks depth/node limits | Unbounded traversal possible in memory |
+| Subscription authorization | Per-event FGA `viewer` check in subscription resolvers | Complete |
+| Traversal guards | Both providers enforce MAX_DEPTH=10 and MAX_NODES=10,000 | Complete |
 | Application Framework | Not implemented | No UI layer; API-only |
 | Federation protocol | Interface defined, not implemented | Single-instance only |
 | TypeDB / Neo4j providers | Not implemented | PostgreSQL+AGE only |
@@ -294,7 +295,7 @@ A human engineer took over direction — reviewing the codebase, revising the sp
 | Deployment config | ~2,000 lines |
 | Specification + MVP docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,845 |
+| Unit + integration tests | 1,848 |
 
 ---
 

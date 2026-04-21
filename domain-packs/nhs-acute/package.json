@@ -11,6 +11,7 @@
   "devDependencies": {
     "@openfoundry/odl": "workspace:*",
     "@openfoundry/actions": "workspace:*",
+    "@types/node": "^22.0.0",
     "vitest": "^3.0.0",
     "yaml": "^2.8.0"
   }

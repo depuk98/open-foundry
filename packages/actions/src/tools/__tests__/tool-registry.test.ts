@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { ParsedSchema } from '@openfoundry/odl';
 import type { ActionManifest } from '../../parser/types.js';
 import { ToolRegistry } from '../tool-registry.js';
-import type { AgentContext, PolicyGuard, PolicyGuardResult, ToolDescriptor } from '../types.js';
+import type { AgentContext, PolicyGuard, PolicyGuardResult } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures: NHS Schema (same structure as action-executor tests)
@@ -380,7 +380,7 @@ describe('ToolRegistry', () => {
   describe('policy guard', () => {
     it('holds high-risk actions for approval', async () => {
       const mockGuard: PolicyGuard = {
-        async evaluate(actionName, riskLevel, agentCtx): Promise<PolicyGuardResult> {
+        async evaluate(_actionName, _riskLevel, _agentCtx): Promise<PolicyGuardResult> {
           return {
             allowed: false,
             holdId: 'hold_123',
