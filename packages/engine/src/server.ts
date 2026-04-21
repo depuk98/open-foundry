@@ -7,7 +7,9 @@
  */
 
 import http from 'node:http';
+import { createLogger } from '@openfoundry/observability';
 
+const logger = createLogger('ontology-engine');
 const PORT = parseInt(process.env['PORT'] ?? '4001', 10);
 
 const server = http.createServer((req, res) => {
@@ -21,10 +23,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('error', (err) => {
-  console.error('Ontology Engine server error:', err);
+  logger.fatal({ err }, 'Ontology Engine server error');
   process.exit(1);
 });
 
 server.listen(PORT, () => {
-  console.info(`Ontology Engine listening on port ${PORT}`);
+  logger.info({ port: PORT }, 'Ontology Engine listening');
 });

@@ -10,6 +10,9 @@ import type { Checkpoint, SourceRecord } from '../connectors/connector.js';
 import type { DatasourceMappingConfig } from '../mapping/mapping-parser.js';
 import type { MappedObject } from '../mapping/record-mapper.js';
 import { RecordMapper } from '../mapping/record-mapper.js';
+import { createLogger } from '@openfoundry/observability';
+
+const logger = createLogger('cdc-consumer');
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -125,9 +128,9 @@ export class CdcConsumer {
         } catch (error) {
           this._stats.recordsFailed++;
           // CQ-17: Log error details instead of silently swallowing
-          console.error(
-            `[CDC] Record processing failed for datasource=${this.datasource} table=${record.table}:`,
-            error instanceof Error ? error.message : String(error),
+          logger.error(
+            { err: error instanceof Error ? error.message : String(error), datasource: this.datasource, table: record.table },
+            'CDC record processing failed',
           );
         }
       }

@@ -7,7 +7,9 @@
  */
 
 import http from 'node:http';
+import { createLogger } from '@openfoundry/observability';
 
+const logger = createLogger('security-service');
 const PORT = parseInt(process.env['PORT'] ?? '4004', 10);
 
 const server = http.createServer((req, res) => {
@@ -21,10 +23,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('error', (err) => {
-  console.error('Security Service server error:', err);
+  logger.fatal({ err }, 'Security Service server error');
   process.exit(1);
 });
 
 server.listen(PORT, () => {
-  console.info(`Security Service listening on port ${PORT}`);
+  logger.info({ port: PORT }, 'Security Service listening');
 });

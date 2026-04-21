@@ -7,7 +7,9 @@
  */
 
 import http from 'node:http';
+import { createLogger } from '@openfoundry/observability';
 
+const logger = createLogger('action-executor');
 const PORT = parseInt(process.env['PORT'] ?? '4002', 10);
 
 const server = http.createServer((req, res) => {
@@ -21,10 +23,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('error', (err) => {
-  console.error('Action Executor server error:', err);
+  logger.fatal({ err }, 'Action Executor server error');
   process.exit(1);
 });
 
 server.listen(PORT, () => {
-  console.info(`Action Executor listening on port ${PORT}`);
+  logger.info({ port: PORT }, 'Action Executor listening');
 });

@@ -17,6 +17,7 @@ import type {
   DateTime,
 } from '@openfoundry/spi';
 import type { ParsedSchema, ActionType } from '@openfoundry/odl';
+import { createLogger } from '@openfoundry/observability';
 import type {
   ActionManifest,
   ActionEffect,
@@ -33,6 +34,8 @@ import type {
   AffectedObject,
   ActionExecutorConfig,
 } from './types.js';
+
+const logger = createLogger('action-executor');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -143,6 +146,7 @@ export class ActionExecutor {
         ctx.consentSubjectId,
         ctx.consentPurpose,
         actor.id,
+        reqCtx.tenantId,
       );
       if (!consentDecision.allowed) {
         return failResult(actionId, [
@@ -288,11 +292,11 @@ export class ActionExecutor {
                 }
                 await compensatingTxn.commit();
               } catch (innerErr) {
-                console.error(`[ActionExecutor] Compensating transaction rollback for action ${actionId}:`, innerErr);
+                logger.error({ err: innerErr, actionId }, 'Compensating transaction rollback failed');
                 await compensatingTxn.rollback();
               }
             } catch (outerErr) {
-              console.error(`[ActionExecutor] Failed to begin compensating transaction for action ${actionId}:`, outerErr);
+              logger.error({ err: outerErr, actionId }, 'Failed to begin compensating transaction');
             }
             return failResult(actionId, [
               {
@@ -372,7 +376,7 @@ export class ActionExecutor {
         }
       }
     } catch (postCommitErr) {
-      console.error(`[ActionExecutor] Post-commit audit/event publishing failed for action ${actionId}:`, postCommitErr);
+      logger.error({ err: postCommitErr, actionId }, 'Post-commit audit/event publishing failed');
       // Do not return failure — the transaction already committed successfully.
     }
 
