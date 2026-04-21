@@ -36,7 +36,7 @@ const tracer = getTracer("security", "consent");
  * Usage:
  * ```ts
  * const consent = new ConsentService(store, authz, { directCareExemptionEnabled: true });
- * const decision = await consent.checkConsent("patient:123", DataPurpose.DIRECT_CARE, "user:dr-smith");
+ * const decision = await consent.checkConsent("patient:123", DataPurpose.DIRECT_CARE, "user:dr-smith", "tenant-1");
  * ```
  */
 export class ConsentService implements ConsentManager {
@@ -69,24 +69,22 @@ export class ConsentService implements ConsentManager {
     subjectId: string,
     purpose: DataPurpose,
     requestor: string,
+    tenantId?: string,
   ): Promise<ConsentDecision> {
     return withSpan(tracer, "consent.check", {}, async () => {
       // 1. Direct care exemption (Section 7.3.3)
       if (this.config.directCareExemptionEnabled && purpose === DataPurposeEnum.DIRECT_CARE) {
-        const decision = await this.evaluateDirectCareExemption(subjectId, requestor);
+        const decision = await this.evaluateDirectCareExemption(subjectId, requestor, tenantId);
         if (decision) {
           return decision;
         }
       }
 
       // 2. Look up explicit consent record
-      // Records are stored in insertion order; the last matching record is the
-      // most recent. We reverse so that records with identical timestamps
-      // preserve insertion order (newest first).
-      // TODO: This relies on insertion order from the store. For Postgres-backed
-      // stores, add an explicit ORDER BY on a timestamp/sequence column to
-      // guarantee newest-first ordering regardless of store implementation.
-      const records = await this.store.getBySubject(subjectId);
+      // Records are returned in insertion order (MemoryConsentStore: array order;
+      // PostgresConsentStore: ORDER BY seq ASC). We reverse so the last matching
+      // record is the most recent decision.
+      const records = await this.store.getBySubject(subjectId, tenantId);
       const matching = records
         .filter(r => r.purpose === purpose)
         .reverse();
@@ -117,6 +115,7 @@ export class ConsentService implements ConsentManager {
     purpose: DataPurpose,
     decision: "GRANT" | "DENY",
     evidence?: string,
+    tenantId?: string,
   ): Promise<void> {
     return withSpan(tracer, "consent.record", {}, async () => {
       const record: ConsentRecord = {
@@ -126,7 +125,7 @@ export class ConsentService implements ConsentManager {
         grantedAt: new Date().toISOString(),
         evidence,
       };
-      await this.store.put(record);
+      await this.store.put(record, tenantId);
     });
   }
 
@@ -137,12 +136,13 @@ export class ConsentService implements ConsentManager {
     subjectIds: string[],
     purpose: DataPurpose,
     requestor: string,
+    tenantId?: string,
   ): Promise<Map<string, ConsentDecision>> {
     return withSpan(tracer, "consent.checkBatch", {}, async () => {
       const results = new Map<string, ConsentDecision>();
       await Promise.all(
         subjectIds.map(async (subjectId) => {
-          const decision = await this.checkConsent(subjectId, purpose, requestor);
+          const decision = await this.checkConsent(subjectId, purpose, requestor, tenantId);
           results.set(subjectId, decision);
         }),
       );
@@ -160,9 +160,10 @@ export class ConsentService implements ConsentManager {
     subjectId: string,
     purpose: DataPurpose,
     reason: string,
+    tenantId?: string,
   ): Promise<RevocationResult> {
     return withSpan(tracer, "consent.revoke", {}, async () => {
-      await this.recordConsent(subjectId, purpose, "DENY", reason);
+      await this.recordConsent(subjectId, purpose, "DENY", reason, tenantId);
       return {
         subjectId,
         purpose,
@@ -176,9 +177,9 @@ export class ConsentService implements ConsentManager {
   /**
    * Retrieve all consent records for a subject.
    */
-  async getConsentRecord(subjectId: string): Promise<ConsentRecord[]> {
+  async getConsentRecord(subjectId: string, tenantId?: string): Promise<ConsentRecord[]> {
     return withSpan(tracer, "consent.getRecord", {}, async () => {
-      return this.store.getBySubject(subjectId);
+      return this.store.getBySubject(subjectId, tenantId);
     });
   }
 
@@ -198,6 +199,7 @@ export class ConsentService implements ConsentManager {
    * @param getSubjectId - Extracts the subject ID from an item
    * @param purpose - The data purpose for this query
    * @param requestor - The requesting user identifier
+   * @param tenantId - Optional tenant scope for multi-tenant deployments
    * @returns Filtered items and consent-aware totalCount
    */
   async filterList<T>(
@@ -205,13 +207,14 @@ export class ConsentService implements ConsentManager {
     getSubjectId: (item: T) => string,
     purpose: DataPurpose,
     requestor: string,
+    tenantId?: string,
   ): Promise<ConsentFilterResult<T>> {
     return withSpan(tracer, "consent.filterList", {}, async () => {
       // Batch consent check for all items
       const results = await Promise.all(
         items.map(async (item) => {
           const subjectId = getSubjectId(item);
-          const decision = await this.checkConsent(subjectId, purpose, requestor);
+          const decision = await this.checkConsent(subjectId, purpose, requestor, tenantId);
           return { item, allowed: decision.allowed };
         }),
       );
@@ -237,6 +240,7 @@ export class ConsentService implements ConsentManager {
    * @param subjectId - The data subject's ID
    * @param purpose - The data purpose
    * @param requestor - The requesting user
+   * @param tenantId - Optional tenant scope for multi-tenant deployments
    * @returns The object with consent restriction status
    */
   async checkSingleObject<T>(
@@ -244,9 +248,10 @@ export class ConsentService implements ConsentManager {
     subjectId: string,
     purpose: DataPurpose,
     requestor: string,
+    tenantId?: string,
   ): Promise<SingleObjectConsentResult<T>> {
     return withSpan(tracer, "consent.checkSingle", {}, async () => {
-      const decision = await this.checkConsent(subjectId, purpose, requestor);
+      const decision = await this.checkConsent(subjectId, purpose, requestor, tenantId);
       return {
         data: item,
         _consentRestricted: !decision.allowed,
@@ -267,15 +272,17 @@ export class ConsentService implements ConsentManager {
    * @param subjectId - The data subject's ID
    * @param purpose - The data purpose for this action
    * @param requestor - The requesting user
+   * @param tenantId - Optional tenant scope for multi-tenant deployments
    * @throws ConsentError with code CONSENT_DENIED if consent is denied
    */
   async guardAction(
     subjectId: string,
     purpose: DataPurpose,
     requestor: string,
+    tenantId?: string,
   ): Promise<void> {
     return withSpan(tracer, "consent.guardAction", {}, async () => {
-      const decision = await this.checkConsent(subjectId, purpose, requestor);
+      const decision = await this.checkConsent(subjectId, purpose, requestor, tenantId);
       if (!decision.allowed) {
         throw new ConsentError(
           "CONSENT_DENIED",
@@ -302,6 +309,7 @@ export class ConsentService implements ConsentManager {
   private async evaluateDirectCareExemption(
     subjectId: string,
     requestor: string,
+    tenantId?: string,
   ): Promise<ConsentDecision | null> {
     const relation = this.config.careRelation ?? "viewer";
     const subjectType = this.config.subjectType ?? "patient";
@@ -322,7 +330,7 @@ export class ConsentService implements ConsentManager {
     }
 
     // Check for National Data Opt-Out override
-    const hasOptOut = await this.store.hasOptOut(subjectId);
+    const hasOptOut = await this.store.hasOptOut(subjectId, tenantId);
     if (hasOptOut) {
       return null;
     }

@@ -35,11 +35,11 @@ export interface ConsentRecord {
 }
 
 export interface ConsentManager {
-  checkConsent(subjectId: string, purpose: DataPurpose, requestor: string): Promise<ConsentDecision>;
-  checkConsentBatch(subjectIds: string[], purpose: DataPurpose, requestor: string): Promise<Map<string, ConsentDecision>>;
-  recordConsent(subjectId: string, purpose: DataPurpose, decision: 'GRANT' | 'DENY', evidence?: string): Promise<void>;
-  revokeConsent(subjectId: string, purpose: DataPurpose, reason: string): Promise<RevocationResult>;
-  getConsentRecord(subjectId: string): Promise<ConsentRecord[]>;
+  checkConsent(subjectId: string, purpose: DataPurpose, requestor: string, tenantId?: string): Promise<ConsentDecision>;
+  checkConsentBatch(subjectIds: string[], purpose: DataPurpose, requestor: string, tenantId?: string): Promise<Map<string, ConsentDecision>>;
+  recordConsent(subjectId: string, purpose: DataPurpose, decision: 'GRANT' | 'DENY', evidence?: string, tenantId?: string): Promise<void>;
+  revokeConsent(subjectId: string, purpose: DataPurpose, reason: string, tenantId?: string): Promise<RevocationResult>;
+  getConsentRecord(subjectId: string, tenantId?: string): Promise<ConsentRecord[]>;
 }
 
 /** Result of a consent revocation (Section 7.3.4). */

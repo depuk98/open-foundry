@@ -73,11 +73,11 @@ export class ConsentError extends Error {
  */
 export interface ConsentStore {
   /** Store a consent record. */
-  put(record: import("@openfoundry/spi").ConsentRecord): Promise<void>;
+  put(record: import("@openfoundry/spi").ConsentRecord, tenantId?: string): Promise<void>;
   /** Retrieve all consent records for a subject. */
-  getBySubject(subjectId: string): Promise<import("@openfoundry/spi").ConsentRecord[]>;
+  getBySubject(subjectId: string, tenantId?: string): Promise<import("@openfoundry/spi").ConsentRecord[]>;
   /** Check if a subject has opted out (national data opt-out). */
-  hasOptOut(subjectId: string): Promise<boolean>;
+  hasOptOut(subjectId: string, tenantId?: string): Promise<boolean>;
   /** Record a national data opt-out for a subject. */
-  setOptOut(subjectId: string, optedOut: boolean): Promise<void>;
+  setOptOut(subjectId: string, optedOut: boolean, tenantId?: string): Promise<void>;
 }
