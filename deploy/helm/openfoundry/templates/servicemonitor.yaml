@@ -1,6 +1,5 @@
 {{/*
-NOTE: Requires prom-client middleware exposing /metrics on the api-gateway.
-Enable only after adding Prometheus exposition to the application.
+Scrapes prom-client metrics from GET /metrics on the api-gateway.
 See values.yaml monitoring.serviceMonitor.enabled (default: false).
 */}}
 {{- if .Values.monitoring.serviceMonitor.enabled }}

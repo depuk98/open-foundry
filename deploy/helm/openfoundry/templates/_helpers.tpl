@@ -33,6 +33,7 @@ Common labels.
 */}}
 {{- define "openfoundry.labels" -}}
 helm.sh/chart: {{ include "openfoundry.chart" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: openfoundry
 {{- end }}

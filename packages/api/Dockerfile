@@ -28,6 +28,8 @@ COPY --from=builder /app/domain-packs/ domain-packs/
 
 RUN pnpm install --frozen-lockfile --prod
 
+USER node
+
 EXPOSE 4000
 
 CMD ["node", "packages/api/dist/server.js"]

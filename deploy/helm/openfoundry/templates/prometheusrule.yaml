@@ -1,9 +1,8 @@
 {{/*
-NOTE: HighErrorRate, HighLatency, and StorageUnhealthy alerts reference
-application-level metrics (http_requests_total, http_request_duration_seconds_bucket,
-openfoundry_storage_healthy) that require prom-client middleware on the api-gateway.
-PodRestarting uses kube-state-metrics which is available out of the box.
-Enable only after adding Prometheus exposition to the application.
+HighErrorRate, HighLatency, and StorageUnhealthy alerts reference application-level
+metrics (http_requests_total, http_request_duration_seconds_bucket,
+openfoundry_storage_healthy) exposed by prom-client on GET /metrics.
+PodRestarting uses kube-state-metrics (available out of the box).
 See values.yaml monitoring.prometheusRules.enabled (default: false).
 */}}
 {{- if .Values.monitoring.prometheusRules.enabled }}

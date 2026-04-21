@@ -24,6 +24,8 @@ COPY --from=builder /app/domain-packs/ domain-packs/
 
 RUN pnpm install --frozen-lockfile --prod
 
+USER node
+
 EXPOSE 4004
 
 CMD ["node", "packages/security/dist/server.js"]

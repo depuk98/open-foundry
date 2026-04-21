@@ -25,9 +25,15 @@ storage:
       password: password
 
 # -- Event bus (Kafka-compatible)
+# Set bootstrapServers to enable persistent event streaming (e.g. "redpanda:9092").
+# Leave empty for in-memory events (single-pod only).
 eventBus:
   redpanda:
-    bootstrapServers: redpanda:9092
+    bootstrapServers: ""
+
+# -- Redis (distributed rate limiting)
+redis:
+  url: ""
 
 # -- Authentication / OIDC
 auth:

@@ -116,6 +116,20 @@ services:
     networks:
       - foundry
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - foundry
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.104.0
     ports:
@@ -165,6 +179,7 @@ services:
       OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:-}
       CEL_EVALUATOR_URL: "cel-evaluator:50051"
       REDPANDA_BROKERS: "redpanda:9092"
+      REDIS_URL: "redis://redis:6379"
       KEYCLOAK_URL: "http://keycloak:8080/auth"
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-openfoundry}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
@@ -177,6 +192,8 @@ services:
       cel-evaluator:
         condition: service_started
       redpanda:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/.well-known/apollo/server-health"]
@@ -298,6 +315,7 @@ services:
 volumes:
   pg_data:
   redpanda_data:
+  redis_data:
 
 networks:
   foundry:
