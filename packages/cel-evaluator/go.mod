@@ -6,6 +6,7 @@ toolchain go1.24.13
 
 require (
 	github.com/google/cel-go v0.27.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 )

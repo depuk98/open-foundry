@@ -105,6 +105,21 @@ Domain Packs are composable schema and configuration modules that specialise the
 
 Each pack includes ODL schemas, action manifests, OpenFGA permission models, and optional sync connectors.
 
+### External Domain Packs
+
+Domain packs can live outside the monorepo and be loaded at runtime via the `DOMAIN_PACKS_EXTRA_DIRS` environment variable or the `extraDirs` parameter to `loadDomainPacks()`.
+
+```bash
+# Load packs from one or more external directories (colon-separated on POSIX, semicolon on Windows)
+export DOMAIN_PACKS_EXTRA_DIRS="/opt/my-org/domain-packs:/opt/partner/custom-pack"
+```
+
+Each entry may be:
+- A **parent directory** containing pack subdirectories (scanned like `domain-packs/`)
+- A **direct path** to a single pack directory (must contain `pack.yaml`)
+
+Primary (monorepo) packs take precedence on name conflicts. Malformed or missing packs are skipped with a warning — they do not abort loading of other packs.
+
 ### NHS Acute Pilot
 
 The NHS Acute pack is the primary vertical slice, targeting patient flow through wards, beds, and consultants at an acute trust:

@@ -5,8 +5,10 @@
  *   Validate -> Authorise -> Consent -> Preconditions -> Execute -> Side-effects -> Audit -> Emit
  *
  * Effects execute in manifest order within a single SPI transaction.
- * CEL expressions are evaluated against an immutable context captured before
- * the first effect. If any effect fails, the transaction is rolled back.
+ * CEL expressions are evaluated against a context captured before the first
+ * effect. Created objects are injected back into this context so subsequent
+ * effects can reference them (e.g. createObject → createLink).
+ * If any effect fails, the transaction is rolled back.
  */
 
 import type {
@@ -200,8 +202,10 @@ export class ActionExecutor {
     // ------------------------------------------------------------------
     // Step 5: EXECUTE — apply effects in manifest order, single txn
     // ------------------------------------------------------------------
-    // Capture immutable context BEFORE first effect (spec Section 5.3)
-    const immutableContext: Record<string, unknown> = { ...resolvedVariables };
+    // Capture effect context from resolved variables (spec Section 5.3).
+    // Created objects are injected back into this context so subsequent
+    // effects (e.g. createLink) can reference them by camelCase type name.
+    const effectContext: Record<string, unknown> = { ...resolvedVariables };
     const affectedObjects: AffectedObject[] = [];
     const beforeStates: Map<string, Record<string, unknown>> = new Map();
     const afterStates: Map<string, Record<string, unknown>> = new Map();
@@ -212,7 +216,7 @@ export class ActionExecutor {
       for (const effect of manifest.effects) {
         await this.executeEffect(
           effect,
-          immutableContext,
+          effectContext,
           txn,
           reqCtx,
           schema,
@@ -241,7 +245,7 @@ export class ActionExecutor {
           se.name,
           se.type,
           se.config,
-          immutableContext,
+          effectContext,
           se.retries,
         );
 
@@ -627,6 +631,14 @@ export class ActionExecutor {
     }
 
     const created = await txn.createObject(effect.objectType, properties);
+
+    // Inject created object into context so subsequent effects (e.g. createLink)
+    // can reference it. Key is the camelCase form of the objectType name:
+    //   "CorpusEntry" → "corpusEntry", "Instance" → "instance"
+    const contextKey = effect.objectType[0]!.toLowerCase() + effect.objectType.slice(1);
+    if (!(contextKey in context)) {
+      context[contextKey] = created;
+    }
 
     const objKey = `${effect.objectType}:${created._id}`;
     afterStates.set(objKey, { ...created });

@@ -524,6 +524,121 @@ func TestPreconditionFromAdmitPatientAction(t *testing.T) {
 	}
 }
 
+func TestValidateJsonSchemaURIPassthrough(t *testing.T) {
+	eval, err := New()
+	if err != nil {
+		t.Fatalf("creating evaluator: %v", err)
+	}
+
+	// URI-based schemas are accepted without validation (no registry yet)
+	params := mustStructVal(t, map[string]any{
+		"value":       map[string]any{"temperature": 36.6},
+		"valueSchema": "urn:json-schema:my-domain/temperature-v1",
+	})
+	vars := map[string]*structpb.Value{
+		"params": params,
+	}
+	te := typeEnv([2]string{"params", "map"})
+
+	result, err := eval.Evaluate(
+		`validateJsonSchema(params.value, params.valueSchema)`,
+		vars, te,
+	)
+	if err != nil {
+		t.Fatalf("evaluate validateJsonSchema (URI): %v", err)
+	}
+	if !result.GetBoolValue() {
+		t.Errorf("expected true for URI-based schema (passthrough), got %v", result)
+	}
+}
+
+func TestValidateJsonSchemaInlineValid(t *testing.T) {
+	eval, err := New()
+	if err != nil {
+		t.Fatalf("creating evaluator: %v", err)
+	}
+
+	// Inline JSON Schema: data conforms → should return true
+	schema := `{"type":"object","properties":{"temperature":{"type":"number"}},"required":["temperature"]}`
+	params := mustStructVal(t, map[string]any{
+		"value":       map[string]any{"temperature": 36.6},
+		"valueSchema": schema,
+	})
+	vars := map[string]*structpb.Value{
+		"params": params,
+	}
+	te := typeEnv([2]string{"params", "map"})
+
+	result, err := eval.Evaluate(
+		`validateJsonSchema(params.value, params.valueSchema)`,
+		vars, te,
+	)
+	if err != nil {
+		t.Fatalf("evaluate validateJsonSchema (inline valid): %v", err)
+	}
+	if !result.GetBoolValue() {
+		t.Errorf("expected true for conforming data, got %v", result)
+	}
+}
+
+func TestValidateJsonSchemaInlineInvalid(t *testing.T) {
+	eval, err := New()
+	if err != nil {
+		t.Fatalf("creating evaluator: %v", err)
+	}
+
+	// Inline JSON Schema: data does NOT conform → should return false
+	schema := `{"type":"object","properties":{"temperature":{"type":"number"}},"required":["temperature"]}`
+	params := mustStructVal(t, map[string]any{
+		"value":       map[string]any{"wrong_field": "not a number"},
+		"valueSchema": schema,
+	})
+	vars := map[string]*structpb.Value{
+		"params": params,
+	}
+	te := typeEnv([2]string{"params", "map"})
+
+	result, err := eval.Evaluate(
+		`validateJsonSchema(params.value, params.valueSchema)`,
+		vars, te,
+	)
+	if err != nil {
+		t.Fatalf("evaluate validateJsonSchema (inline invalid): %v", err)
+	}
+	if result.GetBoolValue() {
+		t.Errorf("expected false for non-conforming data, got %v", result)
+	}
+}
+
+func TestValidateJsonSchemaInlineTypeMismatch(t *testing.T) {
+	eval, err := New()
+	if err != nil {
+		t.Fatalf("creating evaluator: %v", err)
+	}
+
+	// Schema requires number, data has string
+	schema := `{"type":"object","properties":{"temperature":{"type":"number"}},"required":["temperature"]}`
+	params := mustStructVal(t, map[string]any{
+		"value":       map[string]any{"temperature": "not-a-number"},
+		"valueSchema": schema,
+	})
+	vars := map[string]*structpb.Value{
+		"params": params,
+	}
+	te := typeEnv([2]string{"params", "map"})
+
+	result, err := eval.Evaluate(
+		`validateJsonSchema(params.value, params.valueSchema)`,
+		vars, te,
+	)
+	if err != nil {
+		t.Fatalf("evaluate validateJsonSchema (type mismatch): %v", err)
+	}
+	if result.GetBoolValue() {
+		t.Errorf("expected false for type mismatch, got %v", result)
+	}
+}
+
 func TestParseISO8601Duration(t *testing.T) {
 	tests := []struct {
 		input    string

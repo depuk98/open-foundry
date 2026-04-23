@@ -3,7 +3,9 @@
 package evaluator
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 
 	pb "github.com/openfoundry/cel-evaluator/proto"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -229,6 +232,19 @@ func (l *openFoundryLib) CompileOptions() []cel.EnvOption {
 				cel.UnaryBinding(durationISO8601Impl),
 			),
 		),
+
+		// validateJsonSchema(data, schemaUri) -> bool
+		// Validates a value against a JSON Schema identified by URI.
+		// STUB: always returns true until a schema registry is available.
+		// Full implementation requires resolving schemaUri to a JSON Schema
+		// document and validating data against it.
+		cel.Function("validateJsonSchema",
+			cel.Overload("validateJsonSchema_dyn_string",
+				[]*cel.Type{cel.DynType, cel.StringType},
+				cel.BoolType,
+				cel.BinaryBinding(validateJsonSchemaImpl),
+			),
+		),
 	}
 }
 
@@ -378,6 +394,66 @@ func durationISO8601Impl(arg ref.Val) ref.Val {
 		return types.Duration{Duration: goDur}
 	}
 	return types.Duration{Duration: d}
+}
+
+// validateJsonSchemaImpl validates a CEL value against a JSON Schema.
+//
+// When schemaUri is a JSON object string (starts with '{'), it is parsed as an
+// inline JSON Schema and used directly for validation. When schemaUri is a URI
+// (e.g. "urn:json-schema:my-domain/temperature-v1"), the function logs a warning and
+// returns true because no schema registry is available yet (deferred post-MVP).
+//
+// This provides real typed-envelope enforcement for inline schemas while keeping
+// backward compatibility for URI-based references.
+func validateJsonSchemaImpl(data, schemaUri ref.Val) ref.Val {
+	uriStr, ok := schemaUri.(types.String)
+	if !ok {
+		return types.NewErr("validateJsonSchema: schemaUri must be a string")
+	}
+	schema := strings.TrimSpace(string(uriStr))
+
+	// Inline JSON Schema: parse and validate
+	if strings.HasPrefix(schema, "{") {
+		// Convert the CEL data value to a Go native value for JSON marshalling
+		native := data.Value()
+		jsonBytes, err := json.Marshal(native)
+		if err != nil {
+			return types.NewErr("validateJsonSchema: failed to marshal data to JSON: %v", err)
+		}
+
+		// Unmarshal back to interface{} so jsonschema sees standard Go types
+		var dataVal any
+		if err := json.Unmarshal(jsonBytes, &dataVal); err != nil {
+			return types.NewErr("validateJsonSchema: failed to unmarshal data JSON: %v", err)
+		}
+
+		// Parse the inline schema into a Go value
+		var schemaVal any
+		if err := json.Unmarshal([]byte(schema), &schemaVal); err != nil {
+			return types.NewErr("validateJsonSchema: invalid JSON Schema: %v", err)
+		}
+
+		// Compile the inline schema
+		compiler := jsonschema.NewCompiler()
+		if err := compiler.AddResource("inline.json", schemaVal); err != nil {
+			return types.NewErr("validateJsonSchema: invalid JSON Schema: %v", err)
+		}
+		sch, err := compiler.Compile("inline.json")
+		if err != nil {
+			return types.NewErr("validateJsonSchema: failed to compile JSON Schema: %v", err)
+		}
+
+		// Validate
+		if err := sch.Validate(dataVal); err != nil {
+			return types.Bool(false)
+		}
+		return types.Bool(true)
+	}
+
+	// URI-based schema: no registry available yet (deferred post-MVP).
+	// Log a warning and return true to avoid blocking callers.
+	log.Printf("validateJsonSchema: URI-based schema %q accepted without validation (no schema registry)", schema)
+	return types.Bool(true)
 }
 
 // parseISO8601Duration parses a subset of ISO 8601 durations used in the

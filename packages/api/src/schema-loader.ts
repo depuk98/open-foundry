@@ -6,12 +6,16 @@
  * (for the engine/GraphQL layer) and an OntologySchema (for the SPI storage layer).
  *
  * Configuration via environment variables:
- *   DOMAIN_PACKS_DIR  — path to domain-packs directory (default: auto-detected from monorepo)
- *   DOMAIN_PACKS      — comma-separated pack names to load (default: all found; 'core' always included)
+ *   DOMAIN_PACKS_DIR        — path to primary domain-packs directory (default: auto-detected from monorepo)
+ *   DOMAIN_PACKS            — comma-separated pack names to load (default: all found; 'core' always included)
+ *   DOMAIN_PACKS_EXTRA_DIRS — path-separated additional directories to scan for packs
+ *                             (colon on POSIX, semicolon on Windows).
+ *                             Each entry may be a directory containing pack subdirectories,
+ *                             or a direct path to a single pack directory (containing pack.yaml).
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { parseOdl } from '@openfoundry/odl';
@@ -94,6 +98,65 @@ function discoverPacks(packsDir: string): string[] {
     .map(d => d.name);
 }
 
+/**
+ * Resolve additional pack directories from DOMAIN_PACKS_EXTRA_DIRS env var.
+ * Uses the platform path delimiter (colon on POSIX, semicolon on Windows).
+ * Returns empty array if unset.
+ */
+function resolveExtraDirs(): string[] {
+  const raw = process.env['DOMAIN_PACKS_EXTRA_DIRS'];
+  if (!raw) return [];
+  return raw.split(delimiter).map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * Discover packs from an external filesystem path.
+ *
+ * Smart detection: if the path itself contains pack.yaml, treat it as a single
+ * pack directory (pack name read from manifest). Otherwise scan for subdirectories
+ * containing pack.yaml — same behaviour as the primary domain-packs directory.
+ *
+ * @returns Map of pack name (from manifest) → absolute pack directory path.
+ */
+function discoverPacksFromPath(dir: string): Map<string, string> {
+  const result = new Map<string, string>();
+
+  if (!existsSync(dir)) {
+    logger.warn(`Schema loader: extra packs path '${dir}' does not exist, skipping`);
+    return result;
+  }
+
+  // If this directory IS a pack, use it directly
+  if (existsSync(resolve(dir, 'pack.yaml'))) {
+    try {
+      const manifest = readManifest(dir);
+      result.set(manifest.name, dir);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Schema loader: skipping pack at ${dir}: ${msg}`);
+    }
+    return result;
+  }
+
+  // Otherwise scan subdirectories
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      const packDir = resolve(dir, entry.name);
+      if (existsSync(resolve(packDir, 'pack.yaml'))) {
+        try {
+          const manifest = readManifest(packDir);
+          result.set(manifest.name, packDir);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn(`Schema loader: skipping pack at ${packDir}: ${msg}`);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Pack loading
 // ---------------------------------------------------------------------------
@@ -105,10 +168,14 @@ function readManifest(packDir: string): PackManifest {
   const yamlPath = resolve(packDir, 'pack.yaml');
   const content = readFileSync(yamlPath, 'utf-8');
   const parsed = parseYaml(content);
-  if (!parsed || typeof parsed !== 'object') {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`Invalid pack.yaml at ${yamlPath}: expected an object`);
   }
-  return parsed as unknown as PackManifest;
+  const manifest = parsed as Record<string, unknown>;
+  if (typeof manifest['name'] !== 'string' || !manifest['name']) {
+    throw new Error(`Invalid pack.yaml at ${yamlPath}: missing required 'name' field`);
+  }
+  return manifest as unknown as PackManifest;
 }
 
 /**
@@ -414,27 +481,60 @@ function toOntologySchema(parsed: ParsedSchema): OntologySchema {
 /**
  * Load domain pack schemas from the filesystem.
  *
- * @param packsDir - Optional override for domain-packs directory
- * @param packNames - Optional list of pack names. If omitted, loads all packs found.
+ * @param packsDir  - Optional override for primary domain-packs directory.
+ * @param packNames - Optional list of pack names to load. If omitted, loads all discovered packs.
  *                    'core' is always loaded first regardless.
+ * @param extraDirs - Optional additional directories to scan for packs.
+ *                    If omitted, reads DOMAIN_PACKS_EXTRA_DIRS env var (colon-separated).
+ *                    Each entry may be a parent directory containing pack subdirectories,
+ *                    or a direct path to a single pack directory (containing pack.yaml).
  */
 export async function loadDomainPacks(
   packsDir?: string,
   packNames?: string[],
+  extraDirs?: string[],
 ): Promise<LoadedSchema> {
-  const dir = packsDir ?? resolvePacksDir();
+  const primaryDir = packsDir ?? resolvePacksDir();
+  const resolvedExtraDirs = extraDirs ?? resolveExtraDirs();
+
+  // Build a map of packName → absolute packDir, primary directory first
+  const packMap = new Map<string, string>();
+  for (const name of discoverPacks(primaryDir)) {
+    packMap.set(name, resolve(primaryDir, name));
+  }
+
+  // Merge packs from extra directories (primary wins on conflicts)
+  for (const extraDir of resolvedExtraDirs) {
+    const discovered = discoverPacksFromPath(extraDir);
+    for (const [name, packDir] of discovered) {
+      if (packMap.has(name)) {
+        logger.warn(
+          `Schema loader: pack '${name}' from ${packDir} skipped — ` +
+          `already discovered at ${packMap.get(name)}`,
+        );
+      } else {
+        packMap.set(name, packDir);
+        logger.info(`Schema loader: discovered external pack '${name}' at ${packDir}`);
+      }
+    }
+  }
 
   // Determine which packs to load
   let names: string[];
   if (packNames && packNames.length > 0) {
-    names = packNames;
+    names = packNames.filter(n => packMap.has(n));
+    for (const n of packNames) {
+      if (!packMap.has(n)) {
+        logger.warn(`Schema loader: requested pack '${n}' not found in any pack directory`);
+      }
+    }
   } else {
-    names = discoverPacks(dir);
+    names = [...packMap.keys()];
   }
 
   // Ensure 'core' is loaded first
   names = names.filter(n => n !== 'core');
-  if (existsSync(resolve(dir, 'core', 'pack.yaml'))) {
+  if (packMap.has('core')) {
     names = ['core', ...names];
   }
 
@@ -445,7 +545,7 @@ export async function loadDomainPacks(
   const fieldPermissions: FieldPermissionConfig[] = [];
 
   for (const name of names) {
-    const packDir = resolve(dir, name);
+    const packDir = packMap.get(name)!;
     if (!existsSync(resolve(packDir, 'pack.yaml'))) {
       logger.warn(`Schema loader: pack '${name}' not found at ${packDir}, skipping`);
       continue;
