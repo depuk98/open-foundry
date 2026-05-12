@@ -45,6 +45,18 @@ services:
     networks:
       - foundry
 
+  openfga-migrate:
+    image: openfga/openfga:v1.8.2
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: "postgres://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}?sslmode=disable"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    networks:
+      - foundry
+
   openfga:
     image: openfga/openfga:v1.8.2
     command: run
@@ -56,8 +68,8 @@ services:
       OPENFGA_DATASTORE_URI: "postgres://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}?sslmode=disable"
       OPENFGA_PLAYGROUND_ENABLED: "true"
     depends_on:
-      postgresql:
-        condition: service_healthy
+      openfga-migrate:
+        condition: service_completed_successfully
     # OpenFGA uses a distroless image (no shell/wget/curl), so in-container
     # healthchecks are not possible.  Dependents use service_started.
     networks:
@@ -81,7 +93,7 @@ services:
       postgresql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q '200 OK'"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /auth/realms/master HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q '200 OK'"]
       interval: 10s
       timeout: 5s
       retries: 15
