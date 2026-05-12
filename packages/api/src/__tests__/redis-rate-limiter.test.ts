@@ -153,7 +153,7 @@ describe('RedisRateLimiter', () => {
 
     await prefixed.check({ tenantId: 't', principalId: 'u' });
 
-    const evalCall = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[0];
+    const evalCall = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[0]!;
     // KEYS[1] is the 3rd argument (after script, numkeys)
     expect(evalCall[2]).toContain('myprefix:');
   });
@@ -195,10 +195,10 @@ describe('RedisRateLimiter', () => {
     await limiter.check({ tenantId: 't', principalId: 'u' });
 
     // eval args: script, numkeys, key, now, windowMs, maxRequests, member
-    const firstCall = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[0];
+    const firstCall = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[0]!;
     // ARGV[3] = maxRequests is the 6th positional arg (index 5)
     expect(firstCall[5]).toBe('5'); // tenant maxRequests
-    const secondCall = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[1];
+    const secondCall = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[1]!;
     expect(secondCall[5]).toBe('3'); // principal maxRequests
   });
 });

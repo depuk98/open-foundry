@@ -14,16 +14,16 @@ import type { CloudEvent } from '@openfoundry/spi';
 
 // Mock kafkajs before importing RedpandaEventBus
 const mockProducer = {
-  connect: vi.fn(async () => {}),
-  disconnect: vi.fn(async () => {}),
-  send: vi.fn(async () => {}),
+  connect: vi.fn<() => Promise<void>>(async () => {}),
+  disconnect: vi.fn<() => Promise<void>>(async () => {}),
+  send: vi.fn<(args: any) => Promise<void>>(async () => {}),
 };
 
 const mockConsumer = {
-  connect: vi.fn(async () => {}),
-  disconnect: vi.fn(async () => {}),
-  subscribe: vi.fn(async () => {}),
-  run: vi.fn(async () => {}),
+  connect: vi.fn<() => Promise<void>>(async () => {}),
+  disconnect: vi.fn<() => Promise<void>>(async () => {}),
+  subscribe: vi.fn<() => Promise<void>>(async () => {}),
+  run: vi.fn<(args: any) => Promise<void>>(async () => {}),
 };
 
 // Track Kafka constructor calls for config default assertions
@@ -54,7 +54,7 @@ vi.mock('kafkajs', () => {
 
 // Must import after mock setup
 const { RedpandaEventBus } = await import('../events/redpanda-event-bus.js');
-const { logger: mockLogger } = await import('../logger.js') as { logger: Record<string, ReturnType<typeof vi.fn>> };
+const { logger: mockLogger } = await import('../logger.js') as unknown as { logger: Record<string, ReturnType<typeof vi.fn>> };
 
 function makeEvent(overrides?: Partial<CloudEvent>): CloudEvent {
   return {
@@ -154,7 +154,7 @@ describe('RedpandaEventBus', () => {
 
       await bus.publish(event);
 
-      const sentMessage = mockProducer.send.mock.calls[0][0].messages[0];
+      const sentMessage = mockProducer.send.mock.calls[0]![0].messages[0];
       expect(sentMessage.key).toBeNull();
     });
   });
@@ -167,7 +167,7 @@ describe('RedpandaEventBus', () => {
       await bus.connect();
 
       // Simulate a message arriving via the eachMessage callback
-      const eachMessage = mockConsumer.run.mock.calls[0][0].eachMessage;
+      const eachMessage = mockConsumer.run.mock.calls[0]![0].eachMessage;
       const event = makeEvent();
       await eachMessage({
         message: { value: Buffer.from(JSON.stringify(event)) },
@@ -184,7 +184,7 @@ describe('RedpandaEventBus', () => {
 
       await bus.connect();
 
-      const eachMessage = mockConsumer.run.mock.calls[0][0].eachMessage;
+      const eachMessage = mockConsumer.run.mock.calls[0]![0].eachMessage;
       const event = makeEvent();
       await eachMessage({
         message: { value: Buffer.from(JSON.stringify(event)) },
@@ -200,7 +200,7 @@ describe('RedpandaEventBus', () => {
 
       await bus.connect();
 
-      const eachMessage = mockConsumer.run.mock.calls[0][0].eachMessage;
+      const eachMessage = mockConsumer.run.mock.calls[0]![0].eachMessage;
       const event = makeEvent();
 
       await eachMessage({ message: { value: Buffer.from(JSON.stringify(event)) } });
@@ -222,7 +222,7 @@ describe('RedpandaEventBus', () => {
 
       await bus.connect();
 
-      const eachMessage = mockConsumer.run.mock.calls[0][0].eachMessage;
+      const eachMessage = mockConsumer.run.mock.calls[0]![0].eachMessage;
       await eachMessage({
         message: { value: Buffer.from(JSON.stringify(makeEvent())) },
       });
@@ -241,7 +241,7 @@ describe('RedpandaEventBus', () => {
 
       await bus.connect();
 
-      const eachMessage = mockConsumer.run.mock.calls[0][0].eachMessage;
+      const eachMessage = mockConsumer.run.mock.calls[0]![0].eachMessage;
       await eachMessage({ message: { value: null } });
 
       expect(handler).not.toHaveBeenCalled();
@@ -253,7 +253,7 @@ describe('RedpandaEventBus', () => {
 
       await bus.connect();
 
-      const eachMessage = mockConsumer.run.mock.calls[0][0].eachMessage;
+      const eachMessage = mockConsumer.run.mock.calls[0]![0].eachMessage;
       await eachMessage({
         message: { value: Buffer.from('not-json') },
       });

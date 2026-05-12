@@ -25,6 +25,7 @@ schema:
   - schema/shipment.odl
   - schema/inventory-record.odl
   - schema/links.odl
+  - schema/actions.odl
 
 actions:
   - actions/create-order.yaml

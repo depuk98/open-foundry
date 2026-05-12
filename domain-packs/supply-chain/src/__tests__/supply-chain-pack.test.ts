@@ -48,6 +48,7 @@ const ODL_FILES = [
   'shipment.odl',
   'inventory-record.odl',
   'links.odl',
+  'actions.odl',
 ];
 
 function buildCombinedSource(): string {
@@ -389,9 +390,14 @@ describe('Supply Chain Domain Pack — ODL Schema Parsing', () => {
     });
   });
 
-  describe('no action types in ODL files', () => {
-    it('action types are defined in YAML manifests, not ODL', () => {
-      expect(schema.actionTypes).toHaveLength(0);
+  describe('action types', () => {
+    it('defines 4 action types', () => {
+      expect(schema.actionTypes).toHaveLength(4);
+      const names = schema.actionTypes.map(a => a.name);
+      expect(names).toContain('CreateOrder');
+      expect(names).toContain('ShipOrder');
+      expect(names).toContain('ReceiveShipment');
+      expect(names).toContain('CancelOrder');
     });
   });
 });
@@ -570,7 +576,7 @@ describe('Supply Chain Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     const schemaFiles = pack['schema'] as string[];
-    expect(schemaFiles).toHaveLength(8);
+    expect(schemaFiles).toHaveLength(9);
     for (const odlFile of ODL_FILES) {
       expect(schemaFiles).toContain(`schema/${odlFile}`);
     }
