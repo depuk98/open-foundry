@@ -25,6 +25,7 @@ schema:
   - schema/case.odl
   - schema/suspicious-activity-report.odl
   - schema/links.odl
+  - schema/actions.odl
 
 actions:
   - actions/flag-transaction.yaml

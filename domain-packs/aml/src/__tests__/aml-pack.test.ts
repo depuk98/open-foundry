@@ -48,6 +48,7 @@ const ODL_FILES = [
   'case.odl',
   'suspicious-activity-report.odl',
   'links.odl',
+  'actions.odl',
 ];
 
 function buildCombinedSource(): string {
@@ -416,9 +417,16 @@ describe('AML Domain Pack — ODL Schema Parsing', () => {
     });
   });
 
-  describe('no action types in ODL files', () => {
-    it('action types are defined in YAML manifests, not ODL', () => {
-      expect(schema.actionTypes).toHaveLength(0);
+  describe('action types', () => {
+    it('defines 6 action types', () => {
+      expect(schema.actionTypes).toHaveLength(6);
+      const names = schema.actionTypes.map(a => a.name);
+      expect(names).toContain('FlagTransaction');
+      expect(names).toContain('OpenCase');
+      expect(names).toContain('AssignAlertToCase');
+      expect(names).toContain('FreezeAccount');
+      expect(names).toContain('FileReport');
+      expect(names).toContain('SubmitReport');
     });
   });
 });
@@ -647,7 +655,7 @@ describe('AML Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     const schemaFiles = pack['schema'] as string[];
-    expect(schemaFiles).toHaveLength(8);
+    expect(schemaFiles).toHaveLength(9);
     for (const odlFile of ODL_FILES) {
       expect(schemaFiles).toContain(`schema/${odlFile}`);
     }
