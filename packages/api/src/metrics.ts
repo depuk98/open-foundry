@@ -40,6 +40,12 @@ export const storageHealthy = new Gauge({
   help: 'Storage backend health: 1 = healthy, 0 = unhealthy',
 });
 
+export const packLoaded = new Gauge({
+  name: 'openfoundry_pack_loaded',
+  help: 'Domain pack loaded: 1 = loaded',
+  labelNames: ['name', 'version', 'origin'] as const,
+});
+
 // ─── Middleware ───
 
 /**

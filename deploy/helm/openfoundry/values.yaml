@@ -57,6 +57,22 @@ domainPacks:
   - name: nhs-acute
     version: "0.2.0"
 
+# -- External domain packs (loaded from volumes mounted into the api-gateway pod)
+# Each source defines a volume + mount that makes a pack directory available.
+# The schema loader scans each mountPath for pack.yaml files.
+#
+# Supported volume types: configMap, persistentVolumeClaim, emptyDir (with git-init-container)
+#
+# Example:
+#   domainPacksExtra:
+#     sources:
+#       - name: rce
+#         mountPath: /external-packs/rce
+#         persistentVolumeClaim:
+#           claimName: rce-pack-pvc
+domainPacksExtra:
+  sources: []
+
 # -- Observability (OpenTelemetry)
 observability:
   otlp:

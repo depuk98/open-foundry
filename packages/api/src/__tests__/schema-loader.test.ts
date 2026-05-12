@@ -336,6 +336,137 @@ describe('loadDomainPacks with extra directories', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CI fixture external pack (always available — no sibling repo required)
+// ---------------------------------------------------------------------------
+
+const FIXTURE_PACK_DIR = resolve(__dirname, 'fixtures', 'external-pack');
+
+describe('loadDomainPacks with CI fixture external pack', () => {
+  it('loads fixture pack schema, actions, permissions, and connectors', async () => {
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    // Pack discovered and loaded
+    expect(result.packs.map(p => p.name)).toContain('test-external');
+
+    // ODL parsed: 1 object type (Widget), 1 link (BelongsTo), 1 action (ActivateWidget)
+    const objNames = result.parsed.objectTypes.map(t => t.name);
+    expect(objNames).toContain('Widget');
+    expect(result.parsed.linkTypes.map(l => l.name)).toContain('BelongsTo');
+    expect(result.parsed.actionTypes.map(a => a.name)).toContain('ActivateWidget');
+
+    // SPI schema conversion
+    const widget = result.spiSchema.objectTypes.find(t => t.name === 'Widget');
+    expect(widget).toBeDefined();
+    expect(widget!.properties.map(p => p.name)).toContain('serialNumber');
+    expect(widget!.properties.map(p => p.name)).toContain('name');
+    expect(widget!.properties.map(p => p.name)).not.toContain('id');
+
+    // Indexes extracted
+    const uniqueIdx = widget!.indexes!.find(i => i.field === 'serialNumber' && i.unique);
+    expect(uniqueIdx).toBeDefined();
+    const searchIdx = widget!.indexes!.find(i => i.field === 'name' && i.indexType === 'FULLTEXT');
+    expect(searchIdx).toBeDefined();
+
+    // Action manifest loaded and cross-referenced
+    const manifest = result.manifestRegistry.get('ActivateWidget');
+    expect(manifest).toBeDefined();
+    expect(manifest!.version).toBe(1);
+    expect(manifest!.preconditions.length).toBe(1);
+    expect(manifest!.effects.length).toBe(1);
+  });
+
+  it('loads OpenFGA permission overrides from fixture pack', async () => {
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    expect(result.permissionOverrides.length).toBeGreaterThan(0);
+    // The fixture .fga file defines a 'widget' type with 'owner' relation
+    const widgetFga = result.permissionOverrides.find(o => o.includes('type widget'));
+    expect(widgetFga).toBeDefined();
+    expect(widgetFga).toContain('define owner');
+    expect(widgetFga).toContain('define can_activate');
+  });
+
+  it('loads connector manifests from fixture pack', async () => {
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    expect(result.connectorManifests.length).toBeGreaterThan(0);
+    const restConnector = result.connectorManifests.find(c => c.packName === 'test-external');
+    expect(restConnector).toBeDefined();
+    expect(restConnector!.connector).toBe('rest');
+    expect(restConnector!.config['datasource']).toBe('Widget_API');
+  });
+
+  it('tracks pack origin (external vs primary)', async () => {
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    const coreInfo = result.packInfos.find(p => p.manifest.name === 'core');
+    expect(coreInfo).toBeDefined();
+    expect(coreInfo!.external).toBe(false);
+
+    const extInfo = result.packInfos.find(p => p.manifest.name === 'test-external');
+    expect(extInfo).toBeDefined();
+    expect(extInfo!.external).toBe(true);
+  });
+
+  it('merges fixture pack with primary nhs-acute pack', async () => {
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'nhs-acute', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    const objNames = result.parsed.objectTypes.map(t => t.name);
+    expect(objNames).toContain('Patient');  // nhs-acute
+    expect(objNames).toContain('Widget');   // test-external
+    expect(result.spiSchema.objectTypes.length).toBe(6); // 5 nhs-acute + 1 fixture
+  });
+
+  it('loads fixture pack from DOMAIN_PACKS_EXTRA_DIRS env var', async () => {
+    const prev = process.env['DOMAIN_PACKS_EXTRA_DIRS'];
+    try {
+      process.env['DOMAIN_PACKS_EXTRA_DIRS'] = FIXTURE_PACK_DIR;
+
+      const { packs } = await loadDomainPacks(DOMAIN_PACKS_DIR, ['core', 'test-external']);
+
+      expect(packs.map(p => p.name)).toContain('test-external');
+    } finally {
+      if (prev === undefined) {
+        delete process.env['DOMAIN_PACKS_EXTRA_DIRS'];
+      } else {
+        process.env['DOMAIN_PACKS_EXTRA_DIRS'] = prev;
+      }
+    }
+  });
+
+  it('validates dependency constraints (core >= 1.0.0 satisfied)', async () => {
+    // This should not throw — core is v1.0.0 and fixture requires >=1.0.0
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    expect(result.packs.map(p => p.name)).toContain('test-external');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // External RCE pack import (lives outside monorepo at ../silmaril-dp-rce)
 // ---------------------------------------------------------------------------
 

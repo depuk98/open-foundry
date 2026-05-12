@@ -51,7 +51,28 @@ open http://localhost:4000/graphql
 2. Creates the Apache AGE extension and graph
 3. Waits for OpenFGA readiness
 4. Creates an OpenFGA store and loads the NHS authorization model
-5. Creates domain pack registry tables and registers NHS Acute pack
+5. Creates domain pack registry tables (packs are registered by api-gateway at boot)
+
+## External Domain Packs
+
+To load domain packs from outside the monorepo:
+
+1. Set `DOMAIN_PACKS_HOST_DIR` in `.env` to the host path of your pack (or a parent directory containing multiple packs):
+   ```bash
+   DOMAIN_PACKS_HOST_DIR=../../silmaril-dp-rce
+   DOMAIN_PACKS_EXTRA_DIRS=/external-packs
+   ```
+
+2. Add the pack name to `DOMAIN_PACKS` if you use an explicit pack list:
+   ```bash
+   DOMAIN_PACKS=core,nhs-acute,rce
+   ```
+
+3. Restart the api-gateway: `docker compose up -d api-gateway`
+
+The host path is mounted read-only at `/external-packs` inside the container. The schema loader scans it for `pack.yaml` files using the same discovery logic as the primary `domain-packs/` directory.
+
+For full details (pack.yaml format, Helm config, permissions, connectors, troubleshooting), see [docs/external-domain-packs.md](../docs/external-domain-packs.md).
 
 ## Teardown
 

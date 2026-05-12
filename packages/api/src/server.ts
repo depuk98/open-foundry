@@ -62,10 +62,11 @@ import {
 } from './config.js';
 import type { ActionAuthzMapping } from './config.js';
 import { loadDomainPacks } from './schema-loader.js';
+import { generateOpenFGASchema, mergeOpenFGAOverrides } from '@openfoundry/odl';
 import { SlidingWindowRateLimiter, RedisRateLimiter } from './governance/index.js';
 import type { RateLimiter, RateLimitIdentity } from './governance/index.js';
 import { toSnakeCase } from './utils.js';
-import { metricsMiddleware, metricsEndpoint, startStorageHealthGauge } from './metrics.js';
+import { metricsMiddleware, metricsEndpoint, startStorageHealthGauge, packLoaded } from './metrics.js';
 import { logger } from './logger.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
@@ -161,13 +162,22 @@ async function main(): Promise<void> {
   // DOMAIN_PACKS may be comma-separated names ("nhs-acute,aml") or JSON from Helm
   // ([{"name":"nhs-acute","version":"0.2.0"}]). Handle both formats.
   const packNames = parseDomainPacksEnv(process.env['DOMAIN_PACKS']);
-  const { parsed: schema, spiSchema, packs, manifestRegistry, fieldPermissions } = await loadDomainPacks(undefined, packNames);
+  const {
+    parsed: schema, spiSchema, packs, packInfos, manifestRegistry,
+    fieldPermissions, permissionOverrides, connectorManifests,
+  } = await loadDomainPacks(undefined, packNames);
   logger.info(
     `Schema: loaded ${packs.length} domain pack(s) — ` +
     `${schema.objectTypes.length} object types, ` +
     `${schema.linkTypes.length} link types, ` +
     `${schema.enums.length} enums`,
   );
+  if (permissionOverrides.length > 0) {
+    logger.info(`Schema: ${permissionOverrides.length} OpenFGA permission override(s) from domain packs`);
+  }
+  if (connectorManifests.length > 0) {
+    logger.info(`Schema: ${connectorManifests.length} connector manifest(s) from domain packs`);
+  }
   if (schema.objectTypes.length === 0) {
     logger.warn('WARNING: No object types loaded — check DOMAIN_PACKS configuration.');
   }
@@ -175,6 +185,24 @@ async function main(): Promise<void> {
   // Apply schema to storage (creates tables/indexes in Postgres, registers types in memory)
   const bootCtx: RequestContext = { tenantId: 'system', actorId: 'boot' };
   await storage.applySchema(bootCtx, spiSchema);
+
+  // ── Register loaded packs in _domain_packs table (Postgres only) ──
+  if (storage instanceof PostgresStorageProvider) {
+    try {
+      for (const info of packInfos) {
+        await storage.pool.query(
+          `INSERT INTO _domain_packs (name, version, namespace)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (name) DO UPDATE SET version = EXCLUDED.version, loaded_at = NOW()`,
+          [info.manifest.name, info.manifest.version, info.manifest.namespace],
+        );
+      }
+      logger.info(`Domain packs: registered ${packInfos.length} pack(s) in _domain_packs`);
+    } catch (err) {
+      // Non-fatal: table may not exist yet (init-services.sh creates it)
+      logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'Domain packs: failed to register in _domain_packs (table may not exist yet)');
+    }
+  }
 
   // ── Engine ──
   // REDPANDA_BROKERS → persistent event streaming via Kafka protocol;
@@ -231,6 +259,37 @@ async function main(): Promise<void> {
       logger.warn('Authorization: allow-all stub (development mode)');
     }
   }
+  // ── OpenFGA Authorization Model Sync ──
+  // Generate the merged OpenFGA model from schema + pack permission overrides,
+  // then POST to OpenFGA so all pack types are authorized.
+  if (!isDev && process.env['OPENFGA_URL'] && process.env['OPENFGA_STORE_ID']) {
+    try {
+      const baseDSL = generateOpenFGASchema(schema);
+      const mergedDSL = permissionOverrides.length > 0
+        ? mergeOpenFGAOverrides(baseDSL, permissionOverrides)
+        : baseDSL;
+      const modelJson = fgaDslToJson(mergedDSL);
+      const storeId = process.env['OPENFGA_STORE_ID'];
+      const fgaUrl = process.env['OPENFGA_URL'];
+      const resp = await fetch(
+        `${fgaUrl}/stores/${storeId}/authorization-models`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(modelJson),
+        },
+      );
+      if (resp.ok) {
+        logger.info(`Authorization: OpenFGA model synced (${modelJson.type_definitions.length} types)`);
+      } else {
+        const body = await resp.text();
+        logger.warn(`Authorization: OpenFGA model sync failed (${resp.status}): ${body}`);
+      }
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'Authorization: OpenFGA model sync failed');
+    }
+  }
+
   const authorizationService = new AuthorizationService(fgaClient, fieldPermissions);
 
   // ── CEL Evaluator ──
@@ -340,6 +399,19 @@ async function main(): Promise<void> {
   // ── Object Sets ──
   const objectSetStore = new InMemoryObjectSetStore();
   const objectSetManager = new ObjectSetManager(objectSetStore, objectManager);
+
+  // ── Connector Registry ──
+  // Create the default registry (jdbc + rest built-in), then validate that
+  // all pack-declared connectors reference a registered plugin type.
+  const { createDefaultRegistry } = await import('@openfoundry/sync');
+  const connectorRegistry = createDefaultRegistry();
+  for (const cm of connectorManifests) {
+    if (connectorRegistry.has(cm.connector)) {
+      logger.info(`Connector: '${cm.config['datasource'] ?? cm.connector}' (${cm.connector}) from pack '${cm.packName}'`);
+    } else {
+      logger.warn(`Connector: unknown type '${cm.connector}' in pack '${cm.packName}', skipping`);
+    }
+  }
 
   // ── API Dependencies ──
   const deps: ApiDependencies = {
@@ -526,6 +598,37 @@ async function main(): Promise<void> {
   });
   app.get('/.well-known/apollo/server-health', (_req, res) => {
     res.json({ status: 'pass' });
+  });
+
+  // ── Admin endpoints ──
+  // Register Prometheus gauges for loaded packs
+  for (const info of packInfos) {
+    packLoaded.set(
+      { name: info.manifest.name, version: info.manifest.version, origin: info.external ? 'external' : 'primary' },
+      1,
+    );
+  }
+
+  // GET /admin/packs — introspection of loaded domain packs
+  app.get('/admin/packs', (_req, res) => {
+    res.json({
+      packs: packInfos.map(info => ({
+        name: info.manifest.name,
+        version: info.manifest.version,
+        namespace: info.manifest.namespace,
+        description: info.manifest.description ?? null,
+        external: info.external,
+        objectTypes: schema.objectTypes.filter(() => true).length, // total; per-pack requires more tracking
+        connectors: connectorManifests.filter(c => c.packName === info.manifest.name).length,
+        permissions: (info.manifest.permissions ?? []).filter(f => f.endsWith('.fga')).length,
+      })),
+      totals: {
+        objectTypes: schema.objectTypes.length,
+        linkTypes: schema.linkTypes.length,
+        actionTypes: schema.actionTypes.length,
+        connectors: connectorManifests.length,
+      },
+    });
   });
 
   // ── GraphQL at /graphql ──
@@ -751,6 +854,114 @@ function deriveActionAuthzMappings(
   }
 
   return mappings;
+}
+
+/**
+ * Convert OpenFGA DSL (schema 1.1) to the JSON format accepted by the
+ * OpenFGA REST API POST /stores/{id}/authorization-models.
+ *
+ * Handles: direct types [user], computed usersets (derived), tuple-to-userset
+ * (from), and union (or) relations.
+ */
+function fgaDslToJson(dsl: string): { schema_version: string; type_definitions: unknown[] } {
+  const typeDefs: unknown[] = [];
+  const lines = dsl.split('\n');
+  let currentType: string | null = null;
+  let relations: Record<string, unknown> = {};
+  let metadata: Record<string, { directly_related_user_types: Array<{ type: string }> }> = {};
+
+  function flushType() {
+    if (currentType !== null) {
+      const def: Record<string, unknown> = { type: currentType };
+      if (Object.keys(relations).length > 0) {
+        def['relations'] = relations;
+        const metaRelations: Record<string, unknown> = {};
+        for (const [rel, types] of Object.entries(metadata)) {
+          if (types.directly_related_user_types.length > 0) {
+            metaRelations[rel] = types;
+          }
+        }
+        if (Object.keys(metaRelations).length > 0) {
+          def['metadata'] = { relations: metaRelations };
+        }
+      }
+      typeDefs.push(def);
+    }
+    relations = {};
+    metadata = {};
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('model') || trimmed.startsWith('schema')) continue;
+
+    const typeMatch = trimmed.match(/^type\s+(\w+)$/);
+    if (typeMatch) {
+      flushType();
+      currentType = typeMatch[1]!;
+      continue;
+    }
+
+    if (trimmed === 'relations') continue;
+
+    const defineMatch = trimmed.match(/^define\s+(\w+):\s*(.+)$/);
+    if (defineMatch && currentType) {
+      const relName = defineMatch[1]!;
+      const body = defineMatch[2]!.trim();
+      metadata[relName] = { directly_related_user_types: [] };
+
+      // Parse the relation body
+      const parts = body.split(/\s+or\s+/);
+      if (parts.length === 1) {
+        const single = parts[0]!.trim();
+        const directMatch = single.match(/^\[(\w+)]$/);
+        const fromMatch = single.match(/^(\w+)\s+from\s+(\w+)$/);
+
+        if (directMatch) {
+          // Direct assignment: [user]
+          relations[relName] = { this: {} };
+          metadata[relName]!.directly_related_user_types.push({ type: directMatch[1]! });
+        } else if (fromMatch) {
+          // Tuple-to-userset: viewer from admitted_to
+          relations[relName] = {
+            tupleToUserset: {
+              tupleset: { relation: fromMatch[2]! },
+              computedUserset: { relation: fromMatch[1]! },
+            },
+          };
+        } else {
+          // Computed userset: assigned
+          relations[relName] = { computedUserset: { relation: single } };
+        }
+      } else {
+        // Union of multiple parts
+        const children: unknown[] = [];
+        for (const part of parts) {
+          const p = part.trim();
+          const directMatch = p.match(/^\[(\w+)]$/);
+          const fromMatch = p.match(/^(\w+)\s+from\s+(\w+)$/);
+
+          if (directMatch) {
+            children.push({ this: {} });
+            metadata[relName]!.directly_related_user_types.push({ type: directMatch[1]! });
+          } else if (fromMatch) {
+            children.push({
+              tupleToUserset: {
+                tupleset: { relation: fromMatch[2]! },
+                computedUserset: { relation: fromMatch[1]! },
+              },
+            });
+          } else {
+            children.push({ computedUserset: { relation: p } });
+          }
+        }
+        relations[relName] = { union: { child: children } };
+      }
+    }
+  }
+  flushType();
+
+  return { schema_version: '1.1', type_definitions: typeDefs };
 }
 
 // Fatal error handlers — log and exit rather than silently dying.

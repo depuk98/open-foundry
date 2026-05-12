@@ -128,12 +128,13 @@ load_openfga_model() {
   fi
 }
 
-# ─── 5. Load NHS Acute domain pack schema ─────────────────────────
+# ─── 5. Create domain pack registry tables ────────────────────────
 
 load_domain_schema() {
-  log "Loading NHS Acute domain pack schema into PostgreSQL..."
+  log "Creating domain pack registry tables..."
 
-  # Create core tables for the domain pack registry
+  # Create core tables for the domain pack registry.
+  # The api-gateway registers all loaded packs on boot via INSERT ... ON CONFLICT.
   psql -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -q <<'SQL'
 -- Domain pack registry
 CREATE TABLE IF NOT EXISTS _domain_packs (
@@ -172,14 +173,9 @@ CREATE TABLE IF NOT EXISTS _audit_log (
   resource_id TEXT,
   details     JSONB
 );
-
--- Register NHS Acute domain pack
-INSERT INTO _domain_packs (name, version, namespace)
-VALUES ('nhs-acute', '0.2.0', 'nhs.acute')
-ON CONFLICT (name) DO UPDATE SET version = EXCLUDED.version;
 SQL
 
-  log "NHS Acute domain pack schema loaded."
+  log "Domain pack registry tables created."
 }
 
 # ─── Main ─────────────────────────────────────────────────────────

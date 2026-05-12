@@ -29,6 +29,13 @@ data:
   DEBEZIUM_URL: {{ .Values.sync.debezium.url | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.observability.otlp.endpoint | quote }}
   DOMAIN_PACKS: {{ .Values.domainPacks | toJson | quote }}
+  {{- if .Values.domainPacksExtra.sources }}
+  {{- $paths := list }}
+  {{- range .Values.domainPacksExtra.sources }}
+  {{- $paths = append $paths .mountPath }}
+  {{- end }}
+  DOMAIN_PACKS_EXTRA_DIRS: {{ $paths | join ":" | quote }}
+  {{- end }}
   NODE_ENV: {{ .Values.nodeEnv | default "production" | quote }}
   {{- if .Values.cors.allowedOrigins }}
   CORS_ALLOWED_ORIGINS: {{ .Values.cors.allowedOrigins | join "," | quote }}

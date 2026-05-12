@@ -33,6 +33,7 @@
     "@openfoundry/spi": "workspace:*",
     "@openfoundry/storage-memory": "workspace:*",
     "@openfoundry/storage-postgres": "workspace:*",
+    "@openfoundry/sync": "workspace:*",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "graphql": "^16.10.0",

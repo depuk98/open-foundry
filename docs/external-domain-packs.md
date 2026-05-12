@@ -1,0 +1,372 @@
+# External Domain Packs
+
+Load domain packs from outside the Open Foundry monorepo — for proprietary schemas,
+partner integrations, or tenant-specific ontologies that live in separate repositories.
+
+## Overview
+
+The schema loader discovers packs in two locations:
+
+1. **Primary directory** — `domain-packs/` inside the monorepo (ships with `core`, `nhs-acute`, etc.)
+2. **Extra directories** — any additional paths declared via `DOMAIN_PACKS_EXTRA_DIRS`
+
+External packs use the same `pack.yaml` manifest format as built-in packs. They are
+merged into a single unified schema at boot time.
+
+## Pack Structure
+
+A minimal external pack:
+
+```
+my-pack/
+  pack.yaml                # Required — manifest
+  schema/
+    types.odl              # ODL schema files
+    links.odl
+    actions.odl
+  actions/
+    do-something.yaml      # Action manifests (CEL preconditions + effects)
+  connectors/
+    source-jdbc.yaml       # Connector configs (optional)
+  permissions/
+    roles.fga              # OpenFGA DSL overrides (optional)
+```
+
+### pack.yaml
+
+```yaml
+name: my-pack
+version: 0.1.0
+namespace: com.example
+description: "Example external domain pack"
+
+dependencies:
+  openfoundry.core: ">=1.0.0"
+
+schema:
+  - schema/types.odl
+  - schema/links.odl
+  - schema/actions.odl
+
+actions:
+  - actions/do-something.yaml
+
+connectors:
+  - connectors/source-jdbc.yaml
+
+permissions:
+  - permissions/roles.fga
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique pack identifier (used in `DOMAIN_PACKS` filter) |
+| `version` | Recommended | Semver version string (used in dependency checks and metrics) |
+| `namespace` | Recommended | ODL namespace, dot-separated (used for dependency resolution) |
+| `description` | No | Human-readable summary |
+| `dependencies` | No | Map of `namespace: ">=X.Y.Z"` constraints |
+| `schema` | Recommended | ODL files to compile (relative paths); omit for metadata-only packs |
+| `actions` | No | Action manifest YAML files |
+| `connectors` | No | Connector configuration YAML files |
+| `permissions` | No | OpenFGA DSL files merged into the authorization model |
+
+### ODL Schema Files
+
+ODL files must declare their namespace:
+
+```graphql
+extend schema @namespace(name: "com.example", version: "0.1.0")
+
+type Widget @objectType {
+  id: ID! @primary
+  serialNumber: String @unique @indexed
+  name: String! @searchable
+  status: WidgetStatus!
+}
+
+enum WidgetStatus {
+  ACTIVE
+  INACTIVE
+  RETIRED
+}
+
+type BelongsTo @linkType(from: "Widget", to: "Widget", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+}
+
+type ActivateWidget @actionType {
+  widget: Widget! @param
+  reason: String @param
+}
+```
+
+Link types use `type ... @linkType(...)` syntax with a body containing at least `id: ID! @primary`.
+
+### Action Manifests
+
+```yaml
+action: ActivateWidget
+version: 1
+reversible: false
+
+preconditions:
+  - expr: "widget.status == 'INACTIVE'"
+    error: "Widget must be inactive to activate"
+
+effects:
+  - type: updateObject
+    target: "widget"
+    set:
+      status: "ACTIVE"
+```
+
+Action names must match an `@actionType` declared in the pack's ODL schema.
+
+### Connector Configs
+
+```yaml
+datasource: Widget_API
+connector: rest              # Must match a registered ConnectorPlugin (rest, jdbc)
+connection:
+  url: "${WIDGET_API_URL}"
+  table: "widgets"
+
+mapping:
+  objectType: Widget
+  primaryKey:
+    source: "widget_id"
+    target: "id"
+  properties:
+    serialNumber: { source: "serial" }
+    name: { source: "name" }
+    status: { source: "state" }
+
+sync:
+  mode: OVERLAY
+  cacheStrategy: TTL
+  cacheTTL: "PT5M"
+  writeback: false
+```
+
+The `connector` field must reference a plugin type registered in the `ConnectorRegistry`
+(currently `jdbc` and `rest`). Invalid connector types are logged as warnings at boot.
+
+### Permission Overrides (OpenFGA DSL)
+
+```
+model
+  schema 1.1
+
+type user
+
+type widget
+  relations
+    define owner: [user]
+    define viewer: owner
+    define can_activate: owner
+```
+
+Permission files are merged into the base OpenFGA model generated from the ODL schema.
+Merging is type-level, last-wins — if the base model already defines a `widget` type,
+the pack's definition replaces it entirely. The merged model is POSTed to the OpenFGA
+store at boot.
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DOMAIN_PACKS` | Comma-separated pack names to activate. Omit to load all discovered packs. `core` is always included. | `core,nhs-acute,my-pack` |
+| `DOMAIN_PACKS_EXTRA_DIRS` | Path-separated directories to scan for external packs. Colon-separated on Linux, semicolon on Windows. Each entry is either a parent directory (subdirectories scanned) or a direct pack directory (containing `pack.yaml`). | `/external-packs:/opt/packs` |
+| `DOMAIN_PACKS_HOST_DIR` | Docker Compose only — host path mounted at `/external-packs` in the container. | `../../my-pack` |
+
+### Docker Compose
+
+In `deploy/.env`:
+
+```bash
+# Activate specific packs (omit for all discovered)
+DOMAIN_PACKS=core,nhs-acute,my-pack
+
+# Host path to mount into the container
+DOMAIN_PACKS_HOST_DIR=../../my-pack
+
+# Container-side path (matches the volume mount)
+DOMAIN_PACKS_EXTRA_DIRS=/external-packs
+```
+
+The `docker-compose.yaml` mounts `DOMAIN_PACKS_HOST_DIR` read-only at `/external-packs`:
+
+```yaml
+api-gateway:
+  environment:
+    DOMAIN_PACKS_EXTRA_DIRS: ${DOMAIN_PACKS_EXTRA_DIRS:-}
+  volumes:
+    - ${DOMAIN_PACKS_HOST_DIR:-./empty-packs}:/external-packs:ro
+```
+
+Restart after changes:
+
+```bash
+docker compose up -d api-gateway
+```
+
+### Helm / Kubernetes
+
+Add entries to `domainPacksExtra.sources` in `values.yaml`:
+
+```yaml
+domainPacksExtra:
+  sources:
+    - name: my-pack
+      mountPath: /external-packs/my-pack
+      persistentVolumeClaim:
+        claimName: my-pack-pvc
+```
+
+Each source creates a volume mount in the api-gateway pod. The `mountPath` values are
+automatically joined into `DOMAIN_PACKS_EXTRA_DIRS` via the configmap.
+
+Supported volume types:
+
+| Type | Use Case |
+|------|----------|
+| `persistentVolumeClaim` | Pre-provisioned PVC with pack files |
+| `configMap` | Small packs stored as ConfigMap data |
+| `emptyDir` | Combined with an init container (e.g. git clone) |
+
+Example with a git-sync init container:
+
+```yaml
+domainPacksExtra:
+  sources:
+    - name: partner-pack
+      mountPath: /external-packs/partner
+      emptyDir: {}
+
+# Add to api-gateway pod spec:
+apiGateway:
+  initContainers:
+    - name: git-sync
+      image: k8s.gcr.io/git-sync/git-sync:v4.0.0
+      args:
+        - --repo=https://github.com/org/partner-pack.git
+        - --root=/external-packs/partner
+        - --one-time
+      volumeMounts:
+        - name: pack-partner-pack
+          mountPath: /external-packs/partner
+```
+
+## Boot Sequence
+
+When the api-gateway starts:
+
+1. **Discovery** — Scans primary `domain-packs/` and all `DOMAIN_PACKS_EXTRA_DIRS` paths for `pack.yaml` files. Duplicate pack names are skipped with a warning (first-discovered wins).
+
+2. **Filtering** — If `DOMAIN_PACKS` is set, only listed packs are loaded (`core` is always included).
+
+3. **ODL Compilation** — All schema files from all packs are compiled into a unified `ParsedSchema`.
+
+4. **SPI Conversion** — Parsed types are converted to `OntologySchema` for the storage layer.
+
+5. **Action Manifests** — YAML manifests are loaded and cross-referenced against ODL action types.
+
+6. **Permissions** — `.fga` files are collected as override strings for OpenFGA model merging.
+
+7. **Connectors** — Connector YAML files are parsed and validated against registered plugins.
+
+8. **Dependency Validation** — `dependencies` in each `pack.yaml` are checked against loaded pack versions. Missing or unsatisfied constraints log warnings.
+
+9. **OpenFGA Sync** — The base authorization model (generated from ODL) is merged with permission overrides and POSTed to the OpenFGA store.
+
+10. **Registration** — Each loaded pack is recorded in the `_domain_packs` Postgres table and exposed via Prometheus gauge `openfoundry_pack_loaded{name,version,origin}`.
+
+## Introspection
+
+### GET /admin/packs
+
+Returns metadata about all loaded packs:
+
+```bash
+curl http://localhost:4000/admin/packs | jq .
+```
+
+```json
+{
+  "packs": [
+    {
+      "name": "core",
+      "version": "1.0.0",
+      "namespace": "openfoundry.core",
+      "description": "Core domain pack ...",
+      "external": false,
+      "connectors": 0,
+      "permissions": 0
+    },
+    {
+      "name": "my-pack",
+      "version": "0.1.0",
+      "namespace": "com.example",
+      "description": "Example external domain pack",
+      "external": true,
+      "connectors": 1,
+      "permissions": 1
+    }
+  ],
+  "totals": {
+    "objectTypes": 6,
+    "linkTypes": 7,
+    "actionTypes": 4,
+    "connectors": 2
+  }
+}
+```
+
+### Prometheus Metrics
+
+```
+openfoundry_pack_loaded{name="core", version="1.0.0", origin="primary"} 1
+openfoundry_pack_loaded{name="my-pack", version="0.1.0", origin="external"} 1
+```
+
+## Dependency Constraints
+
+Packs can declare dependencies on other packs by namespace:
+
+```yaml
+dependencies:
+  openfoundry.core: ">=1.0.0"
+  nhs.acute: ">=0.2.0"
+```
+
+The constraint format is `>=X.Y.Z` (minimum version). At boot, the loader checks that
+all declared dependencies are satisfied by loaded packs. Unsatisfied constraints produce
+warnings but do not prevent startup (to support gradual rollout).
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Pack not discovered | `DOMAIN_PACKS_EXTRA_DIRS` not set or path doesn't exist | Check env var and mount paths |
+| Pack discovered but not loaded | `DOMAIN_PACKS` filter doesn't include the pack name | Add pack name to `DOMAIN_PACKS` or remove the filter |
+| "already discovered" warning | Two packs with the same `name` field | Rename one of them in `pack.yaml` |
+| ODL parse error | Invalid ODL syntax in schema files | Check error log; common issues: `link` keyword (use `type ... @linkType(...)` instead) |
+| Connector type warning | `connector` field doesn't match a registered plugin | Use `jdbc` or `rest`; custom plugins require code changes |
+| Dependency warning | Required pack not loaded or version too low | Load the dependency pack and check its version |
+| "pack.yaml: missing required 'name' field" | Malformed manifest | Ensure `name`, `version`, and `namespace` are present |
+
+## Testing
+
+The API package includes CI fixture tests using a minimal external pack at
+`packages/api/src/__tests__/fixtures/external-pack/`. These tests verify schema loading,
+action manifest cross-referencing, permission override collection, connector parsing,
+origin tracking, env var loading, and dependency validation — without requiring any
+external repository.
+
+Run fixture tests:
+
+```bash
+cd packages/api && pnpm vitest run -t "CI fixture"
+```

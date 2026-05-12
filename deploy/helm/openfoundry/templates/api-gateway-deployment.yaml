@@ -91,6 +91,24 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- range .Values.domainPacksExtra.sources }}
+            - name: pack-{{ .name }}
+              mountPath: {{ .mountPath }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- range .Values.domainPacksExtra.sources }}
+        - name: pack-{{ .name }}
+          {{- if .configMap }}
+          configMap:
+            name: {{ .configMap }}
+          {{- else if .persistentVolumeClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .persistentVolumeClaim.claimName }}
+            readOnly: true
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}

@@ -150,6 +150,9 @@ importers:
       '@openfoundry/storage-postgres':
         specifier: workspace:*
         version: link:../storage-postgres
+      '@openfoundry/sync':
+        specifier: workspace:*
+        version: link:../sync
       cors:
         specifier: ^2.8.5
         version: 2.8.6

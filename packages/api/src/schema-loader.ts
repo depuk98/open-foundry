@@ -43,6 +43,25 @@ interface PackManifest {
   permissions?: string[];
 }
 
+/** Connector manifest loaded from a domain pack. */
+export interface ConnectorManifest {
+  /** Connector plugin type (e.g. "jdbc", "rest"). */
+  connector: string;
+  /** Raw parsed YAML content. */
+  config: Record<string, unknown>;
+  /** Pack that declared this connector. */
+  packName: string;
+}
+
+/** Metadata about a loaded pack, including its origin. */
+export interface LoadedPackInfo {
+  manifest: PackManifest;
+  /** Absolute path to the pack directory. */
+  packDir: string;
+  /** Whether this pack came from an extra directory (external). */
+  external: boolean;
+}
+
 export interface LoadedSchema {
   /** Combined ParsedSchema for engine + GraphQL layers. */
   parsed: ParsedSchema;
@@ -50,10 +69,16 @@ export interface LoadedSchema {
   spiSchema: OntologySchema;
   /** Pack manifests that were loaded. */
   packs: PackManifest[];
+  /** Detailed pack info including origin. */
+  packInfos: LoadedPackInfo[];
   /** Action manifests (ManifestRegistry for action executor). */
   manifestRegistry: ManifestRegistry;
   /** Field permission configurations for field-level redaction. */
   fieldPermissions: FieldPermissionConfig[];
+  /** OpenFGA permission override DSL strings from pack permissions/*.fga files. */
+  permissionOverrides: string[];
+  /** Connector manifests from pack connectors/*.yaml files. */
+  connectorManifests: ConnectorManifest[];
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +288,128 @@ function loadPackFieldPermissions(
 
     if (typeof objectType === 'string') {
       configs.push({ objectType, alwaysVisible, fieldsByRelation });
+    }
+  }
+}
+
+/**
+ * Load OpenFGA permission DSL files from a domain pack.
+ * Reads each file listed in pack.yaml permissions: that ends in .fga.
+ * Returns raw DSL strings for merging with the auto-generated model.
+ */
+function loadPackPermissions(
+  packDir: string,
+  manifest: PackManifest,
+  overrides: string[],
+): void {
+  const permFiles = manifest.permissions ?? [];
+  for (const file of permFiles) {
+    if (!file.endsWith('.fga')) continue;
+    const filePath = resolve(packDir, file);
+    if (!existsSync(filePath)) {
+      logger.warn(`Schema loader: permission file '${file}' not found in ${packDir}, skipping`);
+      continue;
+    }
+    const content = readFileSync(filePath, 'utf-8');
+    if (content.trim()) {
+      overrides.push(content);
+    }
+  }
+}
+
+/**
+ * Load connector YAML manifests from a domain pack.
+ * Reads each file listed in pack.yaml connectors: and returns parsed configs.
+ */
+function loadPackConnectors(
+  packDir: string,
+  manifest: PackManifest,
+  connectors: ConnectorManifest[],
+): void {
+  const connectorFiles = manifest.connectors ?? [];
+  for (const file of connectorFiles) {
+    const filePath = resolve(packDir, file);
+    if (!existsSync(filePath)) {
+      logger.warn(`Schema loader: connector file '${file}' not found in ${packDir}, skipping`);
+      continue;
+    }
+    const content = readFileSync(filePath, 'utf-8');
+    const parsed = parseYaml(content);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      logger.warn(`Schema loader: connector file '${file}' in ${packDir} is not a valid YAML object, skipping`);
+      continue;
+    }
+    const config = parsed as Record<string, unknown>;
+    const connectorType = typeof config['connector'] === 'string' ? config['connector'] : 'unknown';
+    connectors.push({
+      connector: connectorType,
+      config,
+      packName: manifest.name,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dependency validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Compare two semver-like version strings (e.g. "1.0.0" vs "2.1.3").
+ * Returns -1 if a < b, 0 if a === b, 1 if a > b.
+ */
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const va = pa[i] ?? 0;
+    const vb = pb[i] ?? 0;
+    if (va < vb) return -1;
+    if (va > vb) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Check if a version satisfies a simple constraint (>=X.Y.Z).
+ * Only supports the >=X.Y.Z format used in pack.yaml dependencies.
+ */
+function satisfiesConstraint(version: string, constraint: string): boolean {
+  const trimmed = constraint.trim();
+  const gteMatch = trimmed.match(/^>=\s*(.+)$/);
+  if (gteMatch) {
+    return compareSemver(version, gteMatch[1]!) >= 0;
+  }
+  // Exact match fallback
+  return compareSemver(version, trimmed) === 0;
+}
+
+/**
+ * Validate that all loaded packs have their declared dependencies satisfied.
+ * Checks against the version of the other loaded packs (matched by namespace).
+ * Warns on unsatisfied constraints — does not abort.
+ */
+function validatePackDependencies(manifests: PackManifest[]): void {
+  // Build a map of namespace → version from loaded packs
+  const loadedVersions = new Map<string, string>();
+  for (const m of manifests) {
+    loadedVersions.set(m.namespace, m.version);
+  }
+
+  for (const m of manifests) {
+    if (!m.dependencies) continue;
+    for (const [depNamespace, constraint] of Object.entries(m.dependencies)) {
+      const depVersion = loadedVersions.get(depNamespace);
+      if (!depVersion) {
+        logger.warn(
+          `Pack '${m.name}' depends on '${depNamespace}' (${constraint}) but it is not loaded`,
+        );
+        continue;
+      }
+      if (!satisfiesConstraint(depVersion, constraint)) {
+        logger.warn(
+          `Pack '${m.name}' requires '${depNamespace}' ${constraint} but loaded version is ${depVersion}`,
+        );
+      }
     }
   }
 }
@@ -499,6 +646,7 @@ export async function loadDomainPacks(
 
   // Build a map of packName → absolute packDir, primary directory first
   const packMap = new Map<string, string>();
+  const externalPacks = new Set<string>();
   for (const name of discoverPacks(primaryDir)) {
     packMap.set(name, resolve(primaryDir, name));
   }
@@ -514,6 +662,7 @@ export async function loadDomainPacks(
         );
       } else {
         packMap.set(name, packDir);
+        externalPacks.add(name);
         logger.info(`Schema loader: discovered external pack '${name}' at ${packDir}`);
       }
     }
@@ -538,11 +687,14 @@ export async function loadDomainPacks(
     names = ['core', ...names];
   }
 
-  // Phase 1: Load ODL schemas and field permissions from all packs
+  // Phase 1: Load ODL schemas, permissions, connectors, and field permissions from all packs
   const parsedSchemas: ParsedSchema[] = [];
   const manifests: PackManifest[] = [];
   const packDirs: string[] = [];
+  const packInfos: LoadedPackInfo[] = [];
   const fieldPermissions: FieldPermissionConfig[] = [];
+  const permissionOverrides: string[] = [];
+  const connectorManifests: ConnectorManifest[] = [];
 
   for (const name of names) {
     const packDir = packMap.get(name)!;
@@ -554,6 +706,7 @@ export async function loadDomainPacks(
     const manifest = readManifest(packDir);
     manifests.push(manifest);
     packDirs.push(packDir);
+    packInfos.push({ manifest, packDir, external: externalPacks.has(name) });
 
     const odlSource = loadPackOdl(packDir, manifest);
     if (odlSource.trim()) {
@@ -568,6 +721,12 @@ export async function loadDomainPacks(
 
     // Load field permission configurations
     loadPackFieldPermissions(packDir, manifest, fieldPermissions);
+
+    // Load OpenFGA permission overrides (.fga files)
+    loadPackPermissions(packDir, manifest, permissionOverrides);
+
+    // Load connector manifests
+    loadPackConnectors(packDir, manifest, connectorManifests);
   }
 
   const merged = mergeSchemas(parsedSchemas);
@@ -596,10 +755,22 @@ export async function loadDomainPacks(
   // Phase 4: Validate field permissions against merged schema
   validateFieldPermissions(fieldPermissions, merged);
 
+  // Phase 5: Validate pack dependency constraints
+  validatePackDependencies(manifests);
+
   // Build a ManifestRegistry from loaded action manifests
   const manifestRegistry: ManifestRegistry = {
     get(actionName: string) { return actionManifests.get(actionName); },
   };
 
-  return { parsed: merged, spiSchema, packs: manifests, manifestRegistry, fieldPermissions };
+  return {
+    parsed: merged,
+    spiSchema,
+    packs: manifests,
+    packInfos,
+    manifestRegistry,
+    fieldPermissions,
+    permissionOverrides,
+    connectorManifests,
+  };
 }
