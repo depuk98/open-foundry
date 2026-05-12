@@ -218,10 +218,12 @@ async function main(): Promise<void> {
     );
     logger.info(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
   } else {
-    // Dev stub: allow everything
+    // Dev stub: allow everything.
+    // listObjects returns ['*'] sentinel — resolvers interpret this as
+    // "all objects authorized" and skip the ID-based filter.
     fgaClient = {
       check: async () => ({ allowed: true }),
-      listObjects: async () => ({ objects: [] }),
+      listObjects: async () => ({ objects: ['*'] }),
       writeTuples: async () => ({}),
       deleteTuples: async () => ({}),
     };
@@ -235,7 +237,7 @@ async function main(): Promise<void> {
   let cel: CelEvaluator;
   const celAddress = (process.env['CEL_EVALUATOR_URL'] ?? 'localhost:50051')
     .replace(/^grpc:\/\//, '');
-  if (!isDev) {
+  if (!isDev || process.env['CEL_EVALUATOR_URL']) {
     cel = new CelClient({ address: celAddress });
     logger.info(`CEL evaluator: gRPC @ ${celAddress}`);
   } else {

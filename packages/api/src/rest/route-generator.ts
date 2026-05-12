@@ -124,6 +124,7 @@ function parsePagination(query: Record<string, string | string[] | undefined>): 
 
 /**
  * Resolve authorized object IDs for a user+type via FGA listObjects.
+ * Returns ['*'] when the dev stub signals all objects are authorized.
  */
 async function resolveAllowedIds(
   deps: ApiDependencies,
@@ -135,6 +136,9 @@ async function resolveAllowedIds(
     'viewer',
     fgaType,
   );
+  if (allowedObjects.length === 1 && allowedObjects[0] === '*') {
+    return ['*'];
+  }
   return allowedObjects.map((o: string) => {
     const parts = o.split(':');
     return parts[parts.length - 1];
@@ -143,11 +147,17 @@ async function resolveAllowedIds(
 
 /**
  * Build a combined filter that restricts to authorized IDs + optional user filter.
+ * When allowedIds is ['*'] (dev stub), skip the ID restriction.
  */
 function buildAuthFilter(
   allowedIds: string[],
   userFilter?: FilterExpression,
 ): FilterExpression {
+  const allAuthorized = allowedIds.length === 1 && allowedIds[0] === '*';
+  if (allAuthorized) {
+    const passThrough: FilterExpression = { field: '_deleted_at', operator: 'exists', value: false };
+    return userFilter ? { and: [passThrough, userFilter] } : passThrough;
+  }
   const idFilter: FilterExpression = {
     field: '_id',
     operator: 'in',
@@ -219,20 +229,22 @@ function generateListRoute(
         const { user, requestContext } = ctx;
         const typeName = obj.name;
 
-        // Authorization: list objects user can see
+        // Authorization: list objects user can see.
+        // Dev stub returns ['*'] sentinel meaning "all objects authorized".
         const allowedObjects = await deps.authorizationService.listObjects(
           `user:${user.id}`,
           'viewer',
           fgaType,
         );
 
-        const allowedIds = allowedObjects.map((o: string) => {
+        const allAuthorized = allowedObjects.length === 1 && allowedObjects[0] === '*';
+        const allowedIds = allAuthorized ? [] : allowedObjects.map((o: string) => {
           const parts = o.split(':');
           return parts[parts.length - 1];
         }).filter((id): id is string => id !== undefined && id !== '');
 
         // SEC-10: If no objects are authorized, return empty result immediately
-        if (allowedIds.length === 0) {
+        if (!allAuthorized && allowedIds.length === 0) {
           return {
             status: 200,
             body: {
@@ -241,12 +253,6 @@ function generateListRoute(
             },
           };
         }
-
-        const idFilter: FilterExpression = {
-          field: '_id',
-          operator: 'in',
-          value: allowedIds,
-        };
 
         const userFilter = parseQueryFilter(req.query);
 
@@ -265,9 +271,15 @@ function generateListRoute(
           }
         }
 
-        const combinedFilter: FilterExpression = userFilter
-          ? { and: [idFilter, userFilter] }
-          : idFilter;
+        // Build combined filter — skip ID restriction when all authorized
+        let combinedFilter: FilterExpression;
+        if (!allAuthorized) {
+          const idFilter: FilterExpression = { field: '_id', operator: 'in', value: allowedIds };
+          combinedFilter = userFilter ? { and: [idFilter, userFilter] } : idFilter;
+        } else {
+          const passThrough: FilterExpression = { field: '_deleted_at', operator: 'exists', value: false };
+          combinedFilter = userFilter ? { and: [passThrough, userFilter] } : passThrough;
+        }
 
         const { offset, limit } = parsePagination(req.query);
 

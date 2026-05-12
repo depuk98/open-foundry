@@ -50,7 +50,15 @@ func New() (*Evaluator, error) {
 // Evaluate compiles and evaluates a single CEL expression with the given variables
 // and type environment.
 func (e *Evaluator) Evaluate(expr string, vars map[string]*structpb.Value, typeEnv *pb.TypeEnv) (*structpb.Value, error) {
-	env, err := e.envWithTypes(typeEnv)
+	var env *cel.Env
+	var err error
+	if typeEnv != nil && len(typeEnv.Entries) > 0 {
+		env, err = e.envWithTypes(typeEnv)
+	} else {
+		// No explicit type env: declare all vars as dyn so the expression
+		// can reference them without requiring typed declarations.
+		env, err = e.envWithDynVars(vars)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("building typed environment: %w", err)
 	}
@@ -76,7 +84,13 @@ func (e *Evaluator) Evaluate(expr string, vars map[string]*structpb.Value, typeE
 
 // EvaluateBatch evaluates multiple expressions against the same variable set.
 func (e *Evaluator) EvaluateBatch(exprs []string, vars map[string]*structpb.Value, typeEnv *pb.TypeEnv) ([]*pb.BatchEvalResult, error) {
-	env, err := e.envWithTypes(typeEnv)
+	var env *cel.Env
+	var err error
+	if typeEnv != nil && len(typeEnv.Entries) > 0 {
+		env, err = e.envWithTypes(typeEnv)
+	} else {
+		env, err = e.envWithDynVars(vars)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("building typed environment: %w", err)
 	}
@@ -135,6 +149,21 @@ func (e *Evaluator) envWithTypes(typeEnv *pb.TypeEnv) (*cel.Env, error) {
 		opts = append(opts, cel.Variable(entry.Name, celType))
 	}
 
+	return e.baseEnv.Extend(opts...)
+}
+
+// envWithDynVars extends the base environment by declaring all keys in the
+// vars map as cel.DynType. This allows untyped evaluation when no explicit
+// type environment is provided — the action executor sends resolved objects
+// as protobuf structs without type declarations.
+func (e *Evaluator) envWithDynVars(vars map[string]*structpb.Value) (*cel.Env, error) {
+	if len(vars) == 0 {
+		return e.baseEnv, nil
+	}
+	opts := make([]cel.EnvOption, 0, len(vars))
+	for name := range vars {
+		opts = append(opts, cel.Variable(name, cel.DynType))
+	}
 	return e.baseEnv.Extend(opts...)
 }
 

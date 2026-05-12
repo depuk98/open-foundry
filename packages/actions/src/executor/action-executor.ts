@@ -57,6 +57,17 @@ function failResult(actionId: string, errors: ActionError[]): ActionResult {
   return { success: false, actionId, errors, affectedObjects: [] };
 }
 
+/**
+ * Add an `id` alias for `_id` on an OntologyObject so CEL expressions can
+ * reference `object.id` (the ODL @primary name) as well as `object._id`.
+ */
+function addIdAlias(obj: OntologyObject): OntologyObject {
+  if (!('id' in obj)) {
+    (obj as Record<string, unknown>)['id'] = obj._id;
+  }
+  return obj;
+}
+
 /** System field prefixes that storage manages internally. */
 const SYSTEM_FIELD_PREFIXES = new Set([
   '_id', '_tenantId', '_version', '_createdAt', '_updatedAt', '_deletedAt',
@@ -175,6 +186,12 @@ export class ActionExecutor {
     resolvedVariables['actor'] = { id: actor.id, roles: actor.roles, type: actor.type };
     resolvedVariables['now'] = now();
     resolvedVariables['params'] = params;
+
+    // Pre-resolve @link field paths referenced by the manifest.
+    // This populates link targets in the resolved objects so that
+    // preconditions, effects, and side-effects can traverse them
+    // (e.g. "patient.currentWard", "patient.currentBed").
+    await this.preResolveLinkPaths(manifest, resolvedVariables, schema, reqCtx);
 
     for (const precondition of manifest.preconditions) {
       const result = await this.config.cel.evaluate(
@@ -457,7 +474,7 @@ export class ActionExecutor {
           field.type.name,
           paramValue,
         );
-        resolved[field.name] = obj ?? null;
+        resolved[field.name] = obj ? addIdAlias(obj) : null;
       } else {
         // Scalar param — pass through
         resolved[field.name] = paramValue;
@@ -465,6 +482,80 @@ export class ActionExecutor {
     }
 
     return resolved;
+  }
+
+  // ─── Step 4b: Pre-resolve link paths ───
+
+  /**
+   * Scan the manifest for dotted paths that traverse @link fields and
+   * eagerly resolve them into the context. This allows sync resolveExpression
+   * and precondition CEL evaluation to access linked objects without
+   * needing async resolution at each call site.
+   *
+   * For example, "patient.currentBed" in a transfer-ward manifest triggers:
+   *   1. Find Patient type in schema
+   *   2. Find "currentBed" field with @link(type: "OccupiesBed", direction: OUTBOUND)
+   *   3. Query getLinks(patientId, "OccupiesBed", "outbound")
+   *   4. Fetch the target Bed object
+   *   5. Cache it as patient.currentBed in the context
+   */
+  private async preResolveLinkPaths(
+    manifest: ActionManifest,
+    context: Record<string, unknown>,
+    schema: ParsedSchema,
+    reqCtx: RequestContext,
+  ): Promise<void> {
+    // Collect all dotted paths from the manifest
+    const paths = new Set<string>();
+
+    for (const pre of manifest.preconditions) {
+      // Extract variable references from CEL: simple heuristic for dot paths
+      for (const match of pre.expr.matchAll(/([a-zA-Z_]\w*(?:\.\w+)+)/g)) {
+        paths.add(match[1]!);
+      }
+    }
+
+    for (const effect of manifest.effects) {
+      if (effect.type === 'updateObject' && effect.target.includes('.')) {
+        paths.add(effect.target);
+      }
+      if (effect.type === 'updateObject') {
+        for (const expr of Object.values(effect.set)) {
+          if (typeof expr === 'string' && expr.includes('.') && !expr.startsWith("'")) {
+            paths.add(expr);
+          }
+        }
+      }
+      if (effect.type === 'createObject') {
+        for (const expr of Object.values(effect.properties)) {
+          if (typeof expr === 'string' && expr.includes('.') && !expr.startsWith("'")) {
+            paths.add(expr);
+          }
+        }
+      }
+      if (effect.type === 'createLink' && effect.properties) {
+        for (const expr of Object.values(effect.properties)) {
+          if (typeof expr === 'string' && expr.includes('.') && !expr.startsWith("'")) {
+            paths.add(expr);
+          }
+        }
+      }
+    }
+
+    // For each unique dotted path, resolve it via resolveTarget (which handles
+    // link traversal and caches results in context).
+    const resolved = new Set<string>();
+    for (const path of paths) {
+      // Extract the link path prefix (e.g. "patient.currentWard" from "patient.currentWard.name")
+      const segments = path.split('.');
+      // Try progressively longer prefixes to resolve nested links
+      for (let i = 2; i <= segments.length; i++) {
+        const prefix = segments.slice(0, i).join('.');
+        if (resolved.has(prefix)) continue;
+        await this.resolveTarget(prefix, context, schema, reqCtx);
+        resolved.add(prefix);
+      }
+    }
   }
 
   // ─── Step 5: Effect execution ───
@@ -481,13 +572,13 @@ export class ActionExecutor {
   ): Promise<void> {
     switch (effect.type) {
       case 'updateObject':
-        await this.executeUpdateObject(effect, context, txn, reqCtx, affectedObjects, beforeStates, afterStates);
+        await this.executeUpdateObject(effect, context, txn, reqCtx, affectedObjects, beforeStates, afterStates, schema);
         break;
       case 'createLink':
         await this.executeCreateLink(effect, context, txn, reqCtx, schema, affectedObjects, afterStates);
         break;
       case 'deleteLink':
-        await this.executeDeleteLink(effect, context, txn, reqCtx, affectedObjects, beforeStates);
+        await this.executeDeleteLink(effect, context, txn, reqCtx, affectedObjects, beforeStates, schema);
         break;
       case 'createObject':
         await this.executeCreateObject(effect, context, txn, affectedObjects, afterStates);
@@ -499,10 +590,11 @@ export class ActionExecutor {
     effect: UpdateObjectEffect,
     context: Record<string, unknown>,
     txn: Transaction,
-    _reqCtx: RequestContext,
+    reqCtx: RequestContext,
     affectedObjects: AffectedObject[],
     beforeStates: Map<string, Record<string, unknown>>,
     afterStates: Map<string, Record<string, unknown>>,
+    schema?: ParsedSchema,
   ): Promise<void> {
     // Evaluate condition if present
     if (effect.condition) {
@@ -511,7 +603,7 @@ export class ActionExecutor {
     }
 
     // Resolve target to an object (supports dotted paths like "patient.currentBed")
-    const target = this.resolveTarget(effect.target, context);
+    const target = await this.resolveTarget(effect.target, context, schema, reqCtx);
     if (!target) {
       throw new Error(`Target "${effect.target}" not found in context`);
     }
@@ -542,8 +634,8 @@ export class ActionExecutor {
     effect: CreateLinkEffect,
     context: Record<string, unknown>,
     txn: Transaction,
-    _reqCtx: RequestContext,
-    _schema: ParsedSchema,
+    reqCtx: RequestContext,
+    schema: ParsedSchema,
     affectedObjects: AffectedObject[],
     afterStates: Map<string, Record<string, unknown>>,
   ): Promise<void> {
@@ -553,8 +645,8 @@ export class ActionExecutor {
       if (condResult.value !== true) return;
     }
 
-    const fromObj = this.resolveTarget(effect.from, context);
-    const toObj = this.resolveTarget(effect.to, context);
+    const fromObj = await this.resolveTarget(effect.from, context, schema, reqCtx);
+    const toObj = await this.resolveTarget(effect.to, context, schema, reqCtx);
     if (!fromObj) throw new Error(`createLink "from" param "${effect.from}" not found in context`);
     if (!toObj) throw new Error(`createLink "to" param "${effect.to}" not found in context`);
 
@@ -584,12 +676,14 @@ export class ActionExecutor {
     reqCtx: RequestContext,
     affectedObjects: AffectedObject[],
     beforeStates: Map<string, Record<string, unknown>>,
+    schema?: ParsedSchema,
   ): Promise<void> {
     // Resolve filter to concrete link IDs (Section 5.3 deleteLink resolution)
     const matchingLinks = await this.resolveDeleteLinkFilter(
       effect,
       context,
       reqCtx,
+      schema,
     );
 
     const expect = effect.expect ?? 'ONE';
@@ -655,20 +749,21 @@ export class ActionExecutor {
     effect: DeleteLinkEffect,
     context: Record<string, unknown>,
     reqCtx: RequestContext,
+    schema?: ParsedSchema,
   ): Promise<OntologyLink[]> {
     // Resolve "from" and "to" filter references to object IDs
     let fromId: string | undefined;
     let toId: string | undefined;
 
     if (effect.filter.from) {
-      const fromObj = this.resolveTarget(effect.filter.from, context);
+      const fromObj = await this.resolveTarget(effect.filter.from, context, schema, reqCtx);
       if (fromObj) {
         fromId = fromObj._id;
       }
     }
 
     if (effect.filter.to) {
-      const toObj = this.resolveTarget(effect.filter.to, context);
+      const toObj = await this.resolveTarget(effect.filter.to, context, schema, reqCtx);
       if (toObj) {
         toId = toObj._id;
       }
@@ -772,18 +867,70 @@ export class ActionExecutor {
    * Unlike resolveExpression (which returns _id for objects), this returns
    * the full object so the executor can read _type and _id from it.
    * Supports both flat keys ("patient") and dotted paths ("patient.currentBed").
+   *
+   * When a path segment refers to a @link field (e.g. "currentBed" on Patient),
+   * the link is followed via the storage provider to resolve the target object.
+   * Resolved link targets are cached in context to avoid redundant queries.
    */
-  private resolveTarget(target: string, context: Record<string, unknown>): OntologyObject | null {
+  private async resolveTarget(
+    target: string,
+    context: Record<string, unknown>,
+    schema?: ParsedSchema,
+    reqCtx?: RequestContext,
+  ): Promise<OntologyObject | null> {
     const parts = target.split('.');
     let current: unknown = context;
 
     for (const part of parts) {
       if (current === null || current === undefined) return null;
-      if (typeof current === 'object') {
-        current = (current as Record<string, unknown>)[part];
-      } else {
-        return null;
+      if (typeof current !== 'object') return null;
+
+      const next = (current as Record<string, unknown>)[part];
+      if (next !== undefined) {
+        current = next;
+        continue;
       }
+
+      // Property not found directly. If current is an OntologyObject,
+      // check if 'part' is a @link field and follow the link.
+      const obj = current as Record<string, unknown>;
+      if (schema && reqCtx && obj['_type'] && obj['_id']) {
+        const objTypeDef = schema.objectTypes.find((ot) => ot.name === obj['_type']);
+        if (objTypeDef) {
+          const linkField = objTypeDef.fields.find((f) => f.name === part);
+          const linkDir = linkField?.directives.find((d) => d.kind === 'link') as
+            | { kind: 'link'; type: string; direction: string }
+            | undefined;
+
+          if (linkDir) {
+            const direction = linkDir.direction.toLowerCase() as 'outbound' | 'inbound';
+            const page = await this.config.storage.getLinks(
+              reqCtx,
+              obj['_id'] as string,
+              linkDir.type,
+              direction,
+            );
+            const link = page.items[0];
+            if (link) {
+              const targetId = direction === 'outbound' ? link._toId : link._fromId;
+              const targetType = direction === 'outbound' ? link._toType : link._fromType;
+              const resolved = await this.config.storage.getObject(reqCtx, targetType, targetId);
+              if (resolved) {
+                addIdAlias(resolved);
+                // Cache in context so subsequent references don't re-query
+                (current as Record<string, unknown>)[part] = resolved;
+                current = resolved;
+                continue;
+              }
+            }
+            // Link doesn't exist (e.g. patient has no current bed)
+            return null;
+          }
+        }
+      }
+
+      // Truly not found
+      return null;
     }
 
     if (
