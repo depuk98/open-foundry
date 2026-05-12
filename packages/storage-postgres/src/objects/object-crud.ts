@@ -138,7 +138,12 @@ export async function createObject(
   const systemVals = [ctx.tenantId, id, type, 1, timestamp, timestamp];
 
   const propCols = propEntries.map(([k]) => pgIdent(snakeCase(k)));
-  const propVals = propEntries.map(([, v]) => v);
+  // Serialize objects/arrays as JSON strings for JSONB columns —
+  // the pg driver does not auto-serialize non-primitive values.
+  // Dates must pass through for TIMESTAMPTZ columns.
+  const propVals = propEntries.map(([, v]) =>
+    v !== null && typeof v === 'object' && !(v instanceof Date) ? JSON.stringify(v) : v,
+  );
 
   const allCols = [...systemCols, ...propCols];
   const allVals = [...systemVals, ...propVals];
@@ -213,7 +218,8 @@ export async function updateObject(
 
   for (const [key, value] of propEntries) {
     setClauses.push(`${pgIdent(snakeCase(key))} = $${paramIdx}`);
-    params.push(value);
+    // Serialize objects/arrays as JSON strings for JSONB columns
+    params.push(value !== null && typeof value === 'object' && !(value instanceof Date) ? JSON.stringify(value) : value);
     paramIdx++;
   }
 
@@ -408,7 +414,10 @@ async function insertHistory(
   // Copy all columns except _history_id (auto-generated)
   const entries = Object.entries(row);
   const cols = entries.map(([k]) => `"${k}"`);
-  const vals = entries.map(([, v]) => v);
+  // Serialize objects/arrays for JSONB columns (pg driver returns JSONB as JS objects)
+  const vals = entries.map(([, v]) =>
+    v !== null && typeof v === 'object' && !(v instanceof Date) ? JSON.stringify(v) : v,
+  );
   const placeholders = vals.map((_, i) => `$${i + 1}`);
 
   await q.query(

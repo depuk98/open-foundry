@@ -160,7 +160,7 @@
         "viewer": {
           "this": {}
         },
-        "self": {
+        "owner": {
           "this": {}
         }
       },
@@ -171,7 +171,7 @@
               { "type": "user" }
             ]
           },
-          "self": {
+          "owner": {
             "directly_related_user_types": [
               { "type": "user" }
             ]

@@ -5,7 +5,7 @@ services:
   # ─── Infrastructure ──────────────────────────────────────────────
 
   postgresql:
-    image: apache/age:v1.5.0-pg17
+    image: apache/age:release_PG17_1.6.0
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
@@ -49,8 +49,8 @@ services:
     image: openfga/openfga:v1.8.2
     command: run
     ports:
-      - "${OPENFGA_PORT:-8080}:8080"
-      - "8081:8081"
+      - "${OPENFGA_PORT:-8280}:8080"
+      - "8281:8081"
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
       OPENFGA_DATASTORE_URI: "postgres://${POSTGRES_USER:-openfoundry}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-openfoundry}?sslmode=disable"
@@ -58,11 +58,8 @@ services:
     depends_on:
       postgresql:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    # OpenFGA uses a distroless image (no shell/wget/curl), so in-container
+    # healthchecks are not possible.  Dependents use service_started.
     networks:
       - foundry
 
@@ -93,7 +90,7 @@ services:
       - foundry
 
   debezium:
-    image: debezium/connect:2.7
+    image: debezium/connect:2.7.3.Final
     ports:
       - "${DEBEZIUM_PORT:-8083}:8083"
     environment:
@@ -188,7 +185,7 @@ services:
       postgresql:
         condition: service_healthy
       openfga:
-        condition: service_healthy
+        condition: service_started
       cel-evaluator:
         condition: service_started
       redpanda:
@@ -300,7 +297,7 @@ services:
       postgresql:
         condition: service_healthy
       openfga:
-        condition: service_healthy
+        condition: service_started
       keycloak:
         condition: service_healthy
     healthcheck:

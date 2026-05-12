@@ -272,8 +272,12 @@ export async function createLink(
     ctx.tenantId, id, type, fromType, fromId, toType, toId, 1, timestamp, timestamp,
   ];
 
-  // Strip _engineLinkId from user-facing properties before persisting
+  // Strip _engineLinkId from user-facing properties before persisting.
+  // Auto-populate 'id' property (ODL @primary on link types) if not provided.
   const { _engineLinkId: _, ...userProps } = properties ?? {};
+  if (!('id' in userProps)) {
+    userProps['id'] = id;
+  }
   const propEntries = Object.entries(userProps);
   const propCols = propEntries.map(([k]) => pgIdent(snakeCase(k)));
   const propVals = propEntries.map(([, v]) => v);

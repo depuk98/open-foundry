@@ -17,7 +17,7 @@ POSTGRES_DB="${POSTGRES_DB:-openfoundry}"
 POSTGRES_USER="${POSTGRES_USER:-openfoundry}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
 OPENFGA_HOST="${OPENFGA_HOST:-localhost}"
-OPENFGA_PORT="${OPENFGA_PORT:-8080}"
+OPENFGA_PORT="${OPENFGA_PORT:-8280}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
@@ -113,7 +113,19 @@ load_openfga_model() {
     -d @"${model_file}" >/dev/null
 
   log "OpenFGA model loaded. Store ID: ${store_id}"
-  log "Set OPENFGA_STORE_ID=${store_id} in your .env file."
+
+  # Persist the store ID into .env so services pick it up on restart
+  local env_file="${SCRIPT_DIR}/.env"
+  if [ -f "${env_file}" ]; then
+    if grep -q '^OPENFGA_STORE_ID=' "${env_file}"; then
+      sed -i "s/^OPENFGA_STORE_ID=.*/OPENFGA_STORE_ID=${store_id}/" "${env_file}"
+    else
+      echo "OPENFGA_STORE_ID=${store_id}" >> "${env_file}"
+    fi
+    log "Wrote OPENFGA_STORE_ID=${store_id} to ${env_file}"
+  else
+    log "No .env file found — set OPENFGA_STORE_ID=${store_id} manually."
+  fi
 }
 
 # ─── 5. Load NHS Acute domain pack schema ─────────────────────────
@@ -188,7 +200,7 @@ main() {
   log "Services:"
   log "  GraphQL Playground: http://localhost:4000/graphql"
   log "  Keycloak Admin:     http://localhost:8180/auth/admin"
-  log "  OpenFGA Playground: http://localhost:8080/playground"
+  log "  OpenFGA Playground: http://localhost:8280/playground"
   log "  Debezium:           http://localhost:8083/"
   log "  OTEL Collector:     http://localhost:4317 (gRPC)"
 }

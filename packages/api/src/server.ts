@@ -143,8 +143,10 @@ async function main(): Promise<void> {
   }
 
   // ── Storage ──
+  // Use PostgreSQL when POSTGRES_URL is set, even in development mode.
+  // This allows local Docker Compose setups to use persistent storage.
   let storage: StorageProvider;
-  if (!isDev && process.env['POSTGRES_URL']) {
+  if (process.env['POSTGRES_URL']) {
     const config = parsePostgresUrl(process.env['POSTGRES_URL']);
     storage = new PostgresStorageProvider(config);
     logger.info(`Storage: PostgreSQL @ ${config.host}:${config.port}/${config.database}`);

@@ -35,7 +35,7 @@ open http://localhost:4000/graphql
 | sync-engine | 4003 (internal) | Overlay mode, CDC |
 | security-service | 4004 (internal) | OIDC, OpenFGA authz, audit |
 | cel-evaluator | 50051 | gRPC CEL runtime |
-| openfga | 8080 | Authorization (ReBAC) |
+| openfga | 8280 | Authorization (ReBAC) |
 | postgresql | 5432 | PostgreSQL 17 + Apache AGE |
 | redpanda | 19092 | Kafka-compatible streaming |
 | debezium | 8083 | Change Data Capture |

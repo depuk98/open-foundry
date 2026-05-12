@@ -336,10 +336,10 @@ describe('loadDomainPacks with extra directories', () => {
 });
 
 // ---------------------------------------------------------------------------
-// External RCE pack import (lives outside monorepo at ../rce-domain-pack)
+// External RCE pack import (lives outside monorepo at ../silmaril-dp-rce)
 // ---------------------------------------------------------------------------
 
-const RCE_PACK_DIR = resolve(DOMAIN_PACKS_DIR, '..', '..', 'rce-domain-pack');
+const RCE_PACK_DIR = resolve(DOMAIN_PACKS_DIR, '..', '..', 'silmaril-dp-rce');
 const rcePackAvailable = existsSync(resolve(RCE_PACK_DIR, 'pack.yaml'));
 
 describe.skipIf(!rcePackAvailable)('loadDomainPacks with external RCE pack', () => {

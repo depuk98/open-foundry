@@ -729,7 +729,7 @@ provides:
 | `sync-engine` | `openfoundry/sync:0.1` | 4003 (internal) | CDC consumer + overlay query proxy. |
 | `security-service` | `openfoundry/security:0.1` | 4004 (internal) | Auth + authz + consent + audit. |
 | `cel-evaluator` | `openfoundry/cel:0.1` | 50051 (gRPC) | Go sidecar. CEL expression evaluation. |
-| `openfga` | `openfga/openfga:latest` | 8080 | ReBAC engine. |
+| `openfga` | `openfga/openfga:latest` | 8280 | ReBAC engine. |
 | `postgresql` | `postgres:17` | 5432 | Ontology store + audit log + OpenFGA store. |
 | `redpanda` | `redpandadata/redpanda:latest` | 9092 | Event bus (Kafka-compatible). |
 | `debezium` | `debezium/connect:2.x` | 8083 | CDC from PAS database. |
@@ -744,7 +744,7 @@ docker compose up
 # REST API:            http://localhost:4000/api/v1/
 # FHIR endpoint:       http://localhost:4000/fhir/
 # Keycloak admin:      http://localhost:8180/admin
-# OpenFGA playground:  http://localhost:8080/playground
+# OpenFGA playground:  http://localhost:8280/playground
 ```
 
 ### 5.3 Production (Kubernetes / Helm)

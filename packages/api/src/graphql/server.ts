@@ -46,7 +46,12 @@ export function createGraphQLServer(config: GraphQLServerConfig): GraphQLServerI
   const { resolvers, pubsub } = generateResolvers(config.schema, config.deps);
 
   // 3. Build a single executable schema used by both transports
-  const executableSchema = makeExecutableSchema({ typeDefs: sdl, resolvers });
+  const executableSchema = makeExecutableSchema({
+    typeDefs: sdl,
+    resolvers,
+    // Warn (not error) — deferred bulk-action types lack resolvers (see TODO above).
+    resolverValidationOptions: { requireResolversToMatchSchema: 'warn' },
+  });
 
   // 4. Create Apollo Server with the executable schema
   const isDev = config.isDev ?? false;

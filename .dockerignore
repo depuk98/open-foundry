@@ -8,11 +8,20 @@
 node_modules
 **/node_modules
 **/dist
+**/*.tsbuildinfo
 **/*.test.ts
 **/__tests__
 **/coverage
-tests/
-tools/
+# Exclude tests/ and tools/ source — only package.json is needed in Docker so
+# pnpm sees the full workspace and --frozen-lockfile works.
+tests/*/src
+tests/*/.turbo
+tests/*/.gitkeep
+tests/*/*.ts
+tools/*/src
+tools/*/.turbo
+tools/*/.gitkeep
+tools/*/*.ts
 docs/
 *.md
 LICENSE

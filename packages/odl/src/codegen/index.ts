@@ -647,6 +647,7 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
   for (const obj of schema.objectTypes) {
     const lower = lowerFirst(obj.name);
     subFields.push(`  ${lower}Changed(id: ID!): ${obj.name}ChangeEvent!`);
+    subFields.push(`  ${lower}sChanged(filter: JSON): ${obj.name}ChangeEvent!`);
   }
   if (subFields.length > 0) {
     sections.push(['type Subscription {', ...subFields, '}'].join('\n'));
