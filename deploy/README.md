@@ -1,6 +1,6 @@
 # Open Foundry — Development Deployment
 
-Local development environment with all 12 services via Docker Compose.
+Local development environment with all 13 services via Docker Compose.
 
 ## Prerequisites
 
@@ -37,6 +37,7 @@ open http://localhost:4000/graphql
 | cel-evaluator | 50051 | gRPC CEL runtime |
 | openfga | 8280 | Authorization (ReBAC) |
 | postgresql | 5432 | PostgreSQL 17 + Apache AGE |
+| redis | 6379 | Rate limiter + cache store |
 | redpanda | 19092 | Kafka-compatible streaming |
 | debezium | 8083 | Change Data Capture |
 | otel-collector | 4317 | OpenTelemetry traces/metrics |

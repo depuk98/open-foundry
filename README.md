@@ -291,11 +291,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 ## Test Coverage
 
-1,778 unit tests and 98 integration tests across all packages:
+1,794 unit tests and 98 integration tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,778 | Always run |
+| Unit tests | 1,794 | Always run |
 | Postgres integration tests | 98 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -358,14 +358,14 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 
 | Metric | Value |
 |--------|-------|
-| TypeScript source | ~26,000 lines |
-| Test code | ~37,000 lines |
-| Go source (CEL evaluator) | ~1,900 lines |
+| TypeScript source | ~27,600 lines |
+| Test code | ~33,000 lines |
+| Go source (CEL evaluator) | ~2,100 lines |
 | Domain pack config (ODL, YAML, FGA) | ~1,700 lines |
-| Deployment config | ~2,000 lines |
+| Deployment config | ~2,200 lines |
 | Specification + docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,876 |
+| Unit + integration tests | 1,892 |
 
 ---
 
