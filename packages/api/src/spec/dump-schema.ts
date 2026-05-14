@@ -8,7 +8,8 @@
  * generated from the merged ParsedSchema across all loaded domain packs.
  */
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { generateGraphQLSchema } from '@openfoundry/odl';
 import { loadDomainPacks } from '../schema-loader.js';
 
@@ -22,6 +23,7 @@ async function main(): Promise<void> {
   const { parsed } = await loadDomainPacks();
   const sdl = generateGraphQLSchema(parsed);
 
+  mkdirSync(dirname(resolve(output)), { recursive: true });
   writeFileSync(output, sdl, 'utf-8');
   console.log(`GraphQL SDL written to ${output} (${sdl.split('\n').length} lines)`);
 }

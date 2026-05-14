@@ -19,7 +19,7 @@
     "spec:openapi": "node dist/spec/dump-openapi.js",
     "spec:graphql": "node dist/spec/dump-schema.js",
     "spec:asyncapi": "node dist/spec/dump-asyncapi.js",
-    "spec:all": "mkdir -p spec && node dist/spec/dump-openapi.js spec/openapi.yaml && node dist/spec/dump-schema.js spec/schema.graphql && node dist/spec/dump-asyncapi.js spec/asyncapi.yaml"
+    "spec:all": "node dist/spec/dump-openapi.js spec/openapi.yaml && node dist/spec/dump-schema.js spec/schema.graphql && node dist/spec/dump-asyncapi.js spec/asyncapi.yaml"
   },
   "files": [
     "dist"

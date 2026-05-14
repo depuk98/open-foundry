@@ -282,8 +282,11 @@ function actionPath(action: ActionType): Record<string, unknown> {
 
 /**
  * Generate an OpenAPI 3.0.3 specification from a ParsedSchema.
+ *
+ * @param version - Spec version string (defaults to '1.0.0').
+ *                  Dump CLIs pass the platform version from package.json.
  */
-export function generateOpenApiSpec(schema: ParsedSchema): Record<string, unknown> {
+export function generateOpenApiSpec(schema: ParsedSchema, version = '1.0.0'): Record<string, unknown> {
   // Merge all paths
   let paths: Record<string, unknown> = {};
   for (const obj of schema.objectTypes) {
@@ -339,7 +342,7 @@ export function generateOpenApiSpec(schema: ParsedSchema): Record<string, unknow
     openapi: '3.0.3',
     info: {
       title: 'Open Foundry API',
-      version: '1.0.0',
+      version,
       description: 'Auto-generated REST API for the Open Foundry ontology platform.',
       license: { name: 'Apache-2.0', url: 'https://www.apache.org/licenses/LICENSE-2.0' },
     },

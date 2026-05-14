@@ -20,8 +20,10 @@ import { generateAsyncApiSpec } from '../spec/asyncapi-generator.js';
 import { generateGraphQLSchema } from '@openfoundry/odl';
 import type { ParsedSchema } from '@openfoundry/odl';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DOMAIN_PACKS_DIR = resolve(__dirname, '..', '..', '..', '..', 'domain-packs');
+// Use all discovered packs — matches what spec:all / CI produces.
+const DOMAIN_PACKS_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'domain-packs',
+);
 
 let schema: ParsedSchema;
 let openapi: Record<string, unknown>;
@@ -29,7 +31,7 @@ let asyncapi: Record<string, unknown>;
 let sdl: string;
 
 beforeAll(async () => {
-  const { parsed } = await loadDomainPacks(DOMAIN_PACKS_DIR, ['core', 'nhs-acute']);
+  const { parsed } = await loadDomainPacks(DOMAIN_PACKS_DIR);
   schema = parsed;
   openapi = generateOpenApiSpec(parsed);
   asyncapi = generateAsyncApiSpec(parsed);
