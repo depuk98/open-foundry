@@ -119,7 +119,7 @@ export async function extractUser(
         id: 'dev-user',
         name: 'Development User',
         email: 'dev@openfoundry.local',
-        roles: ['admin', 'clinician', 'nurse_in_charge', 'compliance_analyst', 'compliance_officer', 'bsa_officer'],
+        roles: ['admin', 'clinician', 'nurse_in_charge', 'compliance_analyst', 'compliance_officer', 'bsa_officer', 'operator', 'governor', 'auditor'],
         groups: [],
         tenantId: 'default',
       };

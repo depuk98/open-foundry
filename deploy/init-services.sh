@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Open Foundry — Development Environment Setup
 # Waits for infrastructure and initializes all dependent services.
+# Runs psql via `docker compose exec` so no host-side pg tools are needed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,26 +12,28 @@ if [ -f "${SCRIPT_DIR}/.env" ]; then
   set -a; source "${SCRIPT_DIR}/.env"; set +a
 fi
 
-POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
-POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_DB="${POSTGRES_DB:-openfoundry}"
 POSTGRES_USER="${POSTGRES_USER:-openfoundry}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
 OPENFGA_HOST="${OPENFGA_HOST:-localhost}"
 OPENFGA_PORT="${OPENFGA_PORT:-8280}"
-
-export PGPASSWORD="${POSTGRES_PASSWORD}"
 
 log() { echo "[init] $*"; }
 err() { echo "[init] ERROR: $*" >&2; }
 
+# Run psql inside the postgresql container (no host-side pg tools required).
+dc_psql() {
+  docker compose -f "${COMPOSE_FILE}" exec -T postgresql \
+    psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -q "$@"
+}
+
 # ─── 1. Wait for PostgreSQL ────────────────────────────────────────
 
 wait_for_postgres() {
-  log "Waiting for PostgreSQL on ${POSTGRES_HOST}:${POSTGRES_PORT}..."
+  log "Waiting for PostgreSQL (via docker compose exec)..."
   local attempts=0
   local max_attempts=30
-  until pg_isready -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -q 2>/dev/null; do
+  until docker compose -f "${COMPOSE_FILE}" exec -T postgresql \
+    pg_isready -U "${POSTGRES_USER}" -q 2>/dev/null; do
     attempts=$((attempts + 1))
     if [ "${attempts}" -ge "${max_attempts}" ]; then
       err "PostgreSQL not ready after ${max_attempts} attempts"
@@ -45,7 +48,7 @@ wait_for_postgres() {
 
 init_age() {
   log "Initializing Apache AGE extension..."
-  psql -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -q <<'SQL'
+  dc_psql <<'SQL'
 CREATE EXTENSION IF NOT EXISTS age;
 LOAD 'age';
 SET search_path = ag_catalog, "$user", public;
@@ -135,7 +138,7 @@ load_domain_schema() {
 
   # Create core tables for the domain pack registry.
   # The api-gateway registers all loaded packs on boot via INSERT ... ON CONFLICT.
-  psql -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -q <<'SQL'
+  dc_psql <<'SQL'
 -- Domain pack registry
 CREATE TABLE IF NOT EXISTS _domain_packs (
   name        TEXT PRIMARY KEY,

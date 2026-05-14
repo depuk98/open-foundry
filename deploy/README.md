@@ -5,8 +5,7 @@ Local development environment with all 13 services via Docker Compose.
 ## Prerequisites
 
 - Docker Engine 24+ with Compose v2
-- `psql` CLI (for init script)
-- `curl` (for init script)
+- `curl` (for init script — OpenFGA setup)
 
 ## Quick Start
 
