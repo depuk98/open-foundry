@@ -15,7 +15,11 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "spec:openapi": "node dist/spec/dump-openapi.js",
+    "spec:graphql": "node dist/spec/dump-schema.js",
+    "spec:asyncapi": "node dist/spec/dump-asyncapi.js",
+    "spec:all": "mkdir -p spec && node dist/spec/dump-openapi.js spec/openapi.yaml && node dist/spec/dump-schema.js spec/schema.graphql && node dist/spec/dump-asyncapi.js spec/asyncapi.yaml"
   },
   "files": [
     "dist"

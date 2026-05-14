@@ -1,0 +1,128 @@
+/**
+ * AsyncAPI 2.6.0 specification generator.
+ *
+ * Produces a JSON-serializable AsyncAPI document from the ParsedSchema.
+ * Channels mirror the GraphQL subscription resolvers:
+ *
+ *   {lower}Changed     — single-object change stream (filtered by id)
+ *   {lower}sChanged    — collection change stream (filtered by optional JSON filter)
+ *
+ * Transport: graphql-ws over WebSocket at /graphql.
+ */
+
+import type { ParsedSchema, ObjectType } from '@openfoundry/odl';
+
+function lowerFirst(s: string): string {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+function changeEventSchema(obj: ObjectType): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      changeType: { type: 'string', enum: ['CREATED', 'UPDATED', 'DELETED'] },
+      object: {
+        type: 'object',
+        description: `${obj.name} object snapshot after the change.`,
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          _type: { type: 'string', const: obj.name },
+        },
+      },
+      previousValues: {
+        type: 'object',
+        nullable: true,
+        description: 'Field-level diff (old/new) for UPDATED events.',
+      },
+      causedBy: {
+        type: 'object',
+        nullable: true,
+        properties: {
+          actionType: { type: 'string', nullable: true },
+          actionId: { type: 'string', nullable: true },
+        },
+      },
+      timestamp: { type: 'string', format: 'date-time' },
+    },
+    required: ['changeType', 'object', 'timestamp'],
+  };
+}
+
+/**
+ * Generate an AsyncAPI 2.6.0 specification from a ParsedSchema.
+ */
+export function generateAsyncApiSpec(schema: ParsedSchema): Record<string, unknown> {
+  const channels: Record<string, unknown> = {};
+
+  for (const obj of schema.objectTypes) {
+    const lower = lowerFirst(obj.name);
+    const eventSchema = changeEventSchema(obj);
+
+    // {lower}Changed — subscribe to a single object by ID
+    channels[`${lower}Changed`] = {
+      description: `Changes to a specific ${obj.name} object (by ID).`,
+      subscribe: {
+        operationId: `on${obj.name}Changed`,
+        summary: `Receive change events for a single ${obj.name}`,
+        message: {
+          name: `${obj.name}ChangeEvent`,
+          payload: eventSchema,
+        },
+      },
+      parameters: {
+        id: {
+          description: `ID of the ${obj.name} to watch`,
+          schema: { type: 'string', format: 'uuid' },
+        },
+      },
+    };
+
+    // {lower}sChanged — subscribe to all objects of this type (optional filter)
+    channels[`${lower}sChanged`] = {
+      description: `Changes to any ${obj.name} object (optionally filtered).`,
+      subscribe: {
+        operationId: `on${obj.name}sChanged`,
+        summary: `Receive change events for ${obj.name} objects`,
+        message: {
+          name: `${obj.name}ChangeEvent`,
+          payload: eventSchema,
+        },
+      },
+      parameters: {
+        filter: {
+          description: 'Optional JSON filter to narrow the subscription',
+          schema: { type: 'object' },
+        },
+      },
+    };
+  }
+
+  return {
+    asyncapi: '2.6.0',
+    info: {
+      title: 'Open Foundry Event API',
+      version: '1.0.0',
+      description: 'Real-time change events for the Open Foundry ontology platform.',
+      license: { name: 'Apache-2.0', url: 'https://www.apache.org/licenses/LICENSE-2.0' },
+    },
+    servers: {
+      websocket: {
+        url: '/graphql',
+        protocol: 'ws',
+        description: 'GraphQL WebSocket transport (graphql-ws protocol)',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    channels,
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Pass via connection_params.Authorization when establishing the WebSocket connection.',
+        },
+      },
+    },
+  };
+}
