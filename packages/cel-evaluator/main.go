@@ -86,7 +86,14 @@ func main() {
 		grpcServer.GracefulStop()
 	}()
 
-	log.Printf("CEL evaluator gRPC server listening on :%s", port)
+	rev := os.Getenv("GIT_REVISION")
+	if rev == "" {
+		rev = "unknown"
+	}
+	if len(rev) > 8 {
+		rev = rev[:8]
+	}
+	log.Printf("CEL evaluator gRPC server listening on :%s (rev: %s)", port, rev)
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}

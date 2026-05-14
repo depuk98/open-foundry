@@ -46,7 +46,7 @@ import { AuthorizationService, OidcAuthenticator, AuditWriter, MemoryAuditStore,
 import type { OpenFgaClientInterface } from '@openfoundry/security';
 import type { StorageProvider, RequestContext } from '@openfoundry/spi';
 import { createGraphQLServer, buildResolverContext } from './graphql/index.js';
-import { generateRestRoutes } from './rest/index.js';
+import { generateRestRoutes, generateOpenApiSpec } from './rest/index.js';
 import { createFhirRouter } from './fhir/index.js';
 import { InMemorySubscribableEventBus, SubscriptionManager } from './subscriptions/index.js';
 import type { SubscribableEventBus } from './subscriptions/index.js';
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
   const packNames = parseDomainPacksEnv(process.env['DOMAIN_PACKS']);
   const {
     parsed: schema, spiSchema, packs, packInfos, manifestRegistry,
-    fieldPermissions, permissionOverrides, connectorManifests,
+    fieldPermissions, permissionOverrides, connectorManifests, seedManifests,
   } = await loadDomainPacks(undefined, packNames);
   logger.info(
     `Schema: loaded ${packs.length} domain pack(s) — ` +
@@ -177,6 +177,11 @@ async function main(): Promise<void> {
   }
   if (connectorManifests.length > 0) {
     logger.info(`Schema: ${connectorManifests.length} connector manifest(s) from domain packs`);
+  }
+  if (seedManifests.length > 0) {
+    const totalSeedObjects = seedManifests.reduce((n, s) => n + s.objects.length, 0);
+    const totalSeedLinks = seedManifests.reduce((n, s) => n + s.links.length, 0);
+    logger.info(`Schema: ${seedManifests.length} seed manifest(s) — ${totalSeedObjects} object(s) + ${totalSeedLinks} link(s)`);
   }
   if (schema.objectTypes.length === 0) {
     logger.warn('WARNING: No object types loaded — check DOMAIN_PACKS configuration.');
@@ -225,6 +230,78 @@ async function main(): Promise<void> {
   const emitter = new EngineEventEmitter(eventBus);
   const objectManager = new ObjectManager({ storage, schema, eventEmitter: emitter });
   const linkManager = new LinkManager({ storage, schema, eventEmitter: emitter });
+
+  // ── Bootstrap Seeds ──
+  // Apply seed data from domain packs (idempotent — skips objects that already exist).
+  // Runs through ObjectManager/LinkManager for full validation, events, and audit.
+  // Objects can declare a `ref` label; links reference objects by `ref` or literal ID.
+  if (seedManifests.length > 0) {
+    let seededObjects = 0;
+    let seededLinks = 0;
+    let skippedObjects = 0;
+    // ref → generated _id, shared across all seeds for cross-pack references
+    const refMap = new Map<string, string>();
+
+    for (const seed of seedManifests) {
+      // Phase 1: Create objects
+      for (const obj of seed.objects) {
+        // Idempotency: if this ref was seeded in a prior run, try to find it
+        // by a unique field. For objects with a `name` field we use that as
+        // the natural key. This is best-effort — packs with non-unique fields
+        // will re-create on each boot (ObjectManager deduplication protects
+        // unique-indexed fields from duplicates).
+        const nameValue = obj.fields['name'] ?? obj.fields['title'];
+        if (nameValue && typeof nameValue === 'string') {
+          try {
+            const results = await storage.queryObjects(bootCtx, obj.type,
+              { field: 'name', operator: 'eq', value: nameValue },
+              { limit: 1 },
+            );
+            if (results.items.length > 0) {
+              const existingId = results.items[0]!._id;
+              if (obj.ref) refMap.set(obj.ref, existingId);
+              skippedObjects++;
+              continue;
+            }
+          } catch {
+            // Type may not support filter or field doesn't exist — proceed to create
+          }
+        }
+        try {
+          const created = await objectManager.create(obj.type, obj.fields, bootCtx);
+          const createdId = created['_id'] as string;
+          if (obj.ref) refMap.set(obj.ref, createdId);
+          logger.info(`Seed: created ${obj.type} '${createdId}' (ref: ${obj.ref ?? 'none'}) from pack '${seed.packName}'`);
+          seededObjects++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn(`Seed: failed to create ${obj.type} from pack '${seed.packName}': ${msg}`);
+        }
+      }
+
+      // Phase 2: Create links (after all objects in this seed exist)
+      for (const lnk of seed.links) {
+        const fromId = refMap.get(lnk.from) ?? lnk.from;
+        const toId = refMap.get(lnk.to) ?? lnk.to;
+        try {
+          await linkManager.createLink(lnk.type, fromId, toId, lnk.fields, bootCtx);
+          seededLinks++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Duplicate link is expected on re-run — don't warn loudly
+          if (msg.includes('already exists') || msg.includes('duplicate') || msg.includes('cardinality')) {
+            logger.info(`Seed: link ${lnk.type} ${fromId}→${toId} already exists, skipping`);
+          } else {
+            logger.warn(`Seed: failed to create link ${lnk.type} from pack '${seed.packName}': ${msg}`);
+          }
+        }
+      }
+    }
+
+    if (seededObjects > 0 || seededLinks > 0 || skippedObjects > 0) {
+      logger.info(`Seed: created ${seededObjects} object(s) + ${seededLinks} link(s), skipped ${skippedObjects} existing`);
+    }
+  }
 
   // ── Authentication ──
   const oidcIssuer = process.env['OIDC_ISSUER'] ?? 'http://localhost:8180/realms/openfoundry';
@@ -720,6 +797,12 @@ async function main(): Promise<void> {
     });
   }
 
+  // ── OpenAPI spec at /api/v1/openapi.json ──
+  const openApiSpec = generateOpenApiSpec(schema);
+  app.get('/api/v1/openapi.json', (_req, res) => {
+    res.json(openApiSpec);
+  });
+
   // ── FHIR at /fhir/* ──
   const fhirBaseUrl = process.env['FHIR_BASE_URL'] ?? `http://localhost:${PORT}/fhir`;
   if (!isDev && !process.env['FHIR_BASE_URL']) {
@@ -816,7 +899,7 @@ async function main(): Promise<void> {
 
   const mode = isDev ? 'DEVELOPMENT' : 'PRODUCTION';
   const imageRevision = process.env['GIT_REVISION'] ?? 'unknown';
-  logger.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT} (image: ${imageRevision.slice(0, 8)})`);
+  logger.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT} (rev: ${imageRevision.slice(0, 8)})`);
   logger.info(`  GraphQL:  http://localhost:${PORT}/graphql`);
   logger.info(`  WS Subs:  ws://localhost:${PORT}/graphql`);
   logger.info(`  REST:     http://localhost:${PORT}/api/v1/`);
@@ -859,6 +942,29 @@ function deriveActionAuthzMappings(
   return mappings;
 }
 
+/** OpenFGA relation body — one of direct, computed, tuple-to-userset, or union. */
+export interface FgaRelationBody {
+  this?: Record<string, never>;
+  computedUserset?: { relation: string };
+  tupleToUserset?: { tupleset: { relation: string }; computedUserset: { relation: string } };
+  union?: { child: FgaRelationBody[] };
+}
+
+/** Single type definition in the OpenFGA authorization model JSON. */
+export interface FgaTypeDef {
+  type: string;
+  relations?: Record<string, FgaRelationBody>;
+  metadata?: {
+    relations: Record<string, { directly_related_user_types: Array<{ type: string }> }>;
+  };
+}
+
+/** OpenFGA authorization model JSON accepted by the REST API. */
+export interface FgaAuthorizationModel {
+  schema_version: string;
+  type_definitions: FgaTypeDef[];
+}
+
 /**
  * Convert OpenFGA DSL (schema 1.1) to the JSON format accepted by the
  * OpenFGA REST API POST /stores/{id}/authorization-models.
@@ -866,26 +972,26 @@ function deriveActionAuthzMappings(
  * Handles: direct types [user], computed usersets (derived), tuple-to-userset
  * (from), and union (or) relations.
  */
-export function fgaDslToJson(dsl: string): { schema_version: string; type_definitions: unknown[] } {
-  const typeDefs: unknown[] = [];
+export function fgaDslToJson(dsl: string): FgaAuthorizationModel {
+  const typeDefs: FgaTypeDef[] = [];
   const lines = dsl.split('\n');
   let currentType: string | null = null;
-  let relations: Record<string, unknown> = {};
+  let relations: Record<string, FgaRelationBody> = {};
   let metadata: Record<string, { directly_related_user_types: Array<{ type: string }> }> = {};
 
   function flushType() {
     if (currentType !== null) {
-      const def: Record<string, unknown> = { type: currentType };
+      const def: FgaTypeDef = { type: currentType };
       if (Object.keys(relations).length > 0) {
-        def['relations'] = relations;
-        const metaRelations: Record<string, unknown> = {};
+        def.relations = relations;
+        const metaRelations: Record<string, { directly_related_user_types: Array<{ type: string }> }> = {};
         for (const [rel, types] of Object.entries(metadata)) {
           if (types.directly_related_user_types.length > 0) {
             metaRelations[rel] = types;
           }
         }
         if (Object.keys(metaRelations).length > 0) {
-          def['metadata'] = { relations: metaRelations };
+          def.metadata = { relations: metaRelations };
         }
       }
       typeDefs.push(def);
@@ -938,7 +1044,7 @@ export function fgaDslToJson(dsl: string): { schema_version: string; type_defini
         }
       } else {
         // Union of multiple parts
-        const children: unknown[] = [];
+        const children: FgaRelationBody[] = [];
         for (const part of parts) {
           const p = part.trim();
           const directMatch = p.match(/^\[(\w+)]$/);

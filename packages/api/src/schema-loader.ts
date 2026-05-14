@@ -41,6 +41,7 @@ interface PackManifest {
   actions?: string[];
   connectors?: string[];
   permissions?: string[];
+  seed?: string[];
 }
 
 /** Connector manifest loaded from a domain pack. */
@@ -51,6 +52,38 @@ export interface ConnectorManifest {
   config: Record<string, unknown>;
   /** Pack that declared this connector. */
   packName: string;
+}
+
+/** A single seed object to create at bootstrap. */
+export interface SeedObject {
+  /** Object type name (must exist in the schema). */
+  type: string;
+  /** Local reference label for use in seed link `from`/`to` fields. */
+  ref?: string;
+  /** Field values for the object. */
+  fields: Record<string, unknown>;
+}
+
+/** A single seed link to create at bootstrap. */
+export interface SeedLink {
+  /** Link type name (must exist in the schema). */
+  type: string;
+  /** Source object — either a seed `ref` label or a literal object ID. */
+  from: string;
+  /** Target object — either a seed `ref` label or a literal object ID. */
+  to: string;
+  /** Optional link properties. */
+  fields?: Record<string, unknown>;
+}
+
+/** Seed manifest loaded from a domain pack's seed/*.yaml files. */
+export interface SeedManifest {
+  /** Pack that declared this seed. */
+  packName: string;
+  /** Objects to create (in order). */
+  objects: SeedObject[];
+  /** Links to create (in order, after objects). */
+  links: SeedLink[];
 }
 
 /** Metadata about a loaded pack, including its origin. */
@@ -81,6 +114,8 @@ export interface LoadedSchema {
   permissionOverrides: string[];
   /** Connector manifests from pack connectors/*.yaml files. */
   connectorManifests: ConnectorManifest[];
+  /** Seed manifests from pack seed/*.yaml files. */
+  seedManifests: SeedManifest[];
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +383,67 @@ function loadPackConnectors(
       config,
       packName: manifest.name,
     });
+  }
+}
+
+/**
+ * Load seed YAML files from a domain pack.
+ * Each seed file contains `objects:` and/or `links:` arrays.
+ */
+function loadPackSeeds(
+  packDir: string,
+  manifest: PackManifest,
+  seeds: SeedManifest[],
+): void {
+  const seedFiles = manifest.seed ?? [];
+  for (const file of seedFiles) {
+    const filePath = resolve(packDir, file);
+    if (!existsSync(filePath)) {
+      logger.warn(`Schema loader: seed file '${file}' not found in ${packDir}, skipping`);
+      continue;
+    }
+    const content = readFileSync(filePath, 'utf-8');
+    const parsed = parseYaml(content);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      logger.warn(`Schema loader: seed file '${file}' in ${packDir} is not a valid YAML object, skipping`);
+      continue;
+    }
+    const raw = parsed as Record<string, unknown>;
+    const objects: SeedObject[] = [];
+    const links: SeedLink[] = [];
+
+    if (Array.isArray(raw['objects'])) {
+      for (const obj of raw['objects']) {
+        if (obj && typeof obj === 'object' && typeof (obj as Record<string, unknown>)['type'] === 'string') {
+          const o = obj as Record<string, unknown>;
+          objects.push({
+            type: o['type'] as string,
+            ref: typeof o['ref'] === 'string' ? o['ref'] : undefined,
+            fields: (o['fields'] && typeof o['fields'] === 'object' ? o['fields'] : {}) as Record<string, unknown>,
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(raw['links'])) {
+      for (const lnk of raw['links']) {
+        if (lnk && typeof lnk === 'object') {
+          const l = lnk as Record<string, unknown>;
+          if (typeof l['type'] === 'string' && typeof l['from'] === 'string' && typeof l['to'] === 'string') {
+            links.push({
+              type: l['type'] as string,
+              from: l['from'] as string,
+              to: l['to'] as string,
+              fields: (l['fields'] && typeof l['fields'] === 'object' ? l['fields'] : undefined) as Record<string, unknown> | undefined,
+            });
+          }
+        }
+      }
+    }
+
+    if (objects.length > 0 || links.length > 0) {
+      seeds.push({ packName: manifest.name, objects, links });
+    }
   }
 }
 
@@ -697,6 +793,7 @@ export async function loadDomainPacks(
   const fieldPermissions: FieldPermissionConfig[] = [];
   const permissionOverrides: string[] = [];
   const connectorManifests: ConnectorManifest[] = [];
+  const seedManifests: SeedManifest[] = [];
 
   for (const name of names) {
     const packDir = packMap.get(name)!;
@@ -736,6 +833,9 @@ export async function loadDomainPacks(
 
     // Load connector manifests
     loadPackConnectors(packDir, manifest, connectorManifests);
+
+    // Load seed manifests
+    loadPackSeeds(packDir, manifest, seedManifests);
   }
 
   const merged = mergeSchemas(parsedSchemas);
@@ -781,5 +881,6 @@ export async function loadDomainPacks(
     fieldPermissions,
     permissionOverrides,
     connectorManifests,
+    seedManifests,
   };
 }

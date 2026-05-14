@@ -26,6 +26,8 @@ my-pack/
     actions.odl
   actions/
     do-something.yaml      # Action manifests (CEL preconditions + effects)
+  seed/
+    bootstrap.yaml         # Bootstrap seed data (optional)
   connectors/
     source-jdbc.yaml       # Connector configs (optional)
   permissions/
@@ -51,6 +53,9 @@ schema:
 actions:
   - actions/do-something.yaml
 
+seed:
+  - seed/bootstrap.yaml
+
 connectors:
   - connectors/source-jdbc.yaml
 
@@ -69,6 +74,7 @@ permissions:
 | `actions` | No | Action manifest YAML files |
 | `connectors` | No | Connector configuration YAML files |
 | `permissions` | No | OpenFGA DSL files merged into the authorization model |
+| `seed` | No | Seed data YAML files applied at boot (idempotent bootstrap) |
 
 ### ODL Schema Files
 
@@ -150,6 +156,61 @@ sync:
 
 The `connector` field must reference a plugin type registered in the `ConnectorRegistry`
 (currently `jdbc` and `rest`). Invalid connector types are logged as warnings at boot.
+
+### Seed Data (Bootstrap)
+
+Seed manifests declare objects and links to create at startup. This solves the
+bootstrap problem — packs that require initial data (e.g., a root Instance, default
+Approach objects) before any action can run.
+
+```yaml
+# seed/bootstrap.yaml
+objects:
+  - type: Instance
+    ref: default-instance     # Local label for link references
+    fields:
+      name: "Default Instance"
+      status: ACTIVE
+
+  - type: Approach
+    ref: risk-based
+    fields:
+      name: "Risk-Based Approach"
+      description: "Standard RBA methodology"
+
+links:
+  - type: EmploysApproach
+    from: default-instance     # Resolves via ref map
+    to: risk-based
+```
+
+**Seed format:**
+
+| Field | Description |
+|-------|-------------|
+| `objects[].type` | Object type name (must exist in schema) |
+| `objects[].ref` | Local label for linking — maps to the generated `_id` at runtime |
+| `objects[].fields` | Field values (same as create mutation input) |
+| `links[].type` | Link type name |
+| `links[].from` | Source ref label or literal UUID |
+| `links[].to` | Target ref label or literal UUID |
+| `links[].fields` | Optional link properties |
+
+**Idempotency:** On repeated boots, the loader checks for existing objects by `name`
+field. Objects that already exist are skipped and their IDs are resolved into the ref
+map so links still wire up correctly. Duplicate links (same from/to) are silently
+skipped.
+
+**Execution:** Seeds run through `ObjectManager` and `LinkManager` — full validation,
+event emission, and audit trail apply. The boot context uses `tenantId: 'system'`,
+`actorId: 'boot'`.
+
+Add seeds to `pack.yaml`:
+
+```yaml
+seed:
+  - seed/bootstrap.yaml
+```
 
 ### Permission Overrides (OpenFGA DSL)
 
@@ -277,11 +338,15 @@ When the api-gateway starts:
 
 7. **Connectors** — Connector YAML files are parsed and validated against registered plugins.
 
-8. **Dependency Validation** — `dependencies` in each `pack.yaml` are checked against loaded pack versions. Missing or unsatisfied constraints log warnings.
+8. **Seeds** — Seed YAML files are loaded from each pack's `seed:` entries. Objects and links are created idempotently after schema application.
 
-9. **OpenFGA Sync** — The base authorization model (generated from ODL) is merged with permission overrides and POSTed to the OpenFGA store.
+9. **Dependency Validation** — `dependencies` in each `pack.yaml` are checked against loaded pack versions. Missing or unsatisfied constraints log warnings.
 
-10. **Registration** — Each loaded pack is recorded in the `_domain_packs` Postgres table and exposed via Prometheus gauge `openfoundry_pack_loaded{name,version,origin}`.
+10. **OpenFGA Sync** — The base authorization model (generated from ODL) is merged with permission overrides and POSTed to the OpenFGA store.
+
+11. **Registration** — Each loaded pack is recorded in the `_domain_packs` Postgres table and exposed via Prometheus gauge `openfoundry_pack_loaded{name,version,origin}`.
+
+12. **OpenAPI** — An OpenAPI 3.0.3 spec is generated from the merged schema and served at `/api/v1/openapi.json`.
 
 ## Introspection
 
@@ -328,6 +393,28 @@ curl http://localhost:4000/admin/packs | jq .
     "connectors": 1
   }
 }
+```
+
+### GET /api/v1/openapi.json
+
+Returns a full OpenAPI 3.0.3 specification for the REST API, auto-generated from the
+merged schema. Includes all object type CRUD routes, action execution endpoints,
+filter parameters, component schemas (with enums), and security definitions.
+
+```bash
+curl http://localhost:4000/api/v1/openapi.json | jq .info
+```
+
+Use this to generate client SDKs in any language via tools like
+[openapi-generator](https://openapi-generator.tech/) or
+[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen):
+
+```bash
+# Generate a Python client
+openapi-generator-cli generate -i http://localhost:4000/api/v1/openapi.json -g python -o ./client-python
+
+# Generate a Rust client
+openapi-generator-cli generate -i http://localhost:4000/api/v1/openapi.json -g rust -o ./client-rust
 ```
 
 ### Prometheus Metrics
@@ -394,8 +481,12 @@ warning.
 The API package includes CI fixture tests using a minimal external pack at
 `packages/api/src/__tests__/fixtures/external-pack/`. These tests verify schema loading,
 action manifest cross-referencing, permission override collection, connector parsing,
-origin tracking, env var loading, and dependency validation — without requiring any
-external repository.
+seed manifest loading, origin tracking, env var loading, and dependency validation —
+without requiring any external repository.
+
+A separate OpenAPI test verifies spec generation from the nhs-acute schema, covering
+path generation, component schemas, enum definitions, filter parameters, and security
+definitions.
 
 Run fixture tests:
 

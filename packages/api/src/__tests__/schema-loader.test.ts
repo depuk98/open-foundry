@@ -463,6 +463,33 @@ describe('loadDomainPacks with CI fixture external pack', () => {
     }
   });
 
+  it('loads seed manifests from fixture pack', async () => {
+    const result = await loadDomainPacks(
+      DOMAIN_PACKS_DIR,
+      ['core', 'test-external'],
+      [FIXTURE_PACK_DIR],
+    );
+
+    expect(result.seedManifests.length).toBe(1);
+    const seed = result.seedManifests[0]!;
+    expect(seed.packName).toBe('test-external');
+    expect(seed.objects).toHaveLength(2);
+    expect(seed.links).toHaveLength(1);
+
+    // Check object refs
+    expect(seed.objects[0]!.ref).toBe('parent-widget');
+    expect(seed.objects[0]!.type).toBe('Widget');
+    expect(seed.objects[0]!.fields['name']).toBe('Root Widget');
+
+    expect(seed.objects[1]!.ref).toBe('child-widget');
+    expect(seed.objects[1]!.type).toBe('Widget');
+
+    // Check link references point to seed refs
+    expect(seed.links[0]!.type).toBe('BelongsTo');
+    expect(seed.links[0]!.from).toBe('child-widget');
+    expect(seed.links[0]!.to).toBe('parent-widget');
+  });
+
   it('validates dependency constraints (core >= 1.0.0 satisfied)', async () => {
     // This should not throw — core is v1.0.0 and fixture requires >=1.0.0
     const result = await loadDomainPacks(

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { fgaDslToJson } from '../server.js';
+import type { FgaTypeDef } from '../server.js';
 
 describe('fgaDslToJson', () => {
   it('skips #-comment lines without corrupting output', () => {
@@ -20,12 +21,10 @@ type document
     expect(result.schema_version).toBe('1.1');
     expect(result.type_definitions).toHaveLength(2);
 
-    const doc = result.type_definitions.find(
-      (t: unknown) => (t as { type: string }).type === 'document',
-    ) as { type: string; relations: Record<string, unknown> };
+    const doc = result.type_definitions.find(t => t.type === 'document') as FgaTypeDef;
     expect(doc).toBeDefined();
-    expect(doc.relations['owner']).toEqual({ this: {} });
-    expect(doc.relations['viewer']).toEqual({ computedUserset: { relation: 'owner' } });
+    expect(doc.relations!['owner']).toEqual({ this: {} });
+    expect(doc.relations!['viewer']).toEqual({ computedUserset: { relation: 'owner' } });
   });
 
   it('parses direct types, computed usersets, and tuple-to-userset', () => {
@@ -42,12 +41,10 @@ type org
     define viewer: admin from member
 `;
     const result = fgaDslToJson(dsl);
-    const org = result.type_definitions.find(
-      (t: unknown) => (t as { type: string }).type === 'org',
-    ) as { type: string; relations: Record<string, unknown> };
-    expect(org.relations['member']).toEqual({ this: {} });
-    expect(org.relations['admin']).toEqual({ computedUserset: { relation: 'member' } });
-    expect(org.relations['viewer']).toEqual({
+    const org = result.type_definitions.find(t => t.type === 'org') as FgaTypeDef;
+    expect(org.relations!['member']).toEqual({ this: {} });
+    expect(org.relations!['admin']).toEqual({ computedUserset: { relation: 'member' } });
+    expect(org.relations!['viewer']).toEqual({
       tupleToUserset: {
         tupleset: { relation: 'member' },
         computedUserset: { relation: 'admin' },
@@ -69,10 +66,8 @@ type resource
     define viewer: owner or editor
 `;
     const result = fgaDslToJson(dsl);
-    const res = result.type_definitions.find(
-      (t: unknown) => (t as { type: string }).type === 'resource',
-    ) as { type: string; relations: Record<string, unknown> };
-    expect(res.relations['viewer']).toEqual({
+    const res = result.type_definitions.find(t => t.type === 'resource') as FgaTypeDef;
+    expect(res.relations!['viewer']).toEqual({
       union: {
         child: [
           { computedUserset: { relation: 'owner' } },

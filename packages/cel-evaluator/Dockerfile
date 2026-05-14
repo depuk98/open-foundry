@@ -16,6 +16,7 @@ FROM alpine:3.20
 
 ARG GIT_REVISION=unknown
 LABEL org.opencontainers.image.revision="${GIT_REVISION}"
+ENV GIT_REVISION="${GIT_REVISION}"
 
 RUN apk --no-cache add ca-certificates \
     && adduser -D -u 1000 cel
