@@ -193,6 +193,7 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-openfoundry}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_SERVICE_NAME: api-gateway
+      DOMAIN_PACKS: ${DOMAIN_PACKS:-}
       DOMAIN_PACKS_EXTRA_DIRS: ${DOMAIN_PACKS_EXTRA_DIRS:-}
     volumes:
       - ${DOMAIN_PACKS_HOST_DIR:-./empty-packs}:/external-packs:ro
