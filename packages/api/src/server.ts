@@ -618,7 +618,9 @@ async function main(): Promise<void> {
         namespace: info.manifest.namespace,
         description: info.manifest.description ?? null,
         external: info.external,
-        objectTypes: schema.objectTypes.filter(() => true).length, // total; per-pack requires more tracking
+        objectTypes: info.typeCounts.objectTypes,
+        linkTypes: info.typeCounts.linkTypes,
+        actionTypes: info.typeCounts.actionTypes,
         connectors: connectorManifests.filter(c => c.packName === info.manifest.name).length,
         permissions: (info.manifest.permissions ?? []).filter(f => f.endsWith('.fga')).length,
       })),
@@ -893,7 +895,7 @@ function fgaDslToJson(dsl: string): { schema_version: string; type_definitions: 
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('model') || trimmed.startsWith('schema')) continue;
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('model') || trimmed.startsWith('schema')) continue;
 
     const typeMatch = trimmed.match(/^type\s+(\w+)$/);
     if (typeMatch) {

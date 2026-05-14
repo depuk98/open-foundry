@@ -302,6 +302,9 @@ curl http://localhost:4000/admin/packs | jq .
       "namespace": "openfoundry.core",
       "description": "Core domain pack ...",
       "external": false,
+      "objectTypes": 0,
+      "linkTypes": 0,
+      "actionTypes": 0,
       "connectors": 0,
       "permissions": 0
     },
@@ -311,15 +314,18 @@ curl http://localhost:4000/admin/packs | jq .
       "namespace": "com.example",
       "description": "Example external domain pack",
       "external": true,
+      "objectTypes": 1,
+      "linkTypes": 1,
+      "actionTypes": 1,
       "connectors": 1,
       "permissions": 1
     }
   ],
   "totals": {
-    "objectTypes": 6,
-    "linkTypes": 7,
-    "actionTypes": 4,
-    "connectors": 2
+    "objectTypes": 1,
+    "linkTypes": 1,
+    "actionTypes": 1,
+    "connectors": 1
   }
 }
 ```
@@ -356,6 +362,32 @@ warnings but do not prevent startup (to support gradual rollout).
 | Connector type warning | `connector` field doesn't match a registered plugin | Use `jdbc` or `rest`; custom plugins require code changes |
 | Dependency warning | Required pack not loaded or version too low | Load the dependency pack and check its version |
 | "pack.yaml: missing required 'name' field" | Malformed manifest | Ensure `name`, `version`, and `namespace` are present |
+
+## Known Limitations
+
+### Connectors are validated but not instantiated
+
+Pack connector manifests are loaded and validated against the `ConnectorRegistry`
+(must be `jdbc` or `rest`). However, connectors are **not instantiated** — the
+sync-engine does not yet consume them at runtime. The `connectors:` section in
+`pack.yaml` is effectively a declaration of intent: it ensures the pack's connector
+config is well-formed and uses a known plugin type, but no data ingestion occurs.
+
+### Permission overrides replace entire types
+
+`mergeOpenFGAOverrides` operates at type-level granularity. If a pack's `.fga` file
+defines a type that already exists in the auto-generated model (e.g. `type user`),
+the pack's definition **replaces the entire type**, including all relations generated
+from the ODL schema. To avoid losing auto-generated relations, override files should
+only define types that are new to the pack — not types that the ODL compiler already
+generates.
+
+### Semver constraints
+
+Only `>=X.Y.Z` and exact-match constraints are supported in `pack.yaml` dependencies.
+Range syntax (`^`, `~`, `<`, `<=`, `>`), pre-release tags, and build metadata are not
+handled. Using unsupported syntax will produce incorrect constraint checks without a
+warning.
 
 ## Testing
 

@@ -61,7 +61,9 @@ domainPacks:
 # Each source defines a volume + mount that makes a pack directory available.
 # The schema loader scans each mountPath for pack.yaml files.
 #
-# Supported volume types: configMap, persistentVolumeClaim, emptyDir (with git-init-container)
+# Supported volume types: configMap, persistentVolumeClaim, emptyDir
+# emptyDir requires a git-sync init container to populate it — see docs/external-domain-packs.md.
+# Each source MUST specify exactly one of: configMap, persistentVolumeClaim, or emptyDir.
 #
 # Example:
 #   domainPacksExtra:

@@ -60,6 +60,8 @@ export interface LoadedPackInfo {
   packDir: string;
   /** Whether this pack came from an extra directory (external). */
   external: boolean;
+  /** Per-pack type counts from ODL parsing. */
+  typeCounts: { objectTypes: number; linkTypes: number; actionTypes: number; enums: number };
 }
 
 export interface LoadedSchema {
@@ -706,18 +708,25 @@ export async function loadDomainPacks(
     const manifest = readManifest(packDir);
     manifests.push(manifest);
     packDirs.push(packDir);
-    packInfos.push({ manifest, packDir, external: externalPacks.has(name) });
 
+    let typeCounts = { objectTypes: 0, linkTypes: 0, actionTypes: 0, enums: 0 };
     const odlSource = loadPackOdl(packDir, manifest);
     if (odlSource.trim()) {
       try {
         const parsed = parseOdl(odlSource);
+        typeCounts = {
+          objectTypes: parsed.objectTypes.length,
+          linkTypes: parsed.linkTypes.length,
+          actionTypes: parsed.actionTypes.length,
+          enums: parsed.enums.length,
+        };
         parsedSchemas.push(parsed);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`Schema loader: failed to parse ODL from pack '${name}': ${msg}`);
       }
     }
+    packInfos.push({ manifest, packDir, external: externalPacks.has(name), typeCounts });
 
     // Load field permission configurations
     loadPackFieldPermissions(packDir, manifest, fieldPermissions);

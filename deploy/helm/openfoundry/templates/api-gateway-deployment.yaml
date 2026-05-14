@@ -108,7 +108,9 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .persistentVolumeClaim.claimName }}
             readOnly: true
-          {{- else }}
+          {{- else if .emptyDir }}
           emptyDir: {}
+          {{- else }}
+          {{- fail (printf "domainPacksExtra.sources[%s]: must specify configMap, persistentVolumeClaim, or emptyDir" .name) }}
           {{- end }}
         {{- end }}
