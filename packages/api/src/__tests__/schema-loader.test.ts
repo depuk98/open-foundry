@@ -422,6 +422,15 @@ describe('loadDomainPacks with CI fixture external pack', () => {
     const extInfo = result.packInfos.find(p => p.manifest.name === 'test-external');
     expect(extInfo).toBeDefined();
     expect(extInfo!.external).toBe(true);
+
+    // Per-pack type counts (Widget object, BelongsTo link, ActivateWidget action, WidgetStatus enum)
+    expect(extInfo!.typeCounts.objectTypes).toBe(1);
+    expect(extInfo!.typeCounts.linkTypes).toBe(1);
+    expect(extInfo!.typeCounts.actionTypes).toBe(1);
+    expect(extInfo!.typeCounts.enums).toBe(1);
+
+    // Core pack has no object/link/action types (only scalars + interfaces)
+    expect(coreInfo!.typeCounts.objectTypes).toBe(0);
   });
 
   it('merges fixture pack with primary nhs-acute pack', async () => {

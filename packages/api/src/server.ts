@@ -865,7 +865,7 @@ function deriveActionAuthzMappings(
  * Handles: direct types [user], computed usersets (derived), tuple-to-userset
  * (from), and union (or) relations.
  */
-function fgaDslToJson(dsl: string): { schema_version: string; type_definitions: unknown[] } {
+export function fgaDslToJson(dsl: string): { schema_version: string; type_definitions: unknown[] } {
   const typeDefs: unknown[] = [];
   const lines = dsl.split('\n');
   let currentType: string | null = null;
