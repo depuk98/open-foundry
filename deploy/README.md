@@ -14,8 +14,8 @@ Local development environment with all 13 services via Docker Compose.
 cp .env.example .env
 # Edit .env — at minimum, change POSTGRES_PASSWORD and KEYCLOAK_ADMIN_PASSWORD
 
-# 2. Start all services
-docker compose up -d
+# 2. Start all services (--build ensures images reflect latest source)
+docker compose up -d --build
 
 # 3. Wait for infrastructure, then initialize
 ./init-services.sh
@@ -67,11 +67,29 @@ To load domain packs from outside the monorepo:
    DOMAIN_PACKS=core,nhs-acute,rce
    ```
 
-3. Restart the api-gateway: `docker compose up -d api-gateway`
+3. Restart the api-gateway: `docker compose up -d --build api-gateway`
 
 The host path is mounted read-only at `/external-packs` inside the container. The schema loader scans it for `pack.yaml` files using the same discovery logic as the primary `domain-packs/` directory.
 
 For full details (pack.yaml format, Helm config, permissions, connectors, troubleshooting), see [docs/external-domain-packs.md](../docs/external-domain-packs.md).
+
+## Rebuilding After Updates
+
+After pulling source changes, always pass `--build` to pick up code changes:
+
+```bash
+docker compose up -d --build
+```
+
+To stamp the git revision into image labels (visible via `docker inspect`):
+
+```bash
+GIT_REVISION=$(git rev-parse HEAD) docker compose up -d --build
+```
+
+Without `--build`, Docker Compose reuses locally cached images and will not
+reflect source changes. This applies to both TypeScript services and the Go
+CEL evaluator.
 
 ## Teardown
 

@@ -17,6 +17,10 @@ RUN pnpm turbo build --filter=@openfoundry/api...
 # Runtime stage
 FROM node:20-alpine
 
+ARG GIT_REVISION=unknown
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
+ENV GIT_REVISION="${GIT_REVISION}"
+
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
 WORKDIR /app

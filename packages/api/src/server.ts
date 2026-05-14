@@ -815,7 +815,8 @@ async function main(): Promise<void> {
   });
 
   const mode = isDev ? 'DEVELOPMENT' : 'PRODUCTION';
-  logger.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT}`);
+  const imageRevision = process.env['GIT_REVISION'] ?? 'unknown';
+  logger.info(`Open Foundry API gateway [${mode}] listening at http://localhost:${PORT} (image: ${imageRevision.slice(0, 8)})`);
   logger.info(`  GraphQL:  http://localhost:${PORT}/graphql`);
   logger.info(`  WS Subs:  ws://localhost:${PORT}/graphql`);
   logger.info(`  REST:     http://localhost:${PORT}/api/v1/`);

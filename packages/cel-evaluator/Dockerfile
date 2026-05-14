@@ -14,6 +14,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /cel-evaluator .
 # Runtime stage
 FROM alpine:3.20
 
+ARG GIT_REVISION=unknown
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
+
 RUN apk --no-cache add ca-certificates \
     && adduser -D -u 1000 cel
 

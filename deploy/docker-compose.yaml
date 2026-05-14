@@ -161,6 +161,8 @@ services:
     build:
       context: ../packages/cel-evaluator
       dockerfile: Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     ports:
       - "${CEL_PORT:-50051}:50051"
     environment:
@@ -178,6 +180,8 @@ services:
     build:
       context: ..
       dockerfile: packages/api/Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     ports:
       - "${API_PORT:-4000}:4000"
     environment:
@@ -221,6 +225,8 @@ services:
     build:
       context: ..
       dockerfile: packages/engine/Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     environment:
       NODE_ENV: development
       PORT: "4001"
@@ -243,6 +249,8 @@ services:
     build:
       context: ..
       dockerfile: packages/actions/Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     environment:
       NODE_ENV: development
       PORT: "4002"
@@ -271,6 +279,8 @@ services:
     build:
       context: ..
       dockerfile: packages/sync/Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     environment:
       NODE_ENV: development
       PORT: "4003"
@@ -299,6 +309,8 @@ services:
     build:
       context: ..
       dockerfile: packages/security/Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     environment:
       NODE_ENV: development
       PORT: "4004"
