@@ -74,9 +74,10 @@ The pilot must demonstrate:
 |-----------|---------------|
 | Side-effect orchestration | Inline execution with retry loop (3 attempts, exponential backoff). Temporal interface defined but implementation is a lightweight wrapper. |
 | Webhook delivery | Synchronous HTTP POST with retry. No dead-letter queue. Failures logged. |
-| Federation gateway | gRPC service definition compiled. Gateway returns `FEDERATION_NOT_AVAILABLE` for all calls. DSA parser is functional (for validation tooling). |
+| Federation gateway | **Not built.** Specified in spec §9 only — there is no federation package, gRPC proto, gateway, or DSA parser in the codebase. Tracked as deferred in §2.3 above; listed here to correct earlier phrasing that implied a compiled stub. |
 | Bulk actions | Synchronous chunked execution. No async job queue. Progress reported inline. |
 | Data quality rules | Rule parser loads YAML. Evaluation runs on a cron schedule, not inline with writes. |
+| Lineage / temporal queries | Field-level lineage is recorded and the SPI supports `getObjectAtTime`/`getObjectAtVersion`, but the only API surface is `GET /api/v1/{plural}/:id/history` (which uses `getObjectAtVersion` internally). There is no as-of-time or version-pinned **query** parameter on reads via REST/GraphQL — provenance/temporal querying needs resolver/route additions. |
 
 ---
 

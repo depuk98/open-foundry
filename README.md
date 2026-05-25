@@ -291,11 +291,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 ## Test Coverage
 
-1,796 unit tests and 98 integration tests across all packages:
+1,847 unit tests and 98 Postgres integration tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,796 | Always run |
+| Unit tests | 1,847 | Always run |
 | Postgres integration tests | 98 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -365,7 +365,7 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 | Deployment config | ~2,200 lines |
 | Specification + docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,894 |
+| Unit + integration tests | 1,945 |
 
 ---
 
