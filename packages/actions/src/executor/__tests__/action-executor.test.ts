@@ -255,6 +255,9 @@ sideEffects:
     type: event
     config:
       type: "nhs.acute.patient.admitted"
+      data:
+        patientId: "patient.id"
+        status: "'admitted'"
 
 rollback:
   onSideEffectFailure: LOG_AND_CONTINUE
@@ -548,12 +551,12 @@ function createMockAuditWriter(): AuditWriter & { records: AuditRecord[] } {
 // Mock Side-Effect Handler
 // ---------------------------------------------------------------------------
 
-function createMockSideEffectHandler(): SideEffectHandler & { calls: Array<{ name: string; type: string }> } {
-  const calls: Array<{ name: string; type: string }> = [];
+function createMockSideEffectHandler(): SideEffectHandler & { calls: Array<{ name: string; type: string; config: Record<string, unknown> }> } {
+  const calls: Array<{ name: string; type: string; config: Record<string, unknown> }> = [];
   return {
     calls,
-    async execute(name, type) {
-      calls.push({ name, type });
+    async execute(name, type, config) {
+      calls.push({ name, type, config: config as Record<string, unknown> });
       return { success: true };
     },
   };
@@ -1273,6 +1276,25 @@ effects:
       expect(sideEffectHandler.calls).toHaveLength(1);
       expect(sideEffectHandler.calls[0]!.name).toBe('emitAdmissionEvent');
       expect(sideEffectHandler.calls[0]!.type).toBe('event');
+    });
+
+    it('interpolates event data against the action context (resolved IDs, not literal expressions)', async () => {
+      const { manifest } = parseActionManifest(ADMIT_PATIENT_YAML);
+
+      await executor.execute(
+        manifest!,
+        { patient: patient._id, ward: ward._id, consultant: consultant._id, bed: null, reason: 'Test' },
+        ACTOR,
+        ACTION_CTX,
+        NHS_SCHEMA,
+      );
+
+      const data = sideEffectHandler.calls[0]!.config['data'] as Record<string, unknown>;
+      // "patient.id" must resolve to the real id, not the literal string.
+      expect(data['patientId']).toBe(patient._id);
+      expect(data['patientId']).not.toBe('patient.id');
+      // Quoted literal passes through unwrapped.
+      expect(data['status']).toBe('admitted');
     });
   });
 

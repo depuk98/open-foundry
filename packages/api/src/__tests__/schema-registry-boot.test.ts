@@ -54,4 +54,18 @@ describe('recordSchemaVersion (boot wiring)', () => {
     expect(r.version).toBe(2);
     expect(r.breaking).toBe(true);
   });
+
+  it('treats type reordering as unchanged (no spurious version from pack discovery order)', async () => {
+    const a = objectType('Alpha', [field('id', 'ID', true)]);
+    const b = objectType('Beta', [field('id', 'ID', true)]);
+    const orderAB: ParsedSchema = { ...emptySchema(), objectTypes: [a, b] };
+    const orderBA: ParsedSchema = { ...emptySchema(), objectTypes: [b, a] };
+
+    const reg = new InMemorySchemaRegistry();
+    await recordSchemaVersion(reg, orderAB);
+    // Same types, different discovery/merge order → must NOT mint a new version.
+    const r = await recordSchemaVersion(reg, orderBA);
+    expect(r).toMatchObject({ version: 1, recorded: false });
+    expect(await reg.getCurrentVersion()).toBe(1);
+  });
 });

@@ -258,10 +258,15 @@ export class ActionExecutor {
     // ------------------------------------------------------------------
     if (this.config.sideEffectHandler && manifest.sideEffects.length > 0) {
       for (const se of manifest.sideEffects) {
+        // Interpolate event `data` values against the action context so
+        // payloads carry resolved IDs/values (e.g. "bed.id" → the bed's id),
+        // not the literal expression strings. Link paths (e.g. "bed.ward.id")
+        // were pre-resolved into the context by preResolveLinkPaths.
+        const seConfig = this.resolveSideEffectConfig(se.type, se.config, effectContext);
         const seResult = await this.config.sideEffectHandler.execute(
           se.name,
           se.type,
-          se.config,
+          seConfig,
           effectContext,
           se.retries,
         );
@@ -542,6 +547,21 @@ export class ActionExecutor {
       }
     }
 
+    // Side-effect event `data` values may reference link paths (e.g.
+    // "bed.ward.id"); scan them so the link prefix is pre-resolved and the
+    // interpolation at emit time can read it from context.
+    for (const se of manifest.sideEffects ?? []) {
+      const cfg = se.config as Record<string, unknown> | undefined;
+      const data = cfg?.['data'];
+      if (data && typeof data === 'object') {
+        for (const expr of Object.values(data as Record<string, unknown>)) {
+          if (typeof expr === 'string' && expr.includes('.') && !expr.startsWith("'")) {
+            paths.add(expr);
+          }
+        }
+      }
+    }
+
     // For each unique dotted path, resolve it via resolveTarget (which handles
     // link traversal and caches results in context).
     const resolved = new Set<string>();
@@ -814,6 +834,28 @@ export class ActionExecutor {
    * 4. Fallback: if the root key is NOT in context, treat as literal string
    *    (e.g. "ACTIVE", "DISCHARGED", "OCCUPIED")
    */
+  /**
+   * For event side-effects, resolve each `data` value as a context expression
+   * (string values only) so the emitted CloudEvent carries resolved values
+   * rather than literal expression strings. Non-event configs are returned
+   * unchanged. Returns a shallow copy; the original manifest config is not
+   * mutated.
+   */
+  private resolveSideEffectConfig(
+    type: string,
+    config: Record<string, unknown>,
+    context: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (type !== 'event') return config;
+    const data = config['data'];
+    if (!data || typeof data !== 'object') return config;
+    const resolvedData: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      resolvedData[key] = typeof value === 'string' ? this.resolveExpression(value, context) : value;
+    }
+    return { ...config, data: resolvedData };
+  }
+
   private resolveExpression(expr: string, context: Record<string, unknown>): unknown {
     // String literal: 'VALUE'
     if (expr.startsWith("'") && expr.endsWith("'")) {

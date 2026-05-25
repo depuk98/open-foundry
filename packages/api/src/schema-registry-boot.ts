@@ -14,6 +14,26 @@
 import { diff, classify } from '@openfoundry/odl';
 import type { ParsedSchema, SchemaRegistry } from '@openfoundry/odl';
 
+/**
+ * Order-insensitive canonical key for change detection. Pack discovery and
+ * schema merge order can vary across boots/filesystems, so a raw
+ * JSON.stringify would flag spurious changes. We sort the top-level type
+ * arrays by name before serialising — two schemas with the same types in a
+ * different order are logically identical and must not mint a new version.
+ */
+function canonicalKey(schema: ParsedSchema): string {
+  const byName = <T extends { name: string }>(arr: readonly T[]): T[] =>
+    [...arr].sort((a, b) => a.name.localeCompare(b.name));
+  return JSON.stringify({
+    objectTypes: byName(schema.objectTypes),
+    linkTypes: byName(schema.linkTypes),
+    actionTypes: byName(schema.actionTypes),
+    enums: byName(schema.enums),
+    interfaces: byName(schema.interfaces),
+    scalars: byName(schema.scalars),
+  });
+}
+
 export interface SchemaRecordResult {
   /** Current version after the call. */
   version: number;
@@ -38,7 +58,7 @@ export async function recordSchemaVersion(
     priorSchema = await registry.getSchema();
   }
 
-  const changed = !priorSchema || JSON.stringify(priorSchema) !== JSON.stringify(schema);
+  const changed = !priorSchema || canonicalKey(priorSchema) !== canonicalKey(schema);
   if (!changed) {
     return { version: currentVersion, recorded: false, breaking: false };
   }

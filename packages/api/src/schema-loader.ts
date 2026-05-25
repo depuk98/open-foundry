@@ -157,7 +157,12 @@ function resolvePacksDir(): string {
 function discoverPacks(packsDir: string): string[] {
   return readdirSync(packsDir, { withFileTypes: true })
     .filter(d => d.isDirectory() && existsSync(resolve(packsDir, d.name, 'pack.yaml')))
-    .map(d => d.name);
+    .map(d => d.name)
+    // Sort for deterministic discovery order: readdirSync order is
+    // filesystem-dependent, and the merged schema preserves pack order, so an
+    // unsorted list makes the same logical schema serialize differently across
+    // boots (spurious schema-registry versions).
+    .sort();
 }
 
 /**
