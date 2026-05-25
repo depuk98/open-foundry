@@ -41,6 +41,8 @@ Each layer communicates only with adjacent layers through defined interfaces. No
 - **GraphQL API** -- Auto-generated from ODL schema via Apollo Server 4. Includes queries, mutations, subscriptions, filtering, pagination, and aggregation.
 - **REST API** -- Full CRUD endpoints generated per object/link type with consistent error shapes.
 - **FHIR R4** -- Read-only Patient/Encounter endpoints with `GET /fhir/metadata` CapabilityStatement.
+- **FDP/CDM projection** -- Read-only `/api/v1/cdm/*` view that maps the operational ontology to an NHS Federated Data Platform Canonical Data Model shape, with provenance preserved per record and a published gap register. Starter slice for the NHS pilot (see [`docs/cdm-mapping-profile.md`](docs/cdm-mapping-profile.md)).
+- **API contract artifacts** -- OpenAPI 3.0.3, GraphQL SDL, and AsyncAPI 2.6.0 generated from the merged schema (`pnpm --filter @openfoundry/api spec:all`); OpenAPI served live at `/api/v1/openapi.json` and all three attached to tagged releases. See [`docs/api-spec.md`](docs/api-spec.md).
 - **WebSocket subscriptions** -- Real-time object change events via graphql-ws with per-connection limits (50 max).
 - **Query complexity gate** -- Rejects expensive queries before execution (depth 10, breadth 50, cost 1000).
 - **Introspection disabled in production** -- Schema exploration available only in development mode.
@@ -52,6 +54,8 @@ Each layer communicates only with adjacent layers through defined interfaces. No
 - **Graph traversal** -- Apache AGE-backed relationship traversal with depth (10) and node (10,000) guards.
 - **Full-text search** -- PostgreSQL `tsvector`-backed search across indexed fields.
 - **Object sets** -- Named, persistent collections of objects for batch operations.
+- **Versioned schema registry** -- Monotonic schema versions with automatic diff classification (SAFE / BREAKING) and breaking-change gating behind an approved migration plan. In-memory and PostgreSQL-backed (`PostgresSchemaRegistry`, advisory-lock serialised) implementations.
+- **Bootstrap seeds** -- Declarative `seed:` reference data in `pack.yaml`, applied idempotently at boot through the full action pipeline.
 
 ### Action Framework
 
@@ -122,14 +126,16 @@ Primary (monorepo) packs take precedence on name conflicts. Malformed or missing
 
 ### NHS Acute Pilot
 
-The NHS Acute pack is the primary vertical slice, targeting patient flow through wards, beds, and consultants at an acute trust:
+The NHS Acute pack is the primary vertical slice, targeting patient flow through wards, beds, and consultants at an acute trust. The demo positions Open Foundry as an **FDP-compatible, trust-controlled ontology runtime** — not an NHS FDP instance or a PET replacement — that can ingest read-only source data, map a bounded operational ontology to a version-pinned FDP/CDM subset, and evidence flows under ReBAC, consent, and audit.
 
 - Live ontology modelling patients, wards, beds, and consultants
-- Data ingestion from a PAS (Patient Administration System) via JDBC/CDC
-- Clinician actions (admit, discharge, transfer) through GraphQL
+- Data ingestion from a PAS (Patient Administration System) via JDBC/CDC (read-only)
+- Clinician actions (admit, discharge, transfer) through GraphQL and REST
 - ReBAC-enforced permissions with ward-scoped visibility
 - Immutable audit trail for every operation
-- FHIR R4 read endpoints for interoperability
+- FHIR R4 read endpoints plus an FDP/CDM-shaped projection (`/api/v1/cdm/*`) for interoperability
+
+Stage plan and conformance boundary: [`docs/fdp-plan.md`](docs/fdp-plan.md). Production deployment, OIDC/CIS2 claims, and action-pipeline footguns: [`deploy/README.md`](deploy/README.md).
 
 ---
 
@@ -317,10 +323,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 | Item | Description |
 |------|-------------|
-| Schema Registry persistence | Git-backed + database-cached schema storage (currently in-memory) |
+| Schema Registry persistence | PostgreSQL-backed registry shipped (`PostgresSchemaRegistry`); git-backed storage and boot-time wiring still pending |
+| FDP/CDM full coverage | Extend the S1.0 starter profile — GraphQL CDM view, dataset export, terminology validation, structured-name decomposition, first-class Transfer |
 | FHIR write operations | Mutation support for FHIR resources (currently read-only) |
 | Application framework | Embeddable UI components for common ontology operations |
-| Federation protocol | Multi-instance synchronisation across organisational boundaries |
+| Federation protocol | Multi-instance synchronisation across organisational boundaries (spec-only today) |
 | Additional storage providers | TypeDB, Neo4j, and other graph-capable backends |
 
 ---
@@ -331,7 +338,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 |----------|-------------|
 | [`docs/open-foundry-spec-v2.md`](docs/open-foundry-spec-v2.md) | Full technical specification |
 | [`docs/mvp-nhs-pilot.md`](docs/mvp-nhs-pilot.md) | NHS pilot design document |
-| [`deploy/README.md`](deploy/README.md) | Development deployment quickstart |
+| [`docs/fdp-plan.md`](docs/fdp-plan.md) | NHS FDP integration plan, conformance boundary, stage roadmap |
+| [`docs/cdm-mapping-profile.md`](docs/cdm-mapping-profile.md) | FDP/CDM compatibility profile (S1.0) and gap register |
+| [`docs/api-spec.md`](docs/api-spec.md) | API contract artifacts (OpenAPI / GraphQL / AsyncAPI) and codegen |
+| [`docs/external-domain-packs.md`](docs/external-domain-packs.md) | Loading domain packs from outside the monorepo |
+| [`deploy/README.md`](deploy/README.md) | Deployment quickstart, production mode, OIDC/CIS2, action-pipeline footguns |
 
 ---
 
