@@ -135,6 +135,15 @@ The NHS Acute pack is the primary vertical slice, targeting patient flow through
 - Immutable audit trail for every operation
 - FHIR R4 read endpoints plus an FDP/CDM-shaped projection (`/api/v1/cdm/*`) for interoperability
 
+**Reference app — Nightingale.** A working precursor to the FDP plan's S1.4 Bed
+Management app runs as a separate project (`../nightingale`): a real-time 3D bed
+board operating in **Pilot Mode B** (synthetic data, real governed actions)
+against the deployed stack. Every admit / discharge / transfer / clean is a
+genuine governed action through the api-gateway (authorize → consent → CEL →
+effects → audit), with a Direct-link panel demonstrating ReBAC denial, consent
+denial, and audited success. It uses only the public action API — no SPI
+shortcuts.
+
 Stage plan and conformance boundary: [`docs/fdp-plan.md`](docs/fdp-plan.md). Production deployment, OIDC/CIS2 claims, and action-pipeline footguns: [`deploy/README.md`](deploy/README.md).
 
 ---

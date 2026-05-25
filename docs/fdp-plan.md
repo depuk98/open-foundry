@@ -113,7 +113,7 @@ Separating repo-claimed from locally-verified is mandatory because the IG and cl
 | Listener / webhook connector | Missing |
 | Ontology Manager UI | Missing |
 | Object Views generator | Missing |
-| Bed Management app (real) | Missing — concept only |
+| Bed Management app (real) | Present (precursor) — **Nightingale** (`../nightingale`) runs as the S1.4 reference app in Pilot Mode B against the real governed stack; productionisation edge cases remain (see S1.4) |
 | Markings framework | Missing |
 | AIP trio (gateway / logic / MCP) | Missing |
 | CIS2 / smartcard | Missing |
@@ -297,7 +297,23 @@ Where the public CDM artefact is unstable (DAPB4121 is currently draft in progre
 
 #### S1.4 — Bed Management reference app (`@openfoundry/app-bed-manager`)
 
-**Scope.** Productionise the Nightingale concept: live bed status, ED queue, drag/tap admit, discharge, transfer, activity feed, audit trail, mobile-responsive (tablet form-factor primary).
+**Status — precursor built (Nightingale, `../nightingale`).** A working reference
+app exists and runs in **Pilot Mode B** (synthetic data, real governed actions)
+against the deployed stack — no in-process simulation. Reads are an operational
+projection over the live PostgreSQL+AGE ontology; every write (admit / discharge /
+transfer / clean) is a genuine governed action through the production api-gateway
+(real authorize → consent → CEL → effects → audit → CloudEvents). It ships a
+real-time 3D bed board, an ED queue, an activity feed, a collapsible immutable
+audit trail, a server-side autopilot that issues governed actions on a jittered
+interval, and a **Direct-link** panel proving governance in the substrate
+(porter discharge → ReBAC denial; unconsented admit → consent denial; authorised
+admit → audited success). The `CleanBed` action was driven and verified live
+end-to-end here. This realises the core of S1.4; the items below are the
+remaining productionisation gaps, not greenfield.
+
+**Scope (remaining productionisation).** Promote the Nightingale precursor toward
+a trust-usable app: tablet form-factor hardening, drag/tap interactions, and the
+edge cases below.
 
 **Updates.**
 

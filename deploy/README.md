@@ -231,6 +231,15 @@ effects → audit). These bite a production single-trust pilot specifically.
   tuple gap above). ED (un-admitted) patients have no ward → no ward-scoped viewer
   can see them. *Fix direction: write graph-derived ReBAC tuples as part of link
   effects, or provide an operational read role.*
+  - **Same gap for every `... from <link>` rule.** Any FGA rule that traverses a
+    link userset needs the corresponding relationship tuple to exist. E.g.
+    `bed.can_clean = editor or porter from in_ward` (the `CleanBed` action) only
+    resolves when a `(bed:<id>, in_ward, ward:<id>)` tuple exists, but the pipeline
+    writes the `BedInWard` *ontology link*, not the OpenFGA tuple. Integrators must
+    provision these tuples out-of-band (derive bed→ward from the store and write
+    them). If link effects emitted relationship tuples for `BedInWard`,
+    `AdmittedTo`, ward `assigned`, etc., these `from <link>` rules would work out
+    of the box.
 
 - **Denied actions are not audited.** The pipeline order is validate → authorise →
   consent → preconditions → execute → side-effects → **audit** → emit. A denial at
@@ -286,6 +295,12 @@ GIT_REVISION=$(git rev-parse HEAD) docker compose up -d --build
 Without `--build`, Docker Compose reuses locally cached images and will not
 reflect source changes. This applies to both TypeScript services and the Go
 CEL evaluator.
+
+**Domain-pack changes need an api-gateway rebuild too.** New or changed actions
+(ODL `@actionType` + manifest), permissions, or seeds are baked into the
+api-gateway image. A stale image will **404 a newly added action** (e.g. a
+`POST /api/v1/actions/CleanBed` against an image built before the action existed).
+After changing a pack, rebuild: `docker compose up -d --build api-gateway`.
 
 ## Teardown
 
