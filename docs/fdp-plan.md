@@ -81,8 +81,10 @@ Local results (verified 2026-05-25):
                              graph and (2) two test fixtures that under-modelled the
                              ODL link 'id' column — both fixed; not product bugs.
   Docker-stack integration:  NOT RUN — requires full Docker Compose stack.
-  Container build success:   NOT RUN here — 6 Dockerfiles present (actions, api,
-                             cel-evaluator, engine, security, sync).
+  Container build success:   PASS — all 6 images build clean via
+                             `docker compose build` (cel-evaluator Go ~454MB;
+                             api-gateway/action-executor/ontology-engine/
+                             security-service/sync-engine TS ~237-239MB).
   Helm chart lint:           NOT RUN — helm not available in sandbox; chart at
                              deploy/helm/openfoundry/Chart.yaml.
   Critical CVEs in deps:     NOT RUN — trivy/snyk not available in sandbox.
@@ -91,10 +93,10 @@ Local results (verified 2026-05-25):
 ```
 
 > **Pre-Stage-1 gate.** The code baseline is green (build + 1,865 unit + 287
-> conformance + **226 storage-postgres incl. all 98 PG integration tests**).
-> Still to run in a CI/infra environment before a trust submission: the full
-> Docker-stack integration suite, all 6 container builds, `helm lint`, a CVE
-> scan, and the first `v*` release tag.
+> conformance + **226 storage-postgres incl. all 98 PG integration tests** +
+> **all 6 container images build clean**). Still to run in a CI/infra
+> environment before a trust submission: the full Docker-stack integration
+> suite, `helm lint`, a CVE scan, and the first `v*` release tag.
 
 Separating repo-claimed from locally-verified is mandatory because the IG and clinical safety reviewers will treat unpinned `main` as marketing rather than evidence.
 
