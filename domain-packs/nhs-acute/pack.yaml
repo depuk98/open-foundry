@@ -10,7 +10,7 @@ dependencies:
 provides:
   objectTypes: 5
   linkTypes: 6
-  actionTypes: 3
+  actionTypes: 4
   functions: 0
   connectors: 1
   widgets: 0
@@ -30,6 +30,7 @@ actions:
   - actions/admit-patient.yaml
   - actions/discharge-patient.yaml
   - actions/transfer-ward.yaml
+  - actions/clean-bed.yaml
 
 connectors:
   - connectors/pas-jdbc.yaml

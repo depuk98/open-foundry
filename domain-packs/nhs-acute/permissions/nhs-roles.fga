@@ -6,6 +6,7 @@ type user
 type ward
   relations
     define assigned: [user]
+    define porter: [user]
     define viewer: assigned
     define editor: assigned
 
@@ -26,6 +27,7 @@ type bed
     define in_ward: [ward]
     define viewer: viewer from in_ward
     define editor: editor from in_ward
+    define can_clean: editor or porter from in_ward
 
 type consultant
   relations

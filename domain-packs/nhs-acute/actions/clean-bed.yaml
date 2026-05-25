@@ -1,0 +1,28 @@
+# actions/clean-bed.yaml
+action: CleanBed
+version: 1
+reversible: false
+
+preconditions:
+  - expr: "bed.status == 'CLEANING'"
+    error: "Bed is not awaiting cleaning"
+  - expr: "actor.hasRole('porter') || actor.hasRole('nurse_in_charge') || actor.hasRole('clinician')"
+    error: "Insufficient role to complete bed cleaning"
+
+effects:
+  - type: updateObject
+    target: "bed"
+    set:
+      status: "AVAILABLE"
+
+sideEffects:
+  - name: emitBedReadyEvent
+    type: event
+    config:
+      type: "nhs.acute.bed.ready"
+      data:
+        bedId: "bed.id"
+        wardId: "bed.ward.id"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

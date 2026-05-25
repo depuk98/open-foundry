@@ -295,12 +295,13 @@ describe('NHS Acute Domain Pack — ODL Schema Parsing', () => {
   });
 
   describe('action types', () => {
-    it('defines 3 action types in ODL', () => {
-      expect(schema.actionTypes).toHaveLength(3);
+    it('defines 4 action types in ODL', () => {
+      expect(schema.actionTypes).toHaveLength(4);
       const names = schema.actionTypes.map(a => a.name);
       expect(names).toContain('AdmitPatient');
       expect(names).toContain('DischargePatient');
       expect(names).toContain('TransferWard');
+      expect(names).toContain('CleanBed');
     });
   });
 });
@@ -334,7 +335,7 @@ describe('NHS Acute Domain Pack — Individual ODL Files', () => {
 });
 
 describe('NHS Acute Domain Pack — Action Manifests', () => {
-  const actionFiles = ['admit-patient.yaml', 'discharge-patient.yaml', 'transfer-ward.yaml'];
+  const actionFiles = ['admit-patient.yaml', 'discharge-patient.yaml', 'transfer-ward.yaml', 'clean-bed.yaml'];
 
   for (const file of actionFiles) {
     describe(file, () => {
@@ -408,6 +409,28 @@ describe('NHS Acute Domain Pack — Action Manifests', () => {
       ]);
     });
   });
+
+  describe('clean-bed.yaml', () => {
+    it('has correct action name and structure', () => {
+      const result = parseActionManifest(readAction('clean-bed.yaml'));
+      expect(result.errors).toEqual([]);
+      const m = result.manifest!;
+      expect(m.action).toBe('CleanBed');
+      expect(m.version).toBe(1);
+      expect(m.preconditions).toHaveLength(2);
+      expect(m.effects).toHaveLength(1);
+    });
+
+    it('returns the bed to AVAILABLE', () => {
+      const result = parseActionManifest(readAction('clean-bed.yaml'));
+      const effect = result.manifest!.effects[0]!;
+      expect(effect.type).toBe('updateObject');
+      if (effect.type === 'updateObject') {
+        expect(effect.target).toBe('bed');
+        expect(effect.set).toMatchObject({ status: 'AVAILABLE' });
+      }
+    });
+  });
 });
 
 describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
@@ -439,7 +462,7 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
     const provides = pack['provides'] as Record<string, number>;
     expect(provides['objectTypes']).toBe(5);
     expect(provides['linkTypes']).toBe(6);
-    expect(provides['actionTypes']).toBe(3);
+    expect(provides['actionTypes']).toBe(4);
     expect(provides['connectors']).toBe(1);
   });
 
@@ -461,10 +484,11 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     const actionFiles = pack['actions'] as string[];
-    expect(actionFiles).toHaveLength(3);
+    expect(actionFiles).toHaveLength(4);
     expect(actionFiles).toContain('actions/admit-patient.yaml');
     expect(actionFiles).toContain('actions/discharge-patient.yaml');
     expect(actionFiles).toContain('actions/transfer-ward.yaml');
+    expect(actionFiles).toContain('actions/clean-bed.yaml');
   });
 });
 
@@ -499,6 +523,15 @@ describe('NHS Acute Domain Pack — OpenFGA permissions', () => {
     const content = readFileSync(fgaPath, 'utf-8');
 
     expect(content).toContain('schema 1.1');
+  });
+
+  it('bed has can_clean authorising ward editors and porters (CleanBed action)', () => {
+    const fgaPath = resolve(PACK_ROOT, 'permissions', 'nhs-roles.fga');
+    const content = readFileSync(fgaPath, 'utf-8');
+
+    // CleanBed → runtime verb derivation → can_clean on bed.
+    expect(content).toContain('define porter: [user]');
+    expect(content).toContain('define can_clean: editor or porter from in_ward');
   });
 });
 

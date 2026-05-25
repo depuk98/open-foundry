@@ -25,3 +25,11 @@ type TransferWard @actionType {
   toBed: Bed @param
   reason: String @param
 }
+
+# Returns a bed from CLEANING to AVAILABLE — completes the bed lifecycle the
+# discharge/transfer actions only half-model (both leave the vacated bed
+# CLEANING). A legitimate porter / housekeeping action. Verb "Clean" + type
+# "Bed" → can_clean on bed (consistent across runtime + codegen derivation).
+type CleanBed @actionType {
+  bed: Bed! @param
+}

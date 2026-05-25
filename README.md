@@ -103,7 +103,7 @@ Domain Packs are composable schema and configuration modules that specialise the
 
 | Pack | Namespace | Object Types | Actions | Connectors |
 |------|-----------|-------------|---------|------------|
-| **NHS Acute** | `nhs.acute` | Patient, Ward, Bed, Consultant, DischargeRecord | AdmitPatient, DischargePatient, TransferWard | PAS (JDBC + CDC) |
+| **NHS Acute** | `nhs.acute` | Patient, Ward, Bed, Consultant, DischargeRecord | AdmitPatient, DischargePatient, TransferWard, CleanBed | PAS (JDBC + CDC) |
 | **AML** | `aml` | Customer, Transaction, Alert, Case, Account, SuspiciousActivityReport | AssignAlertToCase, FlagTransaction, FreezeAccount, OpenCase, FileReport, SubmitReport | TMS (JDBC) |
 | **Supply Chain** | `supply.chain` | Product, Supplier, Shipment, Facility, InventoryRecord, PurchaseOrder | ShipOrder, ReceiveShipment, CreateOrder, CancelOrder | ERP (JDBC + CDC) |
 
@@ -188,7 +188,7 @@ The monorepo contains 20 packages across four workspace roots:
 | Pack | Namespace | Contents |
 |------|-----------|----------|
 | `@openfoundry/domain-pack-core` | `openfoundry.core` | Base interfaces, 6 custom scalars |
-| `@openfoundry/domain-pack-nhs-acute` | `nhs.acute` | 7 ODL schemas, 3 actions, 1 connector, permissions |
+| `@openfoundry/domain-pack-nhs-acute` | `nhs.acute` | 7 ODL schemas, 4 actions, 1 connector, permissions |
 | `@openfoundry/domain-pack-aml` | `aml` | 8 ODL schemas, 6 actions, 1 connector, permissions |
 | `@openfoundry/domain-pack-supply-chain` | `supply.chain` | 8 ODL schemas, 4 actions, 1 connector, permissions |
 
@@ -297,11 +297,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 ## Test Coverage
 
-1,847 unit tests and 98 Postgres integration tests across all packages:
+1,852 unit tests and 98 Postgres integration tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,847 | Always run |
+| Unit tests | 1,852 | Always run |
 | Postgres integration tests | 98 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -376,7 +376,7 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 | Deployment config | ~2,200 lines |
 | Specification + docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,945 |
+| Unit + integration tests | 1,950 |
 
 ---
 

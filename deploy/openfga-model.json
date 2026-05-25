@@ -19,13 +19,25 @@
           "computedUserset": {
             "relation": "assigned"
           }
+        },
+        "porter": {
+          "this": {}
         }
       },
       "metadata": {
         "relations": {
           "assigned": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "porter": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
             ]
           }
         }
@@ -69,25 +81,53 @@
         "can_admit": {
           "union": {
             "child": [
-              { "computedUserset": { "relation": "clinician" } },
-              { "computedUserset": { "relation": "nurse_in_charge" } },
-              { "computedUserset": { "relation": "admin" } }
+              {
+                "computedUserset": {
+                  "relation": "clinician"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "nurse_in_charge"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              }
             ]
           }
         },
         "can_discharge": {
           "union": {
             "child": [
-              { "computedUserset": { "relation": "clinician" } },
-              { "computedUserset": { "relation": "nurse_in_charge" } }
+              {
+                "computedUserset": {
+                  "relation": "clinician"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "nurse_in_charge"
+                }
+              }
             ]
           }
         },
         "can_transfer": {
           "union": {
             "child": [
-              { "computedUserset": { "relation": "clinician" } },
-              { "computedUserset": { "relation": "nurse_in_charge" } }
+              {
+                "computedUserset": {
+                  "relation": "clinician"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "nurse_in_charge"
+                }
+              }
             ]
           }
         }
@@ -96,22 +136,30 @@
         "relations": {
           "admitted_to": {
             "directly_related_user_types": [
-              { "type": "ward" }
+              {
+                "type": "ward"
+              }
             ]
           },
           "clinician": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           },
           "nurse_in_charge": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           },
           "admin": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           }
         }
@@ -142,13 +190,36 @@
               "relation": "editor"
             }
           }
+        },
+        "can_clean": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "editor"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "in_ward"
+                  },
+                  "computedUserset": {
+                    "relation": "porter"
+                  }
+                }
+              }
+            ]
+          }
         }
       },
       "metadata": {
         "relations": {
           "in_ward": {
             "directly_related_user_types": [
-              { "type": "ward" }
+              {
+                "type": "ward"
+              }
             ]
           }
         }
@@ -168,12 +239,16 @@
         "relations": {
           "viewer": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           },
           "owner": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           }
         }
@@ -191,8 +266,16 @@
         "viewer": {
           "union": {
             "child": [
-              { "computedUserset": { "relation": "clinician" } },
-              { "computedUserset": { "relation": "nurse_in_charge" } }
+              {
+                "computedUserset": {
+                  "relation": "clinician"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "nurse_in_charge"
+                }
+              }
             ]
           }
         }
@@ -201,12 +284,16 @@
         "relations": {
           "clinician": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           },
           "nurse_in_charge": {
             "directly_related_user_types": [
-              { "type": "user" }
+              {
+                "type": "user"
+              }
             ]
           }
         }
