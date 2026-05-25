@@ -69,6 +69,9 @@ export type { AuditQueryFilter as PostgresAuditQueryFilter } from './audit/postg
 export { PostgresConsentStore } from './consent/postgres-consent-store.js';
 export type { ConsentStoreInterface } from './consent/postgres-consent-store.js';
 
+// ─── Schema Registry (persistent ODL SchemaRegistry) ───
+export { PostgresSchemaRegistry } from './schema-registry/postgres-schema-registry.js';
+
 // ─── Transactions ───
 export { PgTransaction, resolveQueryable } from './transactions/index.js';
 export type { Queryable } from './transactions/index.js';

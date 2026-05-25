@@ -332,6 +332,9 @@ importers:
       '@openfoundry/observability':
         specifier: workspace:*
         version: link:../observability
+      '@openfoundry/odl':
+        specifier: workspace:*
+        version: link:../odl
       '@openfoundry/spi':
         specifier: workspace:*
         version: link:../spi
