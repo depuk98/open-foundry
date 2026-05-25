@@ -394,6 +394,9 @@ export class ActionExecutor {
               cause,
               reqCtx,
             );
+            // Mint/remove the graph-derived ReBAC tuple for this link, so
+            // `... from <link>` rules resolve without out-of-band provisioning.
+            await this.syncLinkTuple(affected.type, affected.changeType, fromId, toId);
           } else {
             // Use publishObjectChange for object effects
             await this.config.eventPublisher.publishObjectChange(
@@ -899,6 +902,37 @@ export class ActionExecutor {
       });
     } catch (err) {
       logger.warn({ err, actionId }, 'Failed to write denial audit record');
+    }
+  }
+
+  /**
+   * Mint or remove the OpenFGA relationship tuple for a created/deleted link,
+   * per the configured linkTupleMap. Tuple is `(toType:toId, relation,
+   * fromType:fromId)` — the `fromType` object holds the relation referencing
+   * the `toType` object (e.g. patient `admitted_to` ward). Best-effort:
+   * post-commit, so a tuple failure never fails the already-committed action.
+   */
+  private async syncLinkTuple(
+    linkType: string,
+    changeType: 'created' | 'updated' | 'deleted',
+    fromId: string,
+    toId: string,
+  ): Promise<void> {
+    const writer = this.config.relationshipWriter;
+    const mapping = this.config.linkTupleMap?.get(linkType);
+    if (!writer || !mapping || !fromId || !toId) return;
+    if (changeType !== 'created' && changeType !== 'deleted') return;
+
+    const user = `${mapping.toType}:${toId}`;
+    const resource = `${mapping.fromType}:${fromId}`;
+    try {
+      if (changeType === 'created') {
+        await writer.writeRelationship(user, mapping.relation, resource);
+      } else {
+        await writer.deleteRelationship(user, mapping.relation, resource);
+      }
+    } catch (err) {
+      logger.warn({ err, linkType, relation: mapping.relation }, 'Failed to sync ReBAC tuple for link');
     }
   }
 

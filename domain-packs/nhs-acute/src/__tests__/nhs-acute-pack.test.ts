@@ -540,7 +540,7 @@ describe('NHS Acute Domain Pack — OpenFGA permissions', () => {
 
     // CleanBed → runtime verb derivation → can_clean on bed.
     expect(content).toContain('define porter: [user]');
-    expect(content).toContain('define can_clean: editor or porter from in_ward');
+    expect(content).toContain('define can_clean: editor or porter from bed_in_ward');
   });
 });
 

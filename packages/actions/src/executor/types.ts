@@ -163,6 +163,27 @@ export interface AffectedObject {
 // Executor configuration
 // ---------------------------------------------------------------------------
 
+/**
+ * Writes/deletes OpenFGA relationship tuples. Structurally matches
+ * `AuthorizationService` (`writeRelationship`/`deleteRelationship`), so the
+ * service instance can be injected directly. Tuple shape: (user, relation,
+ * resource) — e.g. `("ward:W", "admitted_to", "patient:P")`.
+ */
+export interface RelationshipWriter {
+  writeRelationship(user: string, relation: string, resource: string): Promise<void>;
+  deleteRelationship(user: string, relation: string, resource: string): Promise<void>;
+}
+
+/**
+ * Maps an ontology link type to the ReBAC tuple it should mint. Keyed by link
+ * type name. `relation` is the OpenFGA relation on the `fromType` object that
+ * references the `toType` object; `fromType`/`toType` are FGA type names
+ * (snake_case). The executor emits `(toType:toId, relation, fromType:fromId)`
+ * on link create and deletes it on link delete. Only mapped link types are
+ * synced, so unmapped links (no corresponding FGA relation) are skipped.
+ */
+export type LinkTupleMap = Map<string, { relation: string; fromType: string; toType: string }>;
+
 /** Dependencies injected into the ActionExecutor. */
 export interface ActionExecutorConfig {
   storage: StorageProvider;
@@ -172,4 +193,8 @@ export interface ActionExecutorConfig {
   sideEffectHandler?: SideEffectHandler;
   auditWriter?: AuditWriter;
   eventPublisher?: ActionEventPublisher;
+  /** Optional ReBAC tuple writer — mints graph-derived tuples from link effects. */
+  relationshipWriter?: RelationshipWriter;
+  /** Which link types to sync to ReBAC tuples (and how). */
+  linkTupleMap?: LinkTupleMap;
 }

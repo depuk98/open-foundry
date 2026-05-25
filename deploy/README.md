@@ -222,24 +222,22 @@ effects → audit). These bite a production single-trust pilot specifically.
   enum value is `"GRANT"`, not `"ALLOW"`). *Fix direction: make `careRelation`
   configurable (e.g. `clinician`) and expose a consent-record API.*
 
-- **Read visibility after admission needs an `admitted_to` tuple nothing writes.**
-  `AdmitPatient` creates the ontology `AdmittedTo` link, but the admitting
-  clinician then gets `403` reading that patient: object reads use `patient.viewer
-  = viewer from admitted_to`, which requires an OpenFGA `(patient:<id>,
-  admitted_to, ward:<id>)` tuple. Action effects create the ontology link but **do
-  not** write the corresponding FGA tuple (read-side counterpart of the write-side
-  tuple gap above). ED (un-admitted) patients have no ward → no ward-scoped viewer
-  can see them. *Fix direction: write graph-derived ReBAC tuples as part of link
-  effects, or provide an operational read role.*
-  - **Same gap for every `... from <link>` rule.** Any FGA rule that traverses a
-    link userset needs the corresponding relationship tuple to exist. E.g.
-    `bed.can_clean = editor or porter from in_ward` (the `CleanBed` action) only
-    resolves when a `(bed:<id>, in_ward, ward:<id>)` tuple exists, but the pipeline
-    writes the `BedInWard` *ontology link*, not the OpenFGA tuple. Integrators must
-    provision these tuples out-of-band (derive bed→ward from the store and write
-    them). If link effects emitted relationship tuples for `BedInWard`,
-    `AdmittedTo`, ward `assigned`, etc., these `from <link>` rules would work out
-    of the box.
+- **Link-derived ReBAC tuples are now emitted by the pipeline.** On a `createLink`
+  / `deleteLink` effect, the action executor writes/deletes the matching OpenFGA
+  tuple `(toType:toId, <relation>, fromType:fromId)`, where `<relation> =
+  snake_case(linkType)` — so `AdmittedTo` → `(ward:W, admitted_to, patient:P)` and
+  `BedInWard` → `(ward:W, bed_in_ward, bed:B)`. This makes `... from <link>` rules
+  (e.g. `patient.viewer = viewer from admitted_to`, `bed.can_clean = editor or
+  porter from bed_in_ward`) resolve without out-of-band provisioning. The sync set
+  is derived at boot from the merged OpenFGA model (only link types whose
+  `snake(linkType)` relation exists are synced), and emission is post-commit +
+  best-effort (a tuple failure never fails the committed action).
+  - **Still provisioned out-of-band:** *role/direct* grants that aren't
+    link-derived — ward `assigned` (`[user]`) and patient care-team
+    `clinician`/`nurse_in_charge` (`[user]`). These have no originating ontology
+    link, so the demo's `provision-authz.sh` still seeds them.
+  - **ED (un-admitted) patients** have no `AdmittedTo` link → no ward-scoped
+    `viewer`, so they aren't visible via ward-derived reads until admitted.
 
 - **Denied actions ARE audited (authorize + consent).** Authorize and consent
   denials now write an audit record with `result: 'denied'`, `denialReason` (and

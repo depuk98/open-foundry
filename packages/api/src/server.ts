@@ -41,7 +41,7 @@ import {
   ObjectSetManager,
 } from '@openfoundry/engine';
 import { ActionExecutor, CelClient, SideEffectExecutor } from '@openfoundry/actions';
-import type { SecurityLayer, CelEvaluator, ActionEventPublisher, EventBus as SideEffectEventBus, HttpClient as SideEffectHttpClient } from '@openfoundry/actions';
+import type { SecurityLayer, CelEvaluator, ActionEventPublisher, EventBus as SideEffectEventBus, HttpClient as SideEffectHttpClient, LinkTupleMap } from '@openfoundry/actions';
 import { AuthorizationService, OidcAuthenticator, AuditWriter, MemoryAuditStore, ConsentService, MemoryConsentStore } from '@openfoundry/security';
 import type { OpenFgaClientInterface } from '@openfoundry/security';
 import type { StorageProvider, RequestContext } from '@openfoundry/spi';
@@ -366,6 +366,7 @@ async function main(): Promise<void> {
   // ── OpenFGA Authorization Model Sync ──
   // Generate the merged OpenFGA model from schema + pack permission overrides,
   // then POST to OpenFGA so all pack types are authorized.
+  let linkTupleMap: LinkTupleMap | undefined;
   if (!isDev && process.env['OPENFGA_URL'] && process.env['OPENFGA_STORE_ID']) {
     try {
       const baseDSL = generateOpenFGASchema(schema);
@@ -373,6 +374,13 @@ async function main(): Promise<void> {
         ? mergeOpenFGAOverrides(baseDSL, permissionOverrides)
         : baseDSL;
       const modelJson = fgaDslToJson(mergedDSL);
+      // Derive which ontology links map to ReBAC tuples, so the action pipeline
+      // can mint them on link create/delete (only links whose snake(linkType)
+      // relation exists in the merged model are synced).
+      linkTupleMap = buildLinkTupleMap(schema, modelJson);
+      if (linkTupleMap.size > 0) {
+        logger.info(`Authorization: ${linkTupleMap.size} link type(s) sync ReBAC tuples (${[...linkTupleMap.keys()].join(', ')})`);
+      }
       const storeId = process.env['OPENFGA_STORE_ID'];
       const fgaUrl = process.env['OPENFGA_URL'];
       const resp = await fetch(
@@ -498,6 +506,10 @@ async function main(): Promise<void> {
     eventPublisher: actionEventPublisher,
     consentManager: consentService,
     sideEffectHandler,
+    // Mint graph-derived ReBAC tuples from link effects (prod only; map is
+    // built from the merged OpenFGA model above).
+    relationshipWriter: authorizationService,
+    linkTupleMap,
   });
 
   // ── Object Sets ──
@@ -978,6 +990,33 @@ async function main(): Promise<void> {
   logger.info(`  REST:     http://localhost:${PORT}/api/v1/`);
   logger.info(`  FHIR:     http://localhost:${PORT}/fhir/`);
   logger.info(`  Metrics:  http://localhost:${PORT}/metrics`);
+}
+
+/**
+ * Build the link → ReBAC-tuple sync map. For each link type whose
+ * `snake(linkType)` relation exists on its from-type in the merged OpenFGA
+ * model, map it so the action pipeline mints `(toType:toId, relation,
+ * fromType:fromId)` tuples on link create/delete. Links without a matching
+ * model relation (e.g. dropped by a permission override) are skipped.
+ */
+function buildLinkTupleMap(
+  schema: import('@openfoundry/odl').ParsedSchema,
+  model: FgaAuthorizationModel,
+): LinkTupleMap {
+  const relationsByType = new Map<string, Set<string>>();
+  for (const td of model.type_definitions) {
+    relationsByType.set(td.type, new Set(Object.keys(td.relations ?? {})));
+  }
+  const map: LinkTupleMap = new Map();
+  for (const lt of schema.linkTypes) {
+    const fromType = toSnakeCase(lt.from);
+    const toType = toSnakeCase(lt.to);
+    const relation = toSnakeCase(lt.name);
+    if (relationsByType.get(fromType)?.has(relation)) {
+      map.set(lt.name, { relation, fromType, toType });
+    }
+  }
+  return map;
 }
 
 /**

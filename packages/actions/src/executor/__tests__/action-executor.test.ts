@@ -1388,4 +1388,78 @@ effects:
       expect(eventPublisher.events).toHaveLength(5);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // ReBAC relationship tuple sync (graph-derived tuples from link effects)
+  // -------------------------------------------------------------------------
+
+  describe('ReBAC tuple sync', () => {
+    function makeTupleExecutor(): { exec: ActionExecutor; calls: Array<{ op: string; user: string; relation: string; resource: string }> } {
+      const calls: Array<{ op: string; user: string; relation: string; resource: string }> = [];
+      const relationshipWriter = {
+        async writeRelationship(user: string, relation: string, resource: string) { calls.push({ op: 'write', user, relation, resource }); },
+        async deleteRelationship(user: string, relation: string, resource: string) { calls.push({ op: 'delete', user, relation, resource }); },
+      };
+      const linkTupleMap = new Map([
+        ['AdmittedTo', { relation: 'admitted_to', fromType: 'patient', toType: 'ward' }],
+      ]);
+      const exec = new ActionExecutor({
+        storage,
+        security: createAllowAllSecurity(),
+        cel: createMockCelEvaluator(),
+        auditWriter,
+        sideEffectHandler,
+        eventPublisher,
+        relationshipWriter,
+        linkTupleMap,
+      });
+      return { exec, calls };
+    }
+
+    it('writes the graph-derived tuple when a mapped link is created (AdmittedTo → admitted_to)', async () => {
+      const { exec, calls } = makeTupleExecutor();
+      const { manifest } = parseActionManifest(ADMIT_PATIENT_YAML);
+
+      const result = await exec.execute(
+        manifest!,
+        { patient: patient._id, ward: ward._id, consultant: consultant._id, bed: null, reason: 'Tuple test' },
+        ACTOR,
+        ACTION_CTX,
+        NHS_SCHEMA,
+      );
+
+      expect(result.success).toBe(true);
+      // (ward:W, admitted_to, patient:P) — resource is the from-object, user the to-object.
+      expect(calls).toContainEqual({
+        op: 'write',
+        user: `ward:${ward._id}`,
+        relation: 'admitted_to',
+        resource: `patient:${patient._id}`,
+      });
+      // UnderCareOf is unmapped → no tuple for it.
+      expect(calls.every(c => c.relation === 'admitted_to')).toBe(true);
+    });
+
+    it('deletes the tuple when a mapped link is removed (discharge)', async () => {
+      // Admit first (writes the tuple), then discharge (should delete it).
+      const { exec, calls } = makeTupleExecutor();
+      await exec.execute(
+        parseActionManifest(ADMIT_PATIENT_YAML).manifest!,
+        { patient: patient._id, ward: ward._id, consultant: consultant._id, bed: null, reason: 'x' },
+        ACTOR, ACTION_CTX, NHS_SCHEMA,
+      );
+      await exec.execute(
+        parseActionManifest(DISCHARGE_PATIENT_YAML).manifest!,
+        { patient: patient._id, destination: 'HOME' },
+        ACTOR, ACTION_CTX, NHS_SCHEMA,
+      );
+
+      expect(calls).toContainEqual({
+        op: 'delete',
+        user: `ward:${ward._id}`,
+        relation: 'admitted_to',
+        resource: `patient:${patient._id}`,
+      });
+    });
+  });
 });

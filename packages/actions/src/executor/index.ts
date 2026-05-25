@@ -22,4 +22,6 @@ export type {
   SideEffectResult,
   AuditWriter,
   ActionEventPublisher,
+  RelationshipWriter,
+  LinkTupleMap,
 } from './types.js';

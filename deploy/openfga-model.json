@@ -168,13 +168,13 @@
     {
       "type": "bed",
       "relations": {
-        "in_ward": {
+        "bed_in_ward": {
           "this": {}
         },
         "viewer": {
           "tupleToUserset": {
             "tupleset": {
-              "relation": "in_ward"
+              "relation": "bed_in_ward"
             },
             "computedUserset": {
               "relation": "viewer"
@@ -184,7 +184,7 @@
         "editor": {
           "tupleToUserset": {
             "tupleset": {
-              "relation": "in_ward"
+              "relation": "bed_in_ward"
             },
             "computedUserset": {
               "relation": "editor"
@@ -202,7 +202,7 @@
               {
                 "tupleToUserset": {
                   "tupleset": {
-                    "relation": "in_ward"
+                    "relation": "bed_in_ward"
                   },
                   "computedUserset": {
                     "relation": "porter"
@@ -215,7 +215,7 @@
       },
       "metadata": {
         "relations": {
-          "in_ward": {
+          "bed_in_ward": {
             "directly_related_user_types": [
               {
                 "type": "ward"

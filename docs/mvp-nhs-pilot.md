@@ -670,9 +670,9 @@ type patient
 
 type bed
   relations
-    define in_ward: [ward]
-    define viewer: viewer from in_ward
-    define editor: editor from in_ward
+    define bed_in_ward: [ward]
+    define viewer: viewer from bed_in_ward
+    define editor: editor from bed_in_ward
 
 type consultant
   relations

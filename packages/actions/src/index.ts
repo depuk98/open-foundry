@@ -61,6 +61,8 @@ export type {
   SideEffectResult,
   AuditWriter,
   ActionEventPublisher,
+  RelationshipWriter,
+  LinkTupleMap,
 } from './executor/index.js';
 
 export { SideEffectExecutor } from './sideeffects/index.js';
