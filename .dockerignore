@@ -8,11 +8,14 @@
 node_modules
 **/node_modules
 **/dist
-# Go CEL sidecar — not a pnpm workspace member (no package.json), so the
-# TypeScript service images (context = repo root) never need it. Its own image
-# builds from packages/cel-evaluator as a separate context. Excluding it keeps
-# the committed ~22MB Go binary out of every Node image.
-packages/cel-evaluator
+# Go CEL sidecar binary — committed ~22MB artifact that was being copied into
+# every Node image. The cel-evaluator's own image rebuilds it from source, so
+# the binary is never needed in any context. NOTE: ignore only the binary, NOT
+# the whole packages/cel-evaluator dir — the TS actions package loads
+# proto/cel_service.proto at runtime (CelClient.defaultProtoPath resolves
+# ../../../cel-evaluator/proto/cel_service.proto), so that proto must remain in
+# the TS service image contexts.
+packages/cel-evaluator/cel-evaluator
 **/*.tsbuildinfo
 **/*.test.ts
 **/__tests__
