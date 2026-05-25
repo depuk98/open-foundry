@@ -77,6 +77,9 @@ describeWithPg('PostgresStorageProvider lifecycle (integration)', () => {
         toType: 'Ward',
         cardinality: 'MANY_TO_MANY' as const,
         properties: [
+          // ODL link types carry `id: ID! @primary`, which convertLinkType maps
+          // to an `id` column that createLink populates — model it here too.
+          { name: 'id', type: 'ID', required: true },
           { name: 'reason', type: 'String', required: false },
         ],
       },
@@ -85,7 +88,9 @@ describeWithPg('PostgresStorageProvider lifecycle (integration)', () => {
         fromType: 'Ward',
         toType: 'Bed',
         cardinality: 'ONE_TO_MANY' as const,
-        properties: [],
+        properties: [
+          { name: 'id', type: 'ID', required: true },
+        ],
       },
     ],
   };
