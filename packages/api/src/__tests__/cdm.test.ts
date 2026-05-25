@@ -211,6 +211,17 @@ describe('CDM router authorization type derivation', () => {
     await router({ method: 'GET', path: 'Patient/p-1', query: {}, user: makeUser() });
     expect(calls.check[0]!.object).toBe('patient:p-1');
   });
+
+  it('empty list advertises the CDM resource name, not the source type (Ward → Location)', async () => {
+    // Restricted with no authorized ids → empty-list branch.
+    const { deps } = makeDeps({ listResult: [] });
+    const router = createCdmRouter({ deps });
+    const res = await router({ method: 'GET', path: 'Ward', query: {}, user: makeUser() });
+    expect(res.status).toBe(200);
+    const body = res.body as Record<string, unknown>;
+    expect(body['resourceType']).toBe('Location');
+    expect(body['total']).toBe(0);
+  });
 });
 
 describe('CDM router contract', () => {

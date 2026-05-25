@@ -169,6 +169,7 @@ async function handleObjectList(
 ): Promise<CdmResponse> {
   try {
     const ctx = ctxFor(user);
+    const mapping = findMappingBySourceType(NHS_ACUTE_CDM_PROFILE, sourceType)!;
     const fgaType = toSnakeCase(sourceType);
     const allowedObjects = await deps.authorizationService.listObjects(`user:${user.id}`, 'viewer', fgaType);
 
@@ -181,7 +182,8 @@ async function handleObjectList(
           .filter((v): v is string => !!v);
 
     if (!unrestricted && allowedIds.length === 0) {
-      return { status: 200, headers: jsonHeaders(), body: { resourceType: sourceType, total: 0, records: [] } };
+      // Empty result still advertises the CDM resource name (not the OF source type).
+      return { status: 200, headers: jsonHeaders(), body: { resourceType: mapping.cdmResource, total: 0, records: [] } };
     }
 
     // Match-all pass-through (also excludes soft-deleted) mirrors the REST
@@ -212,7 +214,6 @@ async function handleObjectList(
       rows = consentResult.edges as Record<string, unknown>[];
     }
 
-    const mapping = findMappingBySourceType(NHS_ACUTE_CDM_PROFILE, sourceType)!;
     const records: CdmRecord[] = rows.map(r => projectToCdm(r, mapping, NHS_ACUTE_CDM_PROFILE));
 
     return {
@@ -243,8 +244,12 @@ async function handleEncounterSearch(
     if (!allowed) return error(403, `Access denied to Patient ${patientId}`);
 
     const ctx = ctxFor(user);
+    // includeDeleted so discharged admissions (soft-deleted AdmittedTo links)
+    // are returned and mapped to status=finished. (Postgres soft-deletes links;
+    // the memory provider hard-deletes, so finished encounters are only
+    // recoverable on the Postgres backend.)
     const linkPage = await deps.linkManager.getLinks(
-      patientId, 'AdmittedTo', 'outbound', { limit: QUERY_LIMIT, offset: 0 }, ctx,
+      patientId, 'AdmittedTo', 'outbound', { limit: QUERY_LIMIT, offset: 0, includeDeleted: true }, ctx,
     );
 
     // Flatten links to object shape for the profile-driven projection

@@ -127,6 +127,25 @@ describeWithPg('PostgresSchemaRegistry (integration)', () => {
     await expect(reg.getSchema(99)).rejects.toThrow(/version 99 does not exist/);
   });
 
+  it('serializes concurrent applySchema calls into distinct sequential versions', async () => {
+    // Seed v1 so concurrent applies are non-breaking (identical schema → SAFE diff).
+    const reg = new PostgresSchemaRegistry(pool);
+    await reg.applySchema(v1Schema());
+
+    // Fire N concurrent applies; the advisory lock must serialize version
+    // assignment so there are no duplicate versions or PK conflicts.
+    const N = 8;
+    const results = await Promise.all(
+      Array.from({ length: N }, () => new PostgresSchemaRegistry(pool).applySchema(v1Schema())),
+    );
+
+    const versions = results.map(r => r.version).sort((a, b) => a - b);
+    // Expect exactly versions 2..N+1, each unique.
+    expect(versions).toEqual(Array.from({ length: N }, (_, i) => i + 2));
+    expect(new Set(versions).size).toBe(N);
+    expect(await reg.getCurrentVersion()).toBe(N + 1);
+  });
+
   it('persists across instances (durability)', async () => {
     const writer = new PostgresSchemaRegistry(pool);
     await writer.applySchema(v1Schema());

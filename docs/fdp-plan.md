@@ -48,7 +48,7 @@ License:                   Apache 2.0
 | --- | --- |
 | 20 packages across core platform, domain packs, tests, tools | README |
 | ~26,000 lines TypeScript, ~1,900 lines Go (CEL sidecar) | README |
-| 1,796 unit tests + 98 integration tests *(per current README; figure is unverified and may be stale — the README is internally inconsistent, citing 1,894 elsewhere. Confirm via local run before submission)* | README |
+| 1,847 unit tests + 98 Postgres integration tests *(per README; unit count locally verified 2026-05-25 via `pnpm run test` — see "Locally verified posture" below)* | README |
 | ODL compiler generating GraphQL / REST / OpenFGA / TypeScript SDK | README |
 | OIDC + OpenFGA ReBAC + consent + audit + field-level redaction | README |
 | Postgres + Apache AGE storage SPI; in-memory SPI for tests | README |
