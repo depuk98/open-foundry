@@ -251,8 +251,11 @@ function generateChangeEvent(typeName: string): string {
     `type ${typeName}ChangeEvent {`,
     `  changeType: ChangeType!`,
     `  object: ${typeName}!`,
-    `  previousValues: ${typeName}`,
-    `  causedBy: String`,
+    // previousValues is a field-level diff map ({ field: { old, new } }), not a
+    // full object; causedBy is structured. Both match the runtime subscription
+    // payload and the AsyncAPI event schema.
+    `  previousValues: JSON`,
+    `  causedBy: ActionReference`,
     `  timestamp: DateTime!`,
     `}`,
   ].join('\n');
@@ -292,6 +295,14 @@ function generateSharedTypes(): string {
     '  CREATED',
     '  UPDATED',
     '  DELETED',
+    '}',
+    '',
+    '# Provenance of a change event: the action that caused it (null for',
+    '# direct/non-action mutations). Mirrors the runtime ChangeEvent.causedBy',
+    '# and spec Section 8.1 (causedBy: ActionReference).',
+    'type ActionReference {',
+    '  actionType: String',
+    '  actionId: String',
     '}',
     '',
     'type ActionError {',

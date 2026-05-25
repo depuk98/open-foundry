@@ -461,8 +461,10 @@ describe('GraphQL schema codegen', () => {
       const eventBlock = extractTypeBlock(sdl, 'type PatientChangeEvent');
       expect(eventBlock).toContain('changeType: ChangeType!');
       expect(eventBlock).toContain('object: Patient!');
-      expect(eventBlock).toContain('previousValues: Patient');
-      expect(eventBlock).toContain('causedBy: String');
+      // previousValues is a diff map (JSON), causedBy is structured — matches
+      // the runtime subscription payload + AsyncAPI event schema.
+      expect(eventBlock).toContain('previousValues: JSON');
+      expect(eventBlock).toContain('causedBy: ActionReference');
       expect(eventBlock).toContain('timestamp: DateTime!');
     });
 
