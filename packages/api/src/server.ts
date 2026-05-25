@@ -262,6 +262,12 @@ async function main(): Promise<void> {
   // Apply seed data from domain packs (idempotent — skips objects that already exist).
   // Runs through ObjectManager/LinkManager for full validation, events, and audit.
   // Objects can declare a `ref` label; links reference objects by `ref` or literal ID.
+  //
+  // Seeded links bypass the action executor, so their ReBAC tuples aren't minted
+  // by the pipeline. We capture the resolved (type, fromId, toId) here and mint
+  // the matching tuples once the authz layer + linkTupleMap are available below —
+  // keeping seeded links consistent with runtime-created ones.
+  const seededLinkTuples: Array<{ type: string; fromId: string; toId: string }> = [];
   if (seedManifests.length > 0) {
     let seededObjects = 0;
     let seededLinks = 0;
@@ -310,6 +316,9 @@ async function main(): Promise<void> {
       for (const lnk of seed.links) {
         const fromId = refMap.get(lnk.from) ?? lnk.from;
         const toId = refMap.get(lnk.to) ?? lnk.to;
+        // Record for tuple minting regardless of create/exists (writes are
+        // idempotent), so re-boots backfill tuples for pre-existing seed links.
+        seededLinkTuples.push({ type: lnk.type, fromId, toId });
         try {
           await linkManager.createLink(lnk.type, fromId, toId, lnk.fields, bootCtx);
           seededLinks++;
@@ -403,6 +412,26 @@ async function main(): Promise<void> {
   }
 
   const authorizationService = new AuthorizationService(fgaClient, fieldPermissions);
+
+  // ── Backfill ReBAC tuples for seeded links ──
+  // Seeded links bypass the action executor (which mints tuples at runtime), so
+  // mint their tuples here now that the model + authz layer are ready. Mirrors
+  // the executor's syncLinkTuple. Prod-only (linkTupleMap is built from the
+  // merged FGA model); idempotent; best-effort.
+  if (linkTupleMap && linkTupleMap.size > 0 && seededLinkTuples.length > 0) {
+    let minted = 0;
+    for (const l of seededLinkTuples) {
+      const m = linkTupleMap.get(l.type);
+      if (!m || !l.fromId || !l.toId) continue;
+      try {
+        await authorizationService.writeRelationship(`${m.toType}:${l.toId}`, m.relation, `${m.fromType}:${l.fromId}`);
+        minted++;
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : 'unknown', linkType: l.type }, 'Seed: failed to mint ReBAC tuple');
+      }
+    }
+    if (minted > 0) logger.info(`Seed: minted ${minted} ReBAC tuple(s) for seeded links`);
+  }
 
   // ── CEL Evaluator ──
   let cel: CelEvaluator;

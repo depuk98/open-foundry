@@ -232,6 +232,9 @@ effects → audit). These bite a production single-trust pilot specifically.
   is derived at boot from the merged OpenFGA model (only link types whose
   `snake(linkType)` relation exists are synced), and emission is post-commit +
   best-effort (a tuple failure never fails the committed action).
+  - **Seeded links too:** boot-seed links bypass the action executor, so their
+    tuples are backfilled at startup (after the model loads) using the same
+    map — so a seeded `BedInWard` gets its `bed_in_ward` tuple without a script.
   - **Still provisioned out-of-band:** *role/direct* grants that aren't
     link-derived — ward `assigned` (`[user]`) and patient care-team
     `clinician`/`nurse_in_charge` (`[user]`). These have no originating ontology
