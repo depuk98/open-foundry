@@ -82,9 +82,12 @@ Local results (verified 2026-05-25):
                              ODL link 'id' column — both fixed; not product bugs.
   Docker-stack integration:  NOT RUN — requires full Docker Compose stack.
   Container build success:   PASS — all 6 images build clean via
-                             `docker compose build` (cel-evaluator Go ~454MB;
-                             api-gateway/action-executor/ontology-engine/
-                             security-service/sync-engine TS ~237-239MB).
+                             `docker compose build`. Slimmed: cel-evaluator Go
+                             454MB->49MB (build grpc-health-probe in the builder,
+                             copy only static binaries — was copying the whole Go
+                             toolchain into the runtime layer); the 5 TS images
+                             ~237-239MB->215-216MB (committed 22MB Go binary
+                             excluded from the image context via .dockerignore).
   Helm chart lint:           NOT RUN — helm not available in sandbox; chart at
                              deploy/helm/openfoundry/Chart.yaml.
   Critical CVEs in deps:     NOT RUN — trivy/snyk not available in sandbox.
