@@ -241,12 +241,12 @@ effects → audit). These bite a production single-trust pilot specifically.
     `AdmittedTo`, ward `assigned`, etc., these `from <link>` rules would work out
     of the box.
 
-- **Denied actions are not audited.** The pipeline order is validate → authorise →
-  consent → preconditions → execute → side-effects → **audit** → emit. A denial at
-  authorize/consent/precondition returns *before* the audit step, so
-  `audit.audit_records` captures successes but not refused attempts — the opposite
-  of what IG/security review wants. *Fix direction: emit an audit record (actor,
-  target, decision, reason, traceId) on every pre-execute denial.*
+- **Denied actions ARE audited (authorize + consent).** Authorize and consent
+  denials now write an audit record with `result: 'denied'`, `denialReason` (and
+  `consentDecision: 'denied'` for consent), plus actor/roles/traceId — so the
+  immutable trail carries refusal evidence (IG need-to-know). Note: **precondition
+  failures** (`PRECONDITION_FAILED`, business-state) and **input validation**
+  failures are not audited — only access denials are.
 
 - **Boot-seed data lands under tenant `system`.** `server.ts` seeds with
   `bootCtx = { tenantId: 'system' }`. Object rows are tenant-scoped (`_tenant_id`)

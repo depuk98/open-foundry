@@ -143,10 +143,12 @@ export class ActionExecutor {
       reqCtx,
     );
     if (!permResult.allowed) {
+      const reason = permResult.reason ?? `Actor ${actor.id} is not authorized to execute ${actionType}`;
+      await this.auditDenied(actionId, actor, actionType, reqCtx, reason);
       return failResult(actionId, [
         {
           code: 'AUTHORIZATION_DENIED',
-          message: permResult.reason ?? `Actor ${actor.id} is not authorized to execute ${actionType}`,
+          message: reason,
         },
       ]);
     }
@@ -162,10 +164,15 @@ export class ActionExecutor {
         reqCtx.tenantId,
       );
       if (!consentDecision.allowed) {
+        const reason = `Consent denied for purpose ${ctx.consentPurpose}`;
+        await this.auditDenied(actionId, actor, actionType, reqCtx, reason, {
+          consentDenied: true,
+          subjectId: ctx.consentSubjectId,
+        });
         return failResult(actionId, [
           {
             code: 'CONSENT_DENIED',
-            message: `Consent denied for purpose ${ctx.consentPurpose}`,
+            message: reason,
           },
         ]);
       }
@@ -854,6 +861,45 @@ export class ActionExecutor {
       resolvedData[key] = typeof value === 'string' ? this.resolveExpression(value, context) : value;
     }
     return { ...config, data: resolvedData };
+  }
+
+  /**
+   * Write an audit record for a denied action (authorize/consent stage).
+   * Denials return before the post-commit audit step, so without this the
+   * immutable trail would record only successes — IG/security review needs
+   * evidence of refused access too. Best-effort: audit failure never changes
+   * the action's response.
+   */
+  private async auditDenied(
+    actionId: string,
+    actor: ActionActor,
+    actionType: string,
+    reqCtx: RequestContext,
+    denialReason: string,
+    opts?: { consentDenied?: boolean; subjectId?: string },
+  ): Promise<void> {
+    if (!this.config.auditWriter) return;
+    try {
+      await this.config.auditWriter.write({
+        id: `audit_${actionId}`,
+        timestamp: now(),
+        traceId: reqCtx.traceId ?? actionId,
+        actor: { type: actor.type, id: actor.id, roles: actor.roles, ip: actor.ip },
+        operation: {
+          type: 'action',
+          actionType,
+          actionId,
+          ...(opts?.subjectId ? { objectId: opts.subjectId } : {}),
+        },
+        detail: {
+          result: 'denied',
+          denialReason,
+          ...(opts?.consentDenied ? { consentDecision: 'denied' as const } : {}),
+        },
+      });
+    } catch (err) {
+      logger.warn({ err, actionId }, 'Failed to write denial audit record');
+    }
   }
 
   private resolveExpression(expr: string, context: Record<string, unknown>): unknown {

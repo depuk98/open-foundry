@@ -1235,7 +1235,7 @@ effects:
       expect(record.traceId).toBe('trace-001');
     });
 
-    it('does not write audit record on failed action', async () => {
+    it('writes a denied audit record on authorization denial', async () => {
       const denyExecutor = new ActionExecutor({
         storage,
         security: createDenySecurity('No access'),
@@ -1244,7 +1244,7 @@ effects:
       });
 
       const { manifest } = parseActionManifest(ADMIT_PATIENT_YAML);
-      await denyExecutor.execute(
+      const result = await denyExecutor.execute(
         manifest!,
         { patient: patient._id, ward: ward._id, consultant: consultant._id, bed: null, reason: 'Test' },
         ACTOR,
@@ -1252,7 +1252,14 @@ effects:
         NHS_SCHEMA,
       );
 
-      expect(auditWriter.records).toHaveLength(0);
+      expect(result.success).toBe(false);
+      // Denied actions must leave refusal evidence in the immutable trail (IG).
+      expect(auditWriter.records).toHaveLength(1);
+      const record = auditWriter.records[0]!;
+      expect(record.detail.result).toBe('denied');
+      expect(record.detail.denialReason).toBe('No access');
+      expect(record.operation.actionType).toBe('AdmitPatient');
+      expect(record.actor.id).toBe('dr-smith');
     });
   });
 
