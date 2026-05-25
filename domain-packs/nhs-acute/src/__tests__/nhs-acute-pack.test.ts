@@ -295,13 +295,14 @@ describe('NHS Acute Domain Pack — ODL Schema Parsing', () => {
   });
 
   describe('action types', () => {
-    it('defines 4 action types in ODL', () => {
-      expect(schema.actionTypes).toHaveLength(4);
+    it('defines 5 action types in ODL', () => {
+      expect(schema.actionTypes).toHaveLength(5);
       const names = schema.actionTypes.map(a => a.name);
       expect(names).toContain('AdmitPatient');
       expect(names).toContain('DischargePatient');
       expect(names).toContain('TransferWard');
       expect(names).toContain('CleanBed');
+      expect(names).toContain('RegisterPatient');
     });
   });
 });
@@ -335,7 +336,7 @@ describe('NHS Acute Domain Pack — Individual ODL Files', () => {
 });
 
 describe('NHS Acute Domain Pack — Action Manifests', () => {
-  const actionFiles = ['admit-patient.yaml', 'discharge-patient.yaml', 'transfer-ward.yaml', 'clean-bed.yaml'];
+  const actionFiles = ['admit-patient.yaml', 'discharge-patient.yaml', 'transfer-ward.yaml', 'clean-bed.yaml', 'register-patient.yaml'];
 
   for (const file of actionFiles) {
     describe(file, () => {
@@ -440,6 +441,36 @@ describe('NHS Acute Domain Pack — Action Manifests', () => {
       expect(exprs.some(e => e.includes('hasRole'))).toBe(false);
     });
   });
+
+  describe('register-patient.yaml', () => {
+    it('parses; role-gated; creates a DISCHARGED patient then records consent', () => {
+      const result = parseActionManifest(readAction('register-patient.yaml'));
+      expect(result.errors).toEqual([]);
+      const m = result.manifest!;
+      expect(m.action).toBe('RegisterPatient');
+
+      // Role-gated (no object to ReBAC-authorize pre-creation).
+      expect(m.preconditions.some(p => p.expr.includes('hasRole'))).toBe(true);
+
+      // createObject Patient (DISCHARGED) then recordConsent.
+      const types = m.effects.map(e => e.type);
+      expect(types).toEqual(['createObject', 'recordConsent']);
+
+      const create = m.effects[0]!;
+      if (create.type === 'createObject') {
+        expect(create.objectType).toBe('Patient');
+        expect(create.properties).toMatchObject({ status: 'DISCHARGED' });
+      }
+      const consent = m.effects[1]!;
+      if (consent.type === 'recordConsent') {
+        expect(consent.subject).toBe('patient');
+        expect(consent.purpose).toBe('DIRECT_CARE');
+        expect(consent.decision).toBe('GRANT');
+        // Opt-out: recorded by default, skipped only when consent == false.
+        expect(consent.condition).toContain('params.consent');
+      }
+    });
+  });
 });
 
 describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
@@ -471,7 +502,7 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
     const provides = pack['provides'] as Record<string, number>;
     expect(provides['objectTypes']).toBe(5);
     expect(provides['linkTypes']).toBe(6);
-    expect(provides['actionTypes']).toBe(4);
+    expect(provides['actionTypes']).toBe(5);
     expect(provides['connectors']).toBe(1);
   });
 
@@ -493,11 +524,12 @@ describe('NHS Acute Domain Pack — pack.yaml manifest', () => {
     const pack = parseYaml(content) as Record<string, unknown>;
 
     const actionFiles = pack['actions'] as string[];
-    expect(actionFiles).toHaveLength(4);
+    expect(actionFiles).toHaveLength(5);
     expect(actionFiles).toContain('actions/admit-patient.yaml');
     expect(actionFiles).toContain('actions/discharge-patient.yaml');
     expect(actionFiles).toContain('actions/transfer-ward.yaml');
     expect(actionFiles).toContain('actions/clean-bed.yaml');
+    expect(actionFiles).toContain('actions/register-patient.yaml');
   });
 });
 

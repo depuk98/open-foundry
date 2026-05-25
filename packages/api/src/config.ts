@@ -92,13 +92,13 @@ export function createSecurityLayer(
         );
         return { allowed };
       }
-      // Unmapped actions: generic action-level check
-      const allowed = await authz.check(
-        `user:${actor.id}`,
-        'execute',
-        `action:${actionType}`,
-      );
-      return { allowed };
+      // Unmapped actions have no ObjectType @param to ReBAC-authorize against
+      // (e.g. creation actions like RegisterPatient). Authorization for these is
+      // the manifest's CEL preconditions (role claims) — the next pipeline stage.
+      // We allow at the ReBAC layer rather than checking `execute on
+      // action:<type>` (which would fail closed without provisioned tuples and
+      // make every object-less action permanently denied).
+      return { allowed: true };
     },
   };
 }

@@ -17,6 +17,7 @@ import type {
   CreateLinkEffect,
   DeleteLinkEffect,
   CreateObjectEffect,
+  RecordConsentEffect,
   Precondition,
   SideEffect,
   RollbackConfig,
@@ -240,7 +241,7 @@ function parsePreconditions(
 
 // ─── Effects ───
 
-const VALID_EFFECT_TYPES = new Set(['updateObject', 'createLink', 'deleteLink', 'createObject']);
+const VALID_EFFECT_TYPES = new Set(['updateObject', 'createLink', 'deleteLink', 'createObject', 'recordConsent']);
 
 function parseEffects(
   raw: unknown,
@@ -304,10 +305,40 @@ function parseEffects(
         if (effect) result.push(effect);
         break;
       }
+      case 'recordConsent': {
+        const effect = parseRecordConsent(item, path, errors);
+        if (effect) result.push(effect);
+        break;
+      }
     }
   }
 
   return result;
+}
+
+function parseRecordConsent(
+  item: Record<string, unknown>,
+  path: string,
+  errors: ManifestIssue[],
+): RecordConsentEffect | undefined {
+  if (typeof item['subject'] !== 'string' || !item['subject']) {
+    errors.push({
+      severity: 'error',
+      code: 'MISSING_FIELD',
+      message: `${path}.subject is required for recordConsent effect.`,
+      path: `${path}.subject`,
+    });
+    return undefined;
+  }
+  const effect: RecordConsentEffect = {
+    type: 'recordConsent',
+    subject: item['subject'],
+  };
+  if (typeof item['purpose'] === 'string') effect.purpose = item['purpose'];
+  if (typeof item['decision'] === 'string') effect.decision = item['decision'];
+  if (typeof item['evidence'] === 'string') effect.evidence = item['evidence'];
+  if (typeof item['condition'] === 'string') effect.condition = item['condition'];
+  return effect;
 }
 
 function parseUpdateObject(
@@ -892,6 +923,7 @@ export type {
   CreateLinkEffect,
   DeleteLinkEffect,
   CreateObjectEffect,
+  RecordConsentEffect,
   Precondition,
   SideEffect,
   RollbackConfig,

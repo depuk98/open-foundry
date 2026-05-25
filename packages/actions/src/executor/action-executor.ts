@@ -17,6 +17,7 @@ import type {
   Transaction,
   RequestContext,
   DateTime,
+  DataPurpose,
 } from '@openfoundry/spi';
 import type { ParsedSchema, ActionType } from '@openfoundry/odl';
 import { createLogger } from '@openfoundry/observability';
@@ -27,6 +28,7 @@ import type {
   CreateLinkEffect,
   DeleteLinkEffect,
   CreateObjectEffect,
+  RecordConsentEffect,
 } from '../parser/types.js';
 import type {
   ActionActor,
@@ -613,7 +615,42 @@ export class ActionExecutor {
       case 'createObject':
         await this.executeCreateObject(effect, context, txn, affectedObjects, afterStates);
         break;
+      case 'recordConsent':
+        await this.executeRecordConsent(effect, context, reqCtx);
+        break;
     }
+  }
+
+  /**
+   * Record a consent decision via the ConsentManager. Resolves `subject` from
+   * context (e.g. a just-created patient), honours an optional CEL `condition`
+   * (opt-out), and defaults purpose=DIRECT_CARE, decision=GRANT. No-op if no
+   * consent manager is wired. NOTE: consent is recorded outside the SPI
+   * transaction, so this should be the terminal effect (it is not rolled back).
+   */
+  private async executeRecordConsent(
+    effect: RecordConsentEffect,
+    context: Record<string, unknown>,
+    reqCtx: RequestContext,
+  ): Promise<void> {
+    if (!this.config.consentManager) return;
+    if (effect.condition) {
+      const cond = await this.config.cel.evaluate(effect.condition, context);
+      if (cond.value !== true) return;
+    }
+    const subjectId = String(this.resolveExpression(effect.subject, context) ?? '');
+    if (!subjectId) {
+      throw new Error(`recordConsent: subject "${effect.subject}" did not resolve to an id`);
+    }
+    const purpose = (effect.purpose ?? 'DIRECT_CARE') as DataPurpose;
+    const decision = (effect.decision ?? 'GRANT') === 'DENY' ? 'DENY' : 'GRANT';
+    await this.config.consentManager.recordConsent(
+      subjectId,
+      purpose,
+      decision,
+      effect.evidence,
+      reqCtx.tenantId,
+    );
   }
 
   private async executeUpdateObject(

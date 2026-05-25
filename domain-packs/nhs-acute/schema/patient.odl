@@ -11,6 +11,7 @@ type Patient @objectType {
   dateOfBirth: Date! @sensitive
   status: PatientStatus!
   triageCategory: TriageCategory
+  presentingComplaint: String
   currentWard: Ward @link(type: "AdmittedTo", direction: OUTBOUND)
   currentBed: Bed @link(type: "OccupiesBed", direction: OUTBOUND)
   admissions: [AdmittedTo!]! @link(type: "AdmittedTo", direction: OUTBOUND, history: true)

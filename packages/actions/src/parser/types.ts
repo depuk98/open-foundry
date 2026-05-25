@@ -40,11 +40,29 @@ export interface CreateObjectEffect {
   properties: Record<string, string>;
 }
 
+/**
+ * Record a consent decision for a subject (governed, audited). `subject` is an
+ * expression resolving to the consent subject id (e.g. "patient"). `purpose`
+ * defaults to DIRECT_CARE, `decision` to GRANT. `condition` (CEL) gates whether
+ * the consent is recorded — used for opt-out (e.g. consent-on-register unless
+ * `params.consent == false`). Consent is recorded via the ConsentManager, which
+ * is outside the SPI transaction — place it as the terminal effect.
+ */
+export interface RecordConsentEffect {
+  type: 'recordConsent';
+  subject: string;
+  purpose?: string;
+  decision?: string;
+  evidence?: string;
+  condition?: string;
+}
+
 export type ActionEffect =
   | UpdateObjectEffect
   | CreateLinkEffect
   | DeleteLinkEffect
-  | CreateObjectEffect;
+  | CreateObjectEffect
+  | RecordConsentEffect;
 
 // ─── Precondition ───
 

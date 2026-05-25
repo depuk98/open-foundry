@@ -33,3 +33,17 @@ type TransferWard @actionType {
 type CleanBed @actionType {
   bed: Bed! @param
 }
+
+# Governed patient registration (ED arrival). Creates a Patient in DISCHARGED
+# (awaiting-bed) state and, by default, records DIRECT_CARE consent (opt out
+# with consent: false). No object @param → role-gated by CEL (receptionist /
+# clinician / nurse_in_charge), not ReBAC (nothing exists to authorize against
+# pre-creation).
+type RegisterPatient @actionType {
+  name: String! @param
+  dateOfBirth: Date! @param
+  nhsNumber: String @param
+  triageCategory: TriageCategory @param
+  presentingComplaint: String @param
+  consent: Boolean @param
+}

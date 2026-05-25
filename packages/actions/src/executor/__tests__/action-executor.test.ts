@@ -1390,6 +1390,58 @@ effects:
   });
 
   // -------------------------------------------------------------------------
+  // recordConsent effect (governed consent recording)
+  // -------------------------------------------------------------------------
+
+  describe('recordConsent effect', () => {
+    const REGISTER_YAML = `
+action: RegisterPatient
+version: 1
+reversible: false
+effects:
+  - type: createObject
+    objectType: Patient
+    properties:
+      name: "params.name"
+      status: "DISCHARGED"
+  - type: recordConsent
+    subject: "patient"
+    purpose: "DIRECT_CARE"
+    decision: "GRANT"
+`;
+
+    function makeConsentExecutor() {
+      const calls: Array<{ subjectId: string; purpose: string; decision: string }> = [];
+      const consentManager = {
+        async checkConsent() { return { allowed: true }; },
+        async checkConsentBatch() { return new Map(); },
+        async recordConsent(subjectId: string, purpose: string, decision: string) { calls.push({ subjectId, purpose, decision }); },
+        async revokeConsent() { return {}; },
+        async getConsentRecord() { return []; },
+      } as unknown as import('@openfoundry/spi').ConsentManager;
+      const exec = new ActionExecutor({
+        storage, security: createAllowAllSecurity(), cel: createMockCelEvaluator(), consentManager,
+      });
+      return { exec, calls };
+    }
+
+    it('records consent for the just-created patient', async () => {
+      const { exec, calls } = makeConsentExecutor();
+      const result = await exec.execute(
+        parseActionManifest(REGISTER_YAML).manifest!,
+        { name: 'Jane Doe' },
+        ACTOR, ACTION_CTX, NHS_SCHEMA,
+      );
+      expect(result.success).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.purpose).toBe('DIRECT_CARE');
+      expect(calls[0]!.decision).toBe('GRANT');
+      // subject "patient" resolved to the created patient's id (non-empty).
+      expect(calls[0]!.subjectId).toBeTruthy();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // ReBAC relationship tuple sync (graph-derived tuples from link effects)
   // -------------------------------------------------------------------------
 
