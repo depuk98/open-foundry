@@ -329,7 +329,13 @@ type DischargedFromWard @linkType(from: "DischargeRecord", to: "Ward", cardinali
 }
 ```
 
-### 4.3 ActionTypes (3)
+### 4.3 ActionTypes (3 core)
+
+> The three actions below are the original MVP core slice. The pack has since
+> gained two post-MVP actions for the S1.4 bed-management work — **CleanBed**
+> (returns a bed `CLEANING → AVAILABLE`) and **RegisterPatient** (governed ED
+> arrival + consent-on-register) — bringing the pack to 5 ActionTypes. See
+> [`fdp-plan.md`](fdp-plan.md) (S1.4) and the pack manifests for those.
 
 #### AdmitPatient
 
