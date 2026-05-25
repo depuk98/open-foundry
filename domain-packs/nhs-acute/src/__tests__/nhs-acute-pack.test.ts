@@ -417,7 +417,7 @@ describe('NHS Acute Domain Pack — Action Manifests', () => {
       const m = result.manifest!;
       expect(m.action).toBe('CleanBed');
       expect(m.version).toBe(1);
-      expect(m.preconditions).toHaveLength(2);
+      expect(m.preconditions).toHaveLength(1);
       expect(m.effects).toHaveLength(1);
     });
 
@@ -429,6 +429,15 @@ describe('NHS Acute Domain Pack — Action Manifests', () => {
         expect(effect.target).toBe('bed');
         expect(effect.set).toMatchObject({ status: 'AVAILABLE' });
       }
+    });
+
+    it('preconditions assert state only — no global-role CEL gate', () => {
+      // Authorization is FGA can_clean (ward-scoped). A hasRole() gate here
+      // would check a different axis than FGA grants and contradict it.
+      const result = parseActionManifest(readAction('clean-bed.yaml'));
+      const exprs = result.manifest!.preconditions.map(p => p.expr);
+      expect(exprs).toEqual(["bed.status == 'CLEANING'"]);
+      expect(exprs.some(e => e.includes('hasRole'))).toBe(false);
     });
   });
 });

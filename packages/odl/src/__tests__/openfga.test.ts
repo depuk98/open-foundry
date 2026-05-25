@@ -145,6 +145,10 @@ type TransferWard @actionType {
   toBed: Bed @param
   reason: String @param
 }
+
+type CleanBed @actionType {
+  bed: Bed! @param
+}
 `;
 
 /**
@@ -388,6 +392,15 @@ describe('OpenFGA codegen', () => {
       const dsl = getSchema();
       const relations = extractRelations(dsl, 'bed');
       expect(relations.get('editor')).toMatch(/editor from (bed_in_ward|in_ward)/);
+    });
+
+    it('generates can_clean for the CleanBed action (verb derivation agrees with runtime)', () => {
+      // CleanBed targets Bed → codegen strips the "Bed" type word → can_clean;
+      // the runtime (deriveActionAuthzMappings) takes the first word "Clean" →
+      // can_clean. Both must agree or the action is denied before preconditions.
+      const dsl = getSchema();
+      const relations = extractRelations(dsl, 'bed');
+      expect(relations.has('can_clean')).toBe(true);
     });
   });
 

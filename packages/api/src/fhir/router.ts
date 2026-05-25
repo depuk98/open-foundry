@@ -315,11 +315,15 @@ async function handleEncounterSearch(
     // Synthesize FHIR Encounters from AdmittedTo links (Patient→Ward).
     // The NHS acute schema models admissions as AdmittedTo links, not a
     // separate Encounter object type.
+    // includeDeleted so discharged admissions (soft-deleted AdmittedTo links)
+    // surface as finished Encounters — keeps parity with the CDM Encounter
+    // projection. (Postgres soft-deletes links; the memory provider hard-deletes,
+    // so finished encounters are only recoverable on the Postgres backend.)
     const linkPage = await deps.linkManager.getLinks(
       patientId,
       'AdmittedTo',
       'outbound',
-      { limit: 100, offset: 0 },
+      { limit: 100, offset: 0, includeDeleted: true },
       ctx,
     );
 

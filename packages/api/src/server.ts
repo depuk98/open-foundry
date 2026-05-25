@@ -32,7 +32,7 @@ import { GraphQLError } from 'graphql';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
-import { PostgresStorageProvider, PostgresAuditStore, PostgresConsentStore } from '@openfoundry/storage-postgres';
+import { PostgresStorageProvider, PostgresAuditStore, PostgresConsentStore, PostgresSchemaRegistry } from '@openfoundry/storage-postgres';
 import {
   ObjectManager,
   LinkManager,
@@ -63,7 +63,9 @@ import {
 } from './config.js';
 import type { ActionAuthzMapping } from './config.js';
 import { loadDomainPacks } from './schema-loader.js';
-import { generateOpenFGASchema, mergeOpenFGAOverrides } from '@openfoundry/odl';
+import { generateOpenFGASchema, mergeOpenFGAOverrides, InMemorySchemaRegistry } from '@openfoundry/odl';
+import type { SchemaRegistry } from '@openfoundry/odl';
+import { recordSchemaVersion } from './schema-registry-boot.js';
 import { SlidingWindowRateLimiter, RedisRateLimiter } from './governance/index.js';
 import type { RateLimiter, RateLimitIdentity } from './governance/index.js';
 import { toSnakeCase } from './utils.js';
@@ -191,6 +193,30 @@ async function main(): Promise<void> {
   // Apply schema to storage (creates tables/indexes in Postgres, registers types in memory)
   const bootCtx: RequestContext = { tenantId: 'system', actorId: 'boot' };
   await storage.applySchema(bootCtx, spiSchema);
+
+  // ── Schema registry (versioned ODL schema history) ──
+  // Records the merged ParsedSchema as a new version when it differs from the
+  // latest stored one. PostgreSQL-backed when available (durable, shared across
+  // pods); in-memory otherwise. Recording is non-blocking and auto-approves the
+  // migration plan: a breaking pack change is *recorded* (with a warning) rather
+  // than blocking startup — enforcement of breaking changes is a governance-time
+  // concern (a future schema-management API), not a boot gate.
+  const schemaRegistry: SchemaRegistry = storage instanceof PostgresStorageProvider
+    ? new PostgresSchemaRegistry(storage.pool)
+    : new InMemorySchemaRegistry();
+  try {
+    const result = await recordSchemaVersion(schemaRegistry, schema);
+    if (result.breaking) {
+      logger.warn('Schema registry: BREAKING schema change detected at boot — recorded under an auto-approved migration plan. Review schema history before promoting.');
+    }
+    if (result.recorded) {
+      const backend = storage instanceof PostgresStorageProvider ? 'PostgreSQL' : 'in-memory';
+      logger.info(`Schema registry: recorded schema version ${result.version} (${backend})`);
+    }
+  } catch (err) {
+    // Non-fatal: schema-history recording must not block startup.
+    logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'Schema registry: failed to record schema version');
+  }
 
   // ── Register loaded packs in _domain_packs table (Postgres only) ──
   if (storage instanceof PostgresStorageProvider) {
