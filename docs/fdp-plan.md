@@ -48,7 +48,7 @@ License:                   Apache 2.0
 | --- | --- |
 | 20 packages across core platform, domain packs, tests, tools | README |
 | ~26,000 lines TypeScript, ~1,900 lines Go (CEL sidecar) | README |
-| 1,847 unit tests + 98 Postgres integration tests *(per README; unit count locally verified 2026-05-25 via `pnpm run test` — see "Locally verified posture" below)* | README |
+| 1,865 unit tests + 98 Postgres integration tests *(both locally verified 2026-05-25 — see "Locally verified posture" below)* | README |
 | ODL compiler generating GraphQL / REST / OpenFGA / TypeScript SDK | README |
 | OIDC + OpenFGA ReBAC + consent + audit + field-level redaction | README |
 | Postgres + Apache AGE storage SPI; in-memory SPI for tests | README |
@@ -69,15 +69,17 @@ Verification commands:
   pnpm run test
   pnpm run test:integration   # requires Docker Compose stack
 
-Local results (verified 2026-05-25; sandbox without full compose stack):
+Local results (verified 2026-05-25):
   Build:                     PASS — 15/15 turbo tasks, 0 errors
-  Unit tests pass:           1,847 passing (PG integration excluded)
+  Unit tests pass:           1,865 passing (PG integration excluded)
   SPI conformance pass:      287/287 (tests/spi-conformance, 10 categories)
-  Postgres integration:      PARTIAL — against an ad-hoc apache/age:PG17 container,
-                             70/98 pass, 28 fail (link/traversal/transaction/temporal)
-                             with "relation does not exist" errors. Needs the
-                             documented CI DB init (init-services.sh + compose) to
-                             confirm environmental vs regression. NOT yet green.
+  Postgres integration:      PASS — 226/226 (incl. all 98 PG integration tests)
+                             against apache/age:release_PG17_1.6.0 with the
+                             documented init (CREATE EXTENSION age +
+                             create_graph('openfoundry')) and PG_TEST_URL set.
+                             The earlier 28 ad-hoc failures were (1) a missing AGE
+                             graph and (2) two test fixtures that under-modelled the
+                             ODL link 'id' column — both fixed; not product bugs.
   Docker-stack integration:  NOT RUN — requires full Docker Compose stack.
   Container build success:   NOT RUN here — 6 Dockerfiles present (actions, api,
                              cel-evaluator, engine, security, sync).
@@ -88,12 +90,11 @@ Local results (verified 2026-05-25; sandbox without full compose stack):
                              commit (release.yml attaches spec artifacts on v* tags).
 ```
 
-> **Pre-Stage-1 gate — outstanding.** The code baseline is green (build + 1,847
-> unit + 287 conformance). Before a trust submission the following must be run in
-> a CI/infra environment and recorded above: Postgres integration under the
-> documented init (resolve the 28 ad-hoc failures), the full Docker-stack
-> integration suite, all 6 container builds, `helm lint`, a CVE scan, and the
-> first `v*` release tag.
+> **Pre-Stage-1 gate.** The code baseline is green (build + 1,865 unit + 287
+> conformance + **226 storage-postgres incl. all 98 PG integration tests**).
+> Still to run in a CI/infra environment before a trust submission: the full
+> Docker-stack integration suite, all 6 container builds, `helm lint`, a CVE
+> scan, and the first `v*` release tag.
 
 Separating repo-claimed from locally-verified is mandatory because the IG and clinical safety reviewers will treat unpinned `main` as marketing rather than evidence.
 
