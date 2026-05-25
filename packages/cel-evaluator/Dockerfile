@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -7,9 +7,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source and build
+# Copy source and build the server + the gRPC health probe. Both are compiled
+# in the builder (which has the Go toolchain); only the resulting static
+# binaries are copied into the runtime image — never the toolchain itself
+# (copying /usr/local/go added ~400MB to the final image as a permanent layer).
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /cel-evaluator .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /cel-evaluator . \
+    && GOBIN=/usr/local/bin CGO_ENABLED=0 go install github.com/grpc-ecosystem/grpc-health-probe@v0.4.50
 
 # Runtime stage
 FROM alpine:3.20
@@ -21,12 +25,7 @@ ENV GIT_REVISION="${GIT_REVISION}"
 RUN apk --no-cache add ca-certificates \
     && adduser -D -u 1000 cel
 
-# Install grpc-health-probe from Go (alpine edge no longer packages it)
-COPY --from=builder /usr/local/go /usr/local/go
-RUN /usr/local/go/bin/go install github.com/grpc-ecosystem/grpc-health-probe@latest \
-    && mv /root/go/bin/grpc-health-probe /usr/local/bin/ \
-    && rm -rf /usr/local/go /root/go
-
+COPY --from=builder /usr/local/bin/grpc-health-probe /usr/local/bin/grpc-health-probe
 COPY --from=builder /cel-evaluator /usr/local/bin/cel-evaluator
 
 USER cel
