@@ -48,6 +48,7 @@ import type { StorageProvider, RequestContext } from '@openfoundry/spi';
 import { createGraphQLServer, buildResolverContext } from './graphql/index.js';
 import { generateRestRoutes, generateOpenApiSpec } from './rest/index.js';
 import { createFhirRouter } from './fhir/index.js';
+import { createCdmRouter } from './cdm/index.js';
 import { InMemorySubscribableEventBus, SubscriptionManager } from './subscriptions/index.js';
 import type { SubscribableEventBus } from './subscriptions/index.js';
 import { RedpandaEventBus } from './events/index.js';
@@ -801,6 +802,52 @@ async function main(): Promise<void> {
   const openApiSpec = generateOpenApiSpec(schema);
   app.get('/api/v1/openapi.json', (_req, res) => {
     res.json(openApiSpec);
+  });
+
+  // ── FDP/CDM projection at /api/v1/cdm/* (S1.0) ──
+  const cdmHandler = createCdmRouter({ deps });
+  // Public metadata: profile, compatibility matrix, gap register (non-sensitive
+  // schema mapping info — mirrors the public openapi.json endpoint).
+  // Registered for both GET and HEAD so the advertised contract holds before
+  // the authenticated catch-all below.
+  const cdmMetadataHandler: express.RequestHandler = async (req, res) => {
+    const result = await cdmHandler({ method: req.method, path: 'metadata', query: {} });
+    for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
+    res.status(result.status).json(result.body);
+  };
+  app.get('/api/v1/cdm/metadata', cdmMetadataHandler);
+  app.head('/api/v1/cdm/metadata', cdmMetadataHandler);
+  // Authenticated data projections.
+  app.all('/api/v1/cdm/*', async (req, res) => {
+    try {
+      authorizationService.clearFieldCache();
+      const user = await extractUser(req, authenticator, isDev);
+
+      const rlResult = await rateLimiter.check({ tenantId: user.tenantId, principalId: user.id } as RateLimitIdentity);
+      if (!rlResult.allowed) {
+        res.setHeader('Retry-After', String(Math.ceil((rlResult.resetAt - Date.now()) / 1000)));
+        res.status(429).json({ error: { code: 429, message: 'Rate limit exceeded' } });
+        return;
+      }
+
+      const result = await cdmHandler({
+        method: req.method,
+        path: req.path.replace(/^\/api\/v1\/cdm/, ''),
+        query: req.query as Record<string, string>,
+        user,
+      });
+      for (const [key, value] of Object.entries(result.headers)) {
+        res.setHeader(key, value);
+      }
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
+        res.status(401).json({ error: { code: 401, message: 'Authentication required' } });
+        return;
+      }
+      logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'CDM handler error');
+      res.status(500).json({ error: { code: 500, message: 'Internal server error' } });
+    }
   });
 
   // ── FHIR at /fhir/* ──
