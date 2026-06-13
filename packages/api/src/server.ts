@@ -358,7 +358,7 @@ async function main(): Promise<void> {
       process.env['OPENFGA_STORE_ID'],
     );
     logger.info(`Authorization: OpenFGA @ ${process.env['OPENFGA_URL']}`);
-  } else {
+  } else if (isDev) {
     // Dev stub: allow everything.
     // listObjects returns ['*'] sentinel — resolvers interpret this as
     // "all objects authorized" and skip the ID-based filter.
@@ -368,9 +368,15 @@ async function main(): Promise<void> {
       writeTuples: async () => ({}),
       deleteTuples: async () => ({}),
     };
-    if (isDev) {
-      logger.warn('Authorization: allow-all stub (development mode)');
-    }
+    logger.warn('Authorization: allow-all stub (development mode)');
+  } else {
+    // Unreachable in normal operation: the REQUIRED_PROD_VARS guard above exits
+    // the process if OPENFGA_URL/OPENFGA_STORE_ID are missing in production.
+    // Defence in depth — fail closed rather than silently installing an
+    // allow-all authorizer if that guard is ever weakened or bypassed.
+    throw new Error(
+      'FATAL: production authorization requires OPENFGA_URL and OPENFGA_STORE_ID',
+    );
   }
   // ── OpenFGA Authorization Model Sync ──
   // Generate the merged OpenFGA model from schema + pack permission overrides,
