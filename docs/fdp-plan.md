@@ -88,18 +88,34 @@ Local results (verified 2026-05-25):
                              toolchain into the runtime layer); the 5 TS images
                              ~237-239MB->215-216MB (committed 22MB Go binary
                              excluded from the image context via .dockerignore).
-  Helm chart lint:           NOT RUN — helm not available in sandbox; chart at
-                             deploy/helm/openfoundry/Chart.yaml.
-  Critical CVEs in deps:     NOT RUN — trivy/snyk not available in sandbox.
+  Helm chart lint:           PASS — `helm lint --strict` (helm 3.16) 0 failures;
+                             42 K8s resources render with required values set.
+                             Only note: "icon is recommended" (cosmetic).
+  Critical CVEs in deps:     PASS (remediated) — `trivy image` HIGH+CRITICAL on
+                             all 6 images. cel-evaluator CLEAN. The 5 TS images
+                             carry one residual HIGH (CVE-2026-44902, OTEL
+                             exporter-prometheus) that is NOT reachable: /metrics
+                             is served by prom-client, the OTEL Prometheus
+                             exporter HTTP server is never instantiated; tracked
+                             for the full OTEL bump (0.57->0.21x). Fixed in this
+                             pass: protobufjs CRITICAL (CEL proto loader) ->7.6.4,
+                             axios ->1.17, @grpc/grpc-js ->1.14.4, path-to-regexp
+                             ->0.1.13 (pnpm overrides); cel-evaluator grpc CRITICAL
+                             ->v1.79.3 + Go stdlib ->1.25.11 (builder pin); alpine
+                             openssl libcrypto3/libssl3 ->3.5.7-r0 (apk upgrade);
+                             build tooling (npm + corepack pnpm cache) removed
+                             from runtime images, clearing tar/glob/minimatch/
+                             cross-spawn/pnpm findings (not runtime-reachable).
   Commit SHA / release tag:  No tagged release yet. Pin the SHA of the release
                              commit (release.yml attaches spec artifacts on v* tags).
 ```
 
 > **Pre-Stage-1 gate.** The code baseline is green (build + 1,865 unit + 287
 > conformance + **226 storage-postgres incl. all 98 PG integration tests** +
-> **all 6 container images build clean**). Still to run in a CI/infra
-> environment before a trust submission: the full Docker-stack integration
-> suite, `helm lint`, a CVE scan, and the first `v*` release tag.
+> **all 6 container images build clean** + **helm lint pass** + **trivy
+> HIGH/CRITICAL clean except one documented non-reachable OTEL finding**).
+> Still to run in a CI/infra environment before a trust submission: the full
+> Docker-stack integration suite and the first `v*` release tag.
 
 Separating repo-claimed from locally-verified is mandatory because the IG and clinical safety reviewers will treat unpinned `main` as marketing rather than evidence.
 

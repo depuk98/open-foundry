@@ -1,5 +1,7 @@
 # Build stage
-FROM golang:1.25-alpine AS builder
+# Pinned to a patch release so the baked Go stdlib stays ahead of known CVEs
+# (>=1.25.11 fixes CVE-2026-42504); bump deliberately, not via a floating tag.
+FROM golang:1.25.11-alpine AS builder
 
 WORKDIR /app
 
