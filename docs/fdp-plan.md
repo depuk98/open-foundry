@@ -80,7 +80,19 @@ Local results (verified 2026-05-25):
                              The earlier 28 ad-hoc failures were (1) a missing AGE
                              graph and (2) two test fixtures that under-modelled the
                              ODL link 'id' column — both fixed; not product bugs.
-  Docker-stack integration:  NOT RUN — requires full Docker Compose stack.
+  Docker-stack integration:  PARTIAL — full compose stack (14 services) comes up
+                             healthy via `docker compose up --wait` (after fixing
+                             a distroless otel-collector healthcheck). New
+                             governed-pipeline E2E test PASSES 7/7 against the
+                             live stack: RegisterPatient action -> REST/GraphQL
+                             read + redaction -> FHIR R4 Patient + nhs-number +
+                             CapabilityStatement. The 6 legacy suites remain RED:
+                             their bulk seed assumes generic createWard/
+                             createPatient CRUD mutations that the action-oriented
+                             API does not expose; wards/beds have no API creation
+                             path, so they need a reference-data seeding strategy
+                             (test-only seed pack vs pack seed: block) — a design
+                             decision, not yet done.
   Container build success:   PASS — all 6 images build clean via
                              `docker compose build`. Slimmed: cel-evaluator Go
                              454MB->49MB (build grpc-health-probe in the builder,
