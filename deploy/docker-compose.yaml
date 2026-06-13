@@ -147,11 +147,12 @@ services:
       - "8888:8888"
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:13133/"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+    # No healthcheck: the collector-contrib image is distroless (no shell, no
+    # wget/curl), so an in-container HTTP probe of the health_check extension
+    # (:13133) can never succeed. A broken probe reports the container as
+    # perpetually unhealthy, which stalls `docker compose up --wait` and the
+    # integration harness's isStackHealthy(). The collector is non-critical
+    # (telemetry export only) and starts reliably; gate nothing on it.
     networks:
       - foundry
 
