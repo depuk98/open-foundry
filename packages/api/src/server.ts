@@ -32,7 +32,7 @@ import { GraphQLError } from 'graphql';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { MemoryStorageProvider } from '@openfoundry/storage-memory';
-import { PostgresStorageProvider, PostgresAuditStore, PostgresConsentStore, PostgresSchemaRegistry } from '@openfoundry/storage-postgres';
+import { PostgresStorageProvider, PostgresAuditStore, PostgresConsentStore, PostgresSchemaRegistry, PostgresObjectSetStore } from '@openfoundry/storage-postgres';
 import {
   ObjectManager,
   LinkManager,
@@ -548,7 +548,11 @@ async function main(): Promise<void> {
   });
 
   // ── Object Sets ──
-  const objectSetStore = new InMemoryObjectSetStore();
+  // Persistent (durable across restarts, shared across pods) when backed by
+  // PostgreSQL; in-memory otherwise.
+  const objectSetStore = (storage instanceof PostgresStorageProvider)
+    ? new PostgresObjectSetStore(storage.pool)
+    : new InMemoryObjectSetStore();
   const objectSetManager = new ObjectSetManager(objectSetStore, objectManager);
 
   // ── Connector Registry ──

@@ -72,6 +72,9 @@ export type { ConsentStoreInterface } from './consent/postgres-consent-store.js'
 // ─── Schema Registry (persistent ODL SchemaRegistry) ───
 export { PostgresSchemaRegistry } from './schema-registry/postgres-schema-registry.js';
 
+// ─── Object Sets (persistent ObjectSetStore) ───
+export { PostgresObjectSetStore } from './object-sets/postgres-object-set-store.js';
+
 // ─── Transactions ───
 export { PgTransaction, resolveQueryable } from './transactions/index.js';
 export type { Queryable } from './transactions/index.js';
