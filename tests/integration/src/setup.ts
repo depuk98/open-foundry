@@ -32,6 +32,21 @@ export let seededData: SeededData | undefined;
 export async function ensureStack(): Promise<SeededData> {
   if (seededData) return seededData;
 
+  await ensureStackUp();
+
+  // Seed test data via API
+  seededData = await seedTestData();
+
+  return seededData;
+}
+
+/**
+ * Bring the Docker stack up and wait for the API gateway to be healthy,
+ * WITHOUT seeding. Use this for tests that create their own data through the
+ * governed action API (the platform has no generic object-CRUD create path —
+ * objects come into existence via actions or boot seeds, never raw CRUD).
+ */
+export async function ensureStackUp(): Promise<void> {
   // 1. Check Docker availability
   if (!dockerAvailable) {
     throw new Error(
@@ -51,9 +66,4 @@ export async function ensureStack(): Promise<SeededData> {
     60,
     3_000,
   );
-
-  // 4. Seed test data via API
-  seededData = await seedTestData();
-
-  return seededData;
 }
