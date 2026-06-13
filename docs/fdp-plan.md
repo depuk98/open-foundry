@@ -48,7 +48,7 @@ License:                   Apache 2.0
 | --- | --- |
 | 20 packages across core platform, domain packs, tests, tools | README |
 | ~26,000 lines TypeScript, ~1,900 lines Go (CEL sidecar) | README |
-| 1,865 unit tests + 98 Postgres integration tests *(both locally verified 2026-05-25 — see "Locally verified posture" below)* | README |
+| 1,865 unit tests + 109 Postgres integration tests *(both locally verified 2026-05-25 — see "Locally verified posture" below)* | README |
 | ODL compiler generating GraphQL / REST / OpenFGA / TypeScript SDK | README |
 | OIDC + OpenFGA ReBAC + consent + audit + field-level redaction | README |
 | Postgres + Apache AGE storage SPI; in-memory SPI for tests | README |
@@ -73,7 +73,7 @@ Local results (verified 2026-05-25):
   Build:                     PASS — 15/15 turbo tasks, 0 errors
   Unit tests pass:           1,865 passing (PG integration excluded)
   SPI conformance pass:      287/287 (tests/spi-conformance, 10 categories)
-  Postgres integration:      PASS — 226/226 (incl. all 98 PG integration tests)
+  Postgres integration:      PASS — 237/237 (incl. all 109 PG integration tests)
                              against apache/age:release_PG17_1.6.0 with the
                              documented init (CREATE EXTENSION age +
                              create_graph('openfoundry')) and PG_TEST_URL set.
@@ -108,7 +108,7 @@ Local results (verified 2026-05-25):
 ```
 
 > **Pre-Stage-1 gate.** The code baseline is green (build + 1,865 unit + 287
-> conformance + **226 storage-postgres incl. all 98 PG integration tests** +
+> conformance + **237 storage-postgres incl. all 109 PG integration tests** +
 > **all 6 container images build clean** + **helm lint pass** + **trivy
 > HIGH/CRITICAL clean on all 6 images (0 findings)**). Still to run in a
 > CI/infra environment before a trust submission: the full Docker-stack
