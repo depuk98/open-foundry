@@ -21,9 +21,15 @@ describe("tracer", () => {
     exporter = new InMemorySpanExporter();
     contextManager = new AsyncLocalStorageContextManager();
     contextManager.enable();
-    provider = new BasicTracerProvider();
-    provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
-    provider.register({ contextManager });
+    // OTEL JS 2.x: span processors are supplied via the constructor
+    // (BasicTracerProvider.addSpanProcessor was removed), and the convenience
+    // provider.register() was removed — register the provider and context
+    // manager on the global API explicitly.
+    provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    otelContext.setGlobalContextManager(contextManager);
+    trace.setGlobalTracerProvider(provider);
   });
 
   afterEach(async () => {
@@ -43,8 +49,9 @@ describe("tracer", () => {
       });
       const spans = exporter.getFinishedSpans();
       expect(spans).toHaveLength(1);
-      // The instrumentationLibrary name follows our convention
-      expect(spans[0]!.instrumentationLibrary.name).toBe(
+      // The instrumentation scope name follows our convention
+      // (OTEL JS 2.x renamed instrumentationLibrary -> instrumentationScope).
+      expect(spans[0]!.instrumentationScope.name).toBe(
         "openfoundry.engine.query",
       );
     });
@@ -70,7 +77,7 @@ describe("tracer", () => {
       const spans = exporter.getFinishedSpans();
       expect(spans).toHaveLength(layers.length);
 
-      const names = spans.map((s) => s.instrumentationLibrary.name);
+      const names = spans.map((s) => s.instrumentationScope.name);
       for (const layer of layers) {
         expect(names).toContain(`openfoundry.${layer}.test`);
       }

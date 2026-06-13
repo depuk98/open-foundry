@@ -91,21 +91,18 @@ Local results (verified 2026-05-25):
   Helm chart lint:           PASS — `helm lint --strict` (helm 3.16) 0 failures;
                              42 K8s resources render with required values set.
                              Only note: "icon is recommended" (cosmetic).
-  Critical CVEs in deps:     PASS (remediated) — `trivy image` HIGH+CRITICAL on
-                             all 6 images. cel-evaluator CLEAN. The 5 TS images
-                             carry one residual HIGH (CVE-2026-44902, OTEL
-                             exporter-prometheus) that is NOT reachable: /metrics
-                             is served by prom-client, the OTEL Prometheus
-                             exporter HTTP server is never instantiated; tracked
-                             for the full OTEL bump (0.57->0.21x). Fixed in this
-                             pass: protobufjs CRITICAL (CEL proto loader) ->7.6.4,
-                             axios ->1.17, @grpc/grpc-js ->1.14.4, path-to-regexp
-                             ->0.1.13 (pnpm overrides); cel-evaluator grpc CRITICAL
-                             ->v1.79.3 + Go stdlib ->1.25.11 (builder pin); alpine
-                             openssl libcrypto3/libssl3 ->3.5.7-r0 (apk upgrade);
-                             build tooling (npm + corepack pnpm cache) removed
-                             from runtime images, clearing tar/glob/minimatch/
-                             cross-spawn/pnpm findings (not runtime-reachable).
+  Critical CVEs in deps:     PASS — `trivy image` HIGH+CRITICAL CLEAN on all 6
+                             images (0 findings). Remediated: protobufjs CRITICAL
+                             (CEL proto loader) ->7.6.4, axios ->1.17,
+                             @grpc/grpc-js ->1.14.4, path-to-regexp ->0.1.13 (pnpm
+                             overrides); cel-evaluator grpc CRITICAL ->v1.79.3 +
+                             Go stdlib ->1.25.11 (builder pin); alpine openssl
+                             libcrypto3/libssl3 ->3.5.7-r0 (apk upgrade); build
+                             tooling (npm + corepack pnpm cache) removed from
+                             runtime images (cleared tar/glob/minimatch/
+                             cross-spawn/pnpm); OTEL stack 0.57->0.219 / 1.30->2.8
+                             (cleared the last residual, exporter-prometheus
+                             CVE-2026-44902).
   Commit SHA / release tag:  No tagged release yet. Pin the SHA of the release
                              commit (release.yml attaches spec artifacts on v* tags).
 ```
@@ -113,9 +110,9 @@ Local results (verified 2026-05-25):
 > **Pre-Stage-1 gate.** The code baseline is green (build + 1,865 unit + 287
 > conformance + **226 storage-postgres incl. all 98 PG integration tests** +
 > **all 6 container images build clean** + **helm lint pass** + **trivy
-> HIGH/CRITICAL clean except one documented non-reachable OTEL finding**).
-> Still to run in a CI/infra environment before a trust submission: the full
-> Docker-stack integration suite and the first `v*` release tag.
+> HIGH/CRITICAL clean on all 6 images (0 findings)**). Still to run in a
+> CI/infra environment before a trust submission: the full Docker-stack
+> integration suite and the first `v*` release tag.
 
 Separating repo-claimed from locally-verified is mandatory because the IG and clinical safety reviewers will treat unpinned `main` as marketing rather than evidence.
 
