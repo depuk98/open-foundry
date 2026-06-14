@@ -92,14 +92,23 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # Pre-build images so `compose up --wait` only has to start them (avoids
-      # the harness's up-timeout having to also cover a cold image build).
       - name: Build stack images
         run: >-
           docker compose
           -f deploy/docker-compose.yaml
           -f deploy/docker-compose.test.yaml
           build
+      # Bring the stack up here (not inside the test harness): the harness's
+      # dockerComposeUp wraps `up --wait` in a 300s execSync wall-timeout, which
+      # a cold 14-service stack can exceed on CI runners. Starting it in a
+      # dedicated step uses compose's own --wait-timeout; the harness then sees
+      # the stack already healthy (isStackHealthy) and skips its own up.
+      - name: Start stack
+        run: >-
+          docker compose
+          -f deploy/docker-compose.yaml
+          -f deploy/docker-compose.test.yaml
+          up -d --wait --wait-timeout 600
       - name: Integration tests
         run: pnpm run test:integration
       - name: Tear down stack
