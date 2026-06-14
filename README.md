@@ -41,7 +41,7 @@ Each layer communicates only with adjacent layers through defined interfaces. No
 - **GraphQL API** -- Auto-generated from ODL schema via Apollo Server 4. Includes queries, mutations, subscriptions, filtering, pagination, and aggregation.
 - **REST API** -- Per-object-type read endpoints (list, get, `/links`, `/history`, `/aggregate`), governed actions via `POST /api/v1/actions/{Name}`, and object-set CRUD, all with consistent error shapes. The platform is action-oriented: objects are created and mutated through governed actions, not generic per-type create/update/delete.
 - **FHIR R4** -- Read-only Patient/Encounter endpoints with `GET /fhir/metadata` CapabilityStatement.
-- **FDP/CDM projection** -- Read-only view (REST `/api/v1/cdm/*` and GraphQL `cdmMetadata`/`cdmRecord`/`cdmRecords`) that maps the operational ontology to an NHS Federated Data Platform Canonical Data Model shape, with provenance preserved per record and a published gap register. Starter slice for the NHS pilot (see [`docs/cdm-mapping-profile.md`](docs/cdm-mapping-profile.md)).
+- **FDP/CDM projection** -- Read-only view (REST `/api/v1/cdm/*` and GraphQL `cdmMetadata`/`cdmRecord`/`cdmRecords`/`cdmEncounters`) that maps the operational ontology to an NHS Federated Data Platform Canonical Data Model shape, with provenance preserved per record and a published gap register. Starter slice for the NHS pilot (see [`docs/cdm-mapping-profile.md`](docs/cdm-mapping-profile.md)).
 - **API contract artifacts** -- OpenAPI 3.0.3, GraphQL SDL, and AsyncAPI 2.6.0 generated from the merged schema (`pnpm --filter @openfoundry/api spec:all`); OpenAPI served live at `/api/v1/openapi.json` and all three attached to tagged releases. See [`docs/api-spec.md`](docs/api-spec.md).
 - **WebSocket subscriptions** -- Real-time object change events via graphql-ws with per-connection limits (50 max).
 - **Query complexity gate** -- Rejects expensive queries before execution (depth 10, breadth 50, cost 1000).
@@ -306,11 +306,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 ## Test Coverage
 
-1,874 unit tests and 109 Postgres integration tests across all packages:
+1,877 unit tests and 109 Postgres integration tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,874 | Always run |
+| Unit tests | 1,877 | Always run |
 | Postgres integration tests | 109 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -385,7 +385,7 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 | Deployment config | ~2,200 lines |
 | Specification + docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 2,030 (1,874 unit + 109 Postgres integration + 47 Docker-stack integration) |
+| Unit + integration tests | 2,033 (1,877 unit + 109 Postgres integration + 47 Docker-stack integration) |
 
 ---
 
