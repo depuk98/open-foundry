@@ -641,6 +641,9 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
   queryFields.push('  cdmMetadata: JSON!');
   queryFields.push('  cdmRecord(sourceType: String!, id: ID!): JSON');
   queryFields.push('  cdmRecords(sourceType: String!): JSON!');
+  // Encounter is a link-kind CDM resource (derived from AdmittedTo), addressed
+  // by patient — mirrors REST GET /api/v1/cdm/Encounter?patient={id}.
+  queryFields.push('  cdmEncounters(patient: ID!): JSON!');
   sections.push(['type Query {', ...queryFields, '}'].join('\n'));
 
   // 11. Mutation type

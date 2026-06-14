@@ -1081,3 +1081,83 @@ describe('GraphQL CDM projection resolvers', () => {
     expect(record['_provenance']).toBeDefined();
   });
 });
+
+// ─── Link resolver authorization + history (rc.2 hardening) ───
+
+describe('GraphQL link resolver authorization + history', () => {
+  function makeLinkRec(fromId: string, toId: string, id = 'lk-1') {
+    return {
+      _tenantId: 'tenant-1', _type: 'AdmittedTo', _id: id,
+      _fromType: 'Patient', _fromId: fromId, _toType: 'Ward', _toId: toId,
+      _version: 1, _createdAt: 't', _updatedAt: 't',
+      id, admissionDate: 't', reason: 'r',
+    };
+  }
+
+  it('drops link targets the caller cannot view (per-target authorization)', async () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = {
+      getLinks: vi.fn().mockResolvedValue({
+        items: [makeLinkRec('p-1', 'w-1'), makeLinkRec('p-2', 'w-1')], totalCount: 2,
+      }),
+    } as unknown as ApiDependencies['linkManager'];
+    // p-2 is not viewable.
+    (deps.authorizationService.check as ReturnType<typeof vi.fn>).mockImplementation(
+      (_user: string, _rel: string, obj: string) => Promise.resolve(obj !== 'patient:p-2'),
+    );
+    (deps.objectManager.get as ReturnType<typeof vi.fn>).mockImplementation(
+      (_t: string, id: string) => Promise.resolve({ _id: id, _type: 'Patient', name: id }),
+    );
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    const patients = await (resolvers['Ward']!['patients'] as (...a: unknown[]) => Promise<Record<string, unknown>[]>)(
+      { id: 'w-1' }, {}, createResolverContext(deps),
+    );
+    expect(patients.map((p) => p.id)).toEqual(['p-1']); // p-2 dropped by per-target check
+  });
+
+  it('requests soft-deleted links for @link(history: true) fields', async () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    const getLinks = vi.fn().mockResolvedValue({ items: [makeLinkRec('p-1', 'w-1')], totalCount: 1 });
+    deps.linkManager = { getLinks } as unknown as ApiDependencies['linkManager'];
+    const { resolvers } = generateResolvers(parsed, deps);
+    const ctx = createResolverContext(deps);
+
+    await (resolvers['Patient']!['admissions'] as (...a: unknown[]) => Promise<unknown>)({ id: 'p-1' }, {}, ctx);
+    // history field → includeDeleted: true (parity with FHIR/CDM Encounter)
+    expect(getLinks).toHaveBeenCalledWith('p-1', 'AdmittedTo', 'outbound',
+      expect.objectContaining({ includeDeleted: true }), expect.anything());
+
+    getLinks.mockClear();
+    await (resolvers['Patient']!['currentWard'] as (...a: unknown[]) => Promise<unknown>)({ id: 'p-1' }, {}, ctx);
+    // non-history field → includeDeleted: false
+    expect(getLinks).toHaveBeenCalledWith('p-1', 'AdmittedTo', 'outbound',
+      expect.objectContaining({ includeDeleted: false }), expect.anything());
+  });
+});
+
+describe('GraphQL CDM Encounter resolver', () => {
+  it('registers cdmEncounters and projects admissions for a patient', async () => {
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = {
+      getLinks: vi.fn().mockResolvedValue({
+        items: [{
+          _id: 'lk-1', _type: 'AdmittedTo', _fromId: 'p-1', _toId: 'w-1',
+          _version: 1, _updatedAt: 't', admissionDate: 't', reason: 'r',
+        }],
+        totalCount: 1,
+      }),
+    } as unknown as ApiDependencies['linkManager'];
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    expect(resolvers['Query']!['cdmEncounters']).toBeTypeOf('function');
+    const body = await (resolvers['Query']!['cdmEncounters'] as (...a: unknown[]) => Promise<Record<string, unknown>>)(
+      null, { patient: 'p-1' }, createResolverContext(deps),
+    );
+    expect(body['resourceType']).toBe('Encounter');
+    expect(Array.isArray(body['records'])).toBe(true);
+  });
+});

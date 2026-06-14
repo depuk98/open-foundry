@@ -158,5 +158,16 @@ describeWithDocker('governed pipeline (live stack)', () => {
     expect(rec.data?.cdmRecord?.id).toBe(patientId);
     expect(rec.data?.cdmRecord?.resourceType).toBeTruthy();
     expect(rec.data?.cdmRecord?._provenance).toBeDefined();
+
+    // Link-kind Encounter projection (derived from AdmittedTo) is reachable via
+    // GraphQL too — empty for a registered-but-not-admitted patient, but a valid
+    // Encounter searchset rather than an error.
+    const enc = await graphql<{ cdmEncounters: { resourceType: string; records: unknown[] } }>(
+      `query ($id: ID!) { cdmEncounters(patient: $id) }`,
+      { id: patientId },
+    );
+    expect(enc.errors).toBeUndefined();
+    expect(enc.data?.cdmEncounters.resourceType).toBe('Encounter');
+    expect(Array.isArray(enc.data?.cdmEncounters.records)).toBe(true);
   });
 });

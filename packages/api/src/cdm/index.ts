@@ -1,4 +1,4 @@
-export { createCdmRouter, buildCdmMetadata, handleObjectRead, handleObjectList, OBJECT_SOURCE_TYPES } from './router.js';
+export { createCdmRouter, buildCdmMetadata, handleObjectRead, handleObjectList, handleEncounterSearch, OBJECT_SOURCE_TYPES } from './router.js';
 export type { CdmRequest, CdmResponse, CdmRouterConfig } from './router.js';
 export { NHS_ACUTE_CDM_PROFILE } from './profile.js';
 export { projectToCdm, findMappingBySourceType, findMappingByCdmResource } from './mappers.js';

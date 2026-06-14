@@ -235,7 +235,7 @@ export async function handleObjectList(
   }
 }
 
-async function handleEncounterSearch(
+export async function handleEncounterSearch(
   deps: ApiDependencies,
   req: CdmRequest,
   user: AuthenticatedUserInfo,

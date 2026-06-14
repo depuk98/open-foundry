@@ -34,6 +34,7 @@ import {
   buildCdmMetadata,
   handleObjectRead,
   handleObjectList,
+  handleEncounterSearch,
   OBJECT_SOURCE_TYPES,
 } from '../cdm/index.js';
 
@@ -283,9 +284,14 @@ function generateLinkFieldResolvers(
     const targetTypeName = field.type.name;
     const linkTypeDef = schema.linkTypes.find((lt) => lt.name === link.type);
     const targetObjectType = schema.objectTypes.find((ot) => ot.name === targetTypeName);
+    const targetFgaType = toSnakeCase(targetTypeName);
     // Field type IS the link type → return link records (history); otherwise
     // the field type is the linked object type → return target objects.
     const returnsLinkRecords = targetTypeName === link.type;
+    // @link(history: true) fields (e.g. Patient.admissions) include soft-deleted
+    // links so completed/discharged records remain visible — parity with the
+    // FHIR/CDM Encounter projections.
+    const includeDeleted = link.history === true;
 
     typeResolvers[field.name] = async (
       parent: Record<string, unknown>,
@@ -301,7 +307,7 @@ function generateLinkFieldResolvers(
           parentId,
           link.type,
           direction,
-          { limit: isList ? 1000 : 1, offset: 0 },
+          { limit: isList ? 1000 : 1, offset: 0, includeDeleted },
           requestContext,
         );
         const links = page.items;
@@ -328,6 +334,18 @@ function generateLinkFieldResolvers(
           const targetId = direction === 'outbound' ? l._toId : l._fromId;
           if (seen.has(targetId)) continue;
           seen.add(targetId);
+
+          // Per-target authorization — parity with the root foo(id) resolver.
+          // Without this, traversal (e.g. ward.patients) could surface objects
+          // the caller could not fetch directly. Targets the user cannot view
+          // are silently dropped (list) / yield null (single).
+          const allowed = await deps.authorizationService.check(
+            `user:${user.id}`,
+            'viewer',
+            `${targetFgaType}:${targetId}`,
+          );
+          if (!allowed) continue;
+
           const target = await deps.objectManager.get(targetTypeName, targetId, requestContext);
           if (!target) continue;
 
@@ -1228,6 +1246,22 @@ function generateCdmResolvers(resolvers: ResolverMap, deps: ApiDependencies): vo
       throwForStatus(404, { error: { message: `CDM source type '${args.sourceType}' is not exposed.` } }, ctx.requestContext.traceId);
     }
     const res = await handleObjectList(deps, ctx.user, args.sourceType);
+    if (res.status !== 200) throwForStatus(res.status, res.body, ctx.requestContext.traceId);
+    return res.body;
+  };
+
+  // Query: cdmEncounters(patient): JSON! — link-kind Encounter projection
+  // (derived from AdmittedTo), mirroring REST /api/v1/cdm/Encounter?patient=.
+  resolvers['Query']!['cdmEncounters'] = async (
+    _parent: unknown,
+    args: { patient: string },
+    ctx: ResolverContext,
+  ) => {
+    const res = await handleEncounterSearch(
+      deps,
+      { method: 'GET', path: 'Encounter', query: { patient: args.patient }, user: ctx.user },
+      ctx.user,
+    );
     if (res.status !== 200) throwForStatus(res.status, res.body, ctx.requestContext.traceId);
     return res.body;
   };

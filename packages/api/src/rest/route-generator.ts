@@ -121,6 +121,14 @@ function parseQueryFilter(
 }
 
 /**
+ * Upper bound on rows scanned for consent-aware pagination. Consent filtering
+ * removes records, so pagination must happen after it; we scan up to this many
+ * matching rows, filter, then page in memory. For result sets larger than this,
+ * the reported totalCount is the consent-visible count within the scanned window.
+ */
+const MAX_CONSENT_SCAN = 1000;
+
+/**
  * Parse pagination from query params.
  */
 function parsePagination(query: Record<string, string | string[] | undefined>): { offset: number; limit: number } {
@@ -299,49 +307,61 @@ function generateListRoute(
 
         const { offset, limit } = parsePagination(req.query);
 
-        const page = await deps.objectManager.query(
-          typeName,
-          combinedFilter,
-          { limit, offset },
-          requestContext,
-        );
+        const mapAndRedact = (objs: OntologyObject[]): Record<string, unknown>[] =>
+          deps.authorizationService
+            .redactFieldsBatch(
+              user.id,
+              user.roles,
+              typeName,
+              objs.map((item: OntologyObject) => objectToRest(item, obj)),
+            )
+            .map((r: RedactionResult<Record<string, unknown>>) => {
+              const data = r.data as Record<string, unknown>;
+              data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+              data._consentRestricted = false;
+              return data;
+            });
 
-        // Field-level redaction
-        const redactedItems = deps.authorizationService.redactFieldsBatch(
-          user.id,
-          user.roles,
-          typeName,
-          page.items.map((item: OntologyObject) => objectToRest(item, obj)),
-        );
+        let items: Record<string, unknown>[];
+        let totalCount: number;
 
-        let items = redactedItems.map((r: RedactionResult<Record<string, unknown>>) => {
-          const data = r.data as Record<string, unknown>;
-          data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
-          data._consentRestricted = false;
-          return data;
-        });
-
-        // Consent filtering (applied after pagination — see FHIR router for details).
-        // filterList reports totalCount as the number of visible items in the
-        // page; for the paginated response we want the global total reduced by
-        // the items consent removed on this page (the global total is otherwise
-        // correct, and is preserved when consent removes nothing).
-        let totalCount = page.totalCount;
         if (deps.consentService) {
+          // Consent removes records, so pagination must happen AFTER consent
+          // filtering — otherwise totalCount/hasNextPage drift once a removed
+          // record falls outside the requested page. Scan the matching set
+          // (bounded by MAX_CONSENT_SCAN), redact, consent-filter, then page in
+          // memory so the metadata reflects only consent-visible records.
           const getPrimaryId = (item: Record<string, unknown>) => {
             const primaryField = obj.fields.find(f => isPrimaryField(f));
             return String(item[primaryField?.name ?? 'id'] ?? '');
           };
+          const scan = await deps.objectManager.query(
+            typeName,
+            combinedFilter,
+            { limit: MAX_CONSENT_SCAN, offset: 0 },
+            requestContext,
+          );
+          const visibleAll = mapAndRedact(scan.items);
           const consentResult = await deps.consentService.filterList(
-            items,
+            visibleAll,
             getPrimaryId,
             DEFAULT_CONSENT_PURPOSE as DataPurpose,
             user.id,
             requestContext.tenantId,
           );
-          const removedByConsent = items.length - consentResult.edges.length;
-          items = consentResult.edges;
-          totalCount = Math.max(0, page.totalCount - removedByConsent);
+          const visible = consentResult.edges as Record<string, unknown>[];
+          totalCount = visible.length;
+          items = visible.slice(offset, offset + limit);
+        } else {
+          // No consent gate — efficient DB-level pagination.
+          const page = await deps.objectManager.query(
+            typeName,
+            combinedFilter,
+            { limit, offset },
+            requestContext,
+          );
+          items = mapAndRedact(page.items);
+          totalCount = page.totalCount;
         }
 
         return {
