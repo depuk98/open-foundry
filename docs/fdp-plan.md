@@ -80,19 +80,19 @@ Local results (verified 2026-05-25):
                              The earlier 28 ad-hoc failures were (1) a missing AGE
                              graph and (2) two test fixtures that under-modelled the
                              ODL link 'id' column — both fixed; not product bugs.
-  Docker-stack integration:  PARTIAL — full compose stack (14 services) comes up
-                             healthy via `docker compose up --wait` (after fixing
-                             a distroless otel-collector healthcheck). New
-                             governed-pipeline E2E test PASSES 7/7 against the
-                             live stack: RegisterPatient action -> REST/GraphQL
-                             read + redaction -> FHIR R4 Patient + nhs-number +
-                             CapabilityStatement. The 6 legacy suites remain RED:
-                             their bulk seed assumes generic createWard/
-                             createPatient CRUD mutations that the action-oriented
-                             API does not expose; wards/beds have no API creation
-                             path, so they need a reference-data seeding strategy
-                             (test-only seed pack vs pack seed: block) — a design
-                             decision, not yet done.
+  Docker-stack integration:  PASS — full compose stack (14 services) comes up
+                             healthy via `docker compose up --wait`; the whole
+                             integration suite passes 46/46 against the live
+                             stack (apache/age PG17), idempotent across fresh
+                             reruns. Run with the test override:
+                             `docker compose -f deploy/docker-compose.yaml
+                             -f deploy/docker-compose.test.yaml up -d --wait`
+                             then `pnpm run test:integration`. The override
+                             loads a test-only reference-data seed pack
+                             (tests/integration/fixtures/seed-pack) via
+                             DOMAIN_PACKS_EXTRA_DIRS + SEED_TENANT=default. The
+                             legacy suites were reworked from assumed CRUD
+                             mutations onto the governed action API.
   Container build success:   PASS — all 6 images build clean via
                              `docker compose build`. Slimmed: cel-evaluator Go
                              454MB->49MB (build grpc-health-probe in the builder,
@@ -121,10 +121,10 @@ Local results (verified 2026-05-25):
 
 > **Pre-Stage-1 gate.** The code baseline is green (build + 1,865 unit + 287
 > conformance + **237 storage-postgres incl. all 109 PG integration tests** +
-> **all 6 container images build clean** + **helm lint pass** + **trivy
-> HIGH/CRITICAL clean on all 6 images (0 findings)**). Still to run in a
-> CI/infra environment before a trust submission: the full Docker-stack
-> integration suite and the first `v*` release tag.
+> **46/46 full Docker-stack integration** + **all 6 container images build
+> clean** + **helm lint pass** + **trivy HIGH/CRITICAL clean on all 6 images
+> (0 findings)**). Remaining before a trust submission: cut the first `v*`
+> release tag from the verified HEAD and run these gates in CI.
 
 Separating repo-claimed from locally-verified is mandatory because the IG and clinical safety reviewers will treat unpinned `main` as marketing rather than evidence.
 
