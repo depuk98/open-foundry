@@ -77,11 +77,12 @@ jobs:
   docker-stack-integration:
     name: Docker-stack integration
     runs-on: ubuntu-latest
-    # docker-compose.yaml requires POSTGRES_PASSWORD (no default, by design —
-    # fails loud in prod). Supply a throwaway value for the CI stack; it stays
-    # consistent across the postgres container and the services' POSTGRES_URL.
+    # docker-compose.yaml has two intentionally-required vars (no defaults —
+    # fail loud in prod): POSTGRES_PASSWORD and KEYCLOAK_ADMIN_PASSWORD. Supply
+    # throwaway values for the CI stack; they stay consistent across containers.
     env:
       POSTGRES_PASSWORD: postgres
+      KEYCLOAK_ADMIN_PASSWORD: admin
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -126,11 +127,12 @@ jobs:
   image-scan:
     name: Trivy image scan (HIGH/CRITICAL)
     runs-on: ubuntu-latest
-    # `docker compose build` interpolates the whole compose file, which requires
-    # POSTGRES_PASSWORD (no default). Throwaway value — only the built image
-    # layers are scanned, not a running DB.
+    # `docker compose build` interpolates the whole compose file, which has two
+    # required vars (POSTGRES_PASSWORD, KEYCLOAK_ADMIN_PASSWORD). Throwaway
+    # values — only the built image layers are scanned, nothing runs.
     env:
       POSTGRES_PASSWORD: postgres
+      KEYCLOAK_ADMIN_PASSWORD: admin
     steps:
       - uses: actions/checkout@v4
       - name: Build all images
