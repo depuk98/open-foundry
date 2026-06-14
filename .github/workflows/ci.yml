@@ -1,0 +1,135 @@
+name: CI
+
+# Runs the full pre-Stage-1 verification gate on every push to main and on PRs:
+# build + unit tests, Postgres integration, full Docker-stack integration,
+# helm lint, and a trivy HIGH/CRITICAL image scan. Mirrors the gates documented
+# in docs/fdp-plan.md so the posture is enforced, not just locally verified.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm run build
+      - name: Unit tests
+        run: pnpm run test
+
+  postgres-integration:
+    name: Postgres integration (AGE)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: apache/age:release_PG17_1.6.0
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: openfoundry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Initialise Apache AGE
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=postgres psql -h localhost -U postgres -d openfoundry_test \
+            -c "CREATE EXTENSION IF NOT EXISTS age;" \
+            -c "LOAD 'age';" \
+            -c "SET search_path = ag_catalog, public;" \
+            -c "SELECT create_graph('openfoundry');"
+      - name: Storage-postgres integration tests
+        env:
+          PG_TEST_URL: postgresql://postgres:postgres@localhost:5432/openfoundry_test
+        run: pnpm --filter @openfoundry/storage-postgres test
+
+  docker-stack-integration:
+    name: Docker-stack integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Pre-build images so `compose up --wait` only has to start them (avoids
+      # the harness's up-timeout having to also cover a cold image build).
+      - name: Build stack images
+        run: >-
+          docker compose
+          -f deploy/docker-compose.yaml
+          -f deploy/docker-compose.test.yaml
+          build
+      - name: Integration tests
+        run: pnpm run test:integration
+      - name: Tear down stack
+        if: always()
+        run: >-
+          docker compose
+          -f deploy/docker-compose.yaml
+          -f deploy/docker-compose.test.yaml
+          down -v --remove-orphans
+
+  helm-lint:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Lint chart
+        run: >-
+          helm lint --strict deploy/helm/openfoundry
+          --set auth.oidc.clientId=ci
+          --set authz.openfga.storeId=ci
+
+  image-scan:
+    name: Trivy image scan (HIGH/CRITICAL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build all images
+        run: docker compose -f deploy/docker-compose.yaml build
+      - name: Install trivy
+        run: |
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v0.71.0/trivy_0.71.0_Linux-64bit.tar.gz" \
+            | sudo tar xz -C /usr/local/bin trivy
+      - name: Scan all images (fail on HIGH/CRITICAL)
+        run: |
+          status=0
+          for img in cel-evaluator api-gateway ontology-engine action-executor security-service sync-engine; do
+            echo "::group::trivy deploy-$img"
+            trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "deploy-$img:latest" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
