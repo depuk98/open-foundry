@@ -287,7 +287,7 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 | Provider | Use Case | Conformance |
 |----------|----------|-------------|
-| PostgreSQL 17 + Apache AGE | Production | 109 integration tests |
+| PostgreSQL 17 + Apache AGE | Production | 110 integration tests |
 | In-memory | Tests and development | 287 conformance tests (10 categories) |
 
 ### PostgreSQL Capabilities
@@ -306,11 +306,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 ## Test Coverage
 
-1,877 unit tests and 109 Postgres integration tests across all packages:
+1,883 unit tests and 110 Postgres integration tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,877 | Always run |
+| Unit tests | 1,883 | Always run |
 | Postgres integration tests | 109 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
@@ -372,7 +372,7 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 - **Feature additions** -- Aggregation queries, full-text search, object sets, connector plugin architecture, distributed rate limiting, persistent event bus, and OTEL instrumentation.
 - **Security hardening** -- Multiple review rounds (including cross-model Codex reviews) identified and fixed 200+ issues across auth pipelines, SQL injection, field-level redaction, system-field mapping, error message sanitization, CORS fail-closed, proxy-aware rate limiting, advisory lock safety, and schema migration integrity.
 - **Production hardening** -- Structured logging, query complexity gates, idempotency caching, connection timeouts, graceful shutdown, non-root containers, Helm PDBs, and network policies.
-- **Postgres integration** -- Idempotent DDL generation (AGE graph/labels), link table schema alignment, traversal behavior parity with the memory provider, and 109 integration tests against a live PostgreSQL+AGE instance.
+- **Postgres integration** -- Idempotent DDL generation (AGE graph/labels), link table schema alignment, traversal behavior parity with the memory provider, and 110 integration tests against a live PostgreSQL+AGE instance.
 
 ### By the Numbers
 
@@ -385,7 +385,7 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 | Deployment config | ~2,200 lines |
 | Specification + docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 2,033 (1,877 unit + 109 Postgres integration + 47 Docker-stack integration) |
+| Unit + integration tests | 2,040 (1,883 unit + 110 Postgres integration + 47 Docker-stack integration) |
 
 ---
 
