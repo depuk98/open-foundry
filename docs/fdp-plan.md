@@ -237,7 +237,7 @@ Clinicians never "admit" real patients inside Open Foundry in Stage 1 unless the
 - Provenance-preserving projection: `packages/api/src/cdm/mappers.ts` — every record carries a `_provenance` envelope (source type/version/timestamp + lossy fields).
 - Read API at `/api/v1/cdm/*`: public `metadata` (profile + compatibility matrix + gap register), authenticated per-resource list/by-id projections, and Encounter-by-patient (via `AdmittedTo`). Reuses the FHIR/GraphQL auth + redaction + consent pipeline.
 - Human-readable canonical mapping document: `docs/cdm-mapping-profile.md`.
-- Tests: `packages/api/src/__tests__/cdm.test.ts` (11 tests — profile completeness, projection, enum remaps, provenance, gap register).
+- Tests: `packages/api/src/__tests__/cdm.test.ts` (19 tests — profile completeness, projection, enum remaps, provenance, gap register, and the GraphQL CDM resolvers incl. Encounter).
 
 The GraphQL CDM view is now implemented (`cdmMetadata` / `cdmRecord` /
 `cdmRecords` queries, reusing the same handlers as the REST router).
