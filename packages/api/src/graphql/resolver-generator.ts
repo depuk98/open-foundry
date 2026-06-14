@@ -24,6 +24,7 @@ import { PubSub } from 'graphql-subscriptions';
 import type { ApiDependencies, ResolverContext, PaginationArgs } from './types.js';
 import { DEFAULT_CONSENT_PURPOSE } from './types.js';
 import { resolvePagination, buildConnection, decodeCursor } from './pagination.js';
+import { paginateWithConsent } from '../consent-pagination.js';
 import { createOpenFoundryError, wrapError } from './errors.js';
 import {
   createIdFilteredSubscription,
@@ -594,49 +595,61 @@ function generateQueryResolvers(
       // c. Resolve pagination
       const { offset, limit } = resolvePagination(args);
 
-      // d. Query engine
-      const page = await deps.objectManager.query(
-        typeName,
-        combinedFilter,
-        {
-          limit,
-          offset,
-          orderBy: convertOrderBy(args.orderBy),
-        },
-        requestContext,
-      );
+      const mapAndRedact = (objs: OntologyObject[]): Record<string, unknown>[] =>
+        deps.authorizationService
+          .redactFieldsBatch(
+            user.id,
+            user.roles,
+            typeName,
+            objs.map((item: OntologyObject) => objectToGraphQL(item, obj)),
+          )
+          .map((r: RedactionResult<Record<string, unknown>>) => {
+            const data = r.data as Record<string, unknown>;
+            data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+            data._consentRestricted = false;
+            return data;
+          });
 
-      // e. Apply field-level redaction to all items
-      const redactedItems = deps.authorizationService.redactFieldsBatch(
-        user.id,
-        user.roles,
-        typeName,
-        page.items.map((item: OntologyObject) => objectToGraphQL(item, obj)),
-      );
+      let items: Record<string, unknown>[];
+      let totalCount: number;
 
-      let items = redactedItems.map((r: RedactionResult<Record<string, unknown>>) => {
-        const data = r.data as Record<string, unknown>;
-        data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
-        data._consentRestricted = false;
-        return data;
-      });
-
-      // f. Consent filtering (applied after pagination — see FHIR router for details)
-      let totalCount = page.totalCount;
       if (deps.consentService) {
+        // Consent removes records, so filter BEFORE slicing the page (see
+        // consent-pagination.ts) — DB-pagination then consent drops drifts
+        // totalCount/hasNextPage and can hide later pages.
         const getPrimaryId = (item: Record<string, unknown>) => {
           const primaryField = obj.fields.find(f => isPrimaryField(f));
           return String(item[primaryField?.name ?? 'id'] ?? '');
         };
-        const consentResult = await deps.consentService.filterList(
-          items,
-          getPrimaryId,
-          DEFAULT_CONSENT_PURPOSE as DataPurpose,
-          user.id,
-          requestContext.tenantId,
+        const result = await paginateWithConsent<OntologyObject, Record<string, unknown>>(
+          offset,
+          limit,
+          async (windowLimit) => {
+            const scan = await deps.objectManager.query(
+              typeName, combinedFilter, { limit: windowLimit, offset: 0, orderBy: convertOrderBy(args.orderBy) }, requestContext,
+            );
+            return { items: scan.items, total: scan.totalCount };
+          },
+          async (raw) => {
+            const consentResult = await deps.consentService!.filterList(
+              mapAndRedact(raw), getPrimaryId, DEFAULT_CONSENT_PURPOSE as DataPurpose,
+              user.id, requestContext.tenantId,
+            );
+            return consentResult.edges as Record<string, unknown>[];
+          },
         );
-        items = consentResult.edges;
-        totalCount = consentResult.totalCount;
+        items = result.items;
+        // Nudge totalCount so buildConnection's hasNextPage matches the helper
+        // even when the scan window did not cover every matching row.
+        totalCount = result.hasNextPage
+          ? Math.max(result.totalCount, offset + items.length + 1)
+          : result.totalCount;
+      } else {
+        const page = await deps.objectManager.query(
+          typeName, combinedFilter, { limit, offset, orderBy: convertOrderBy(args.orderBy) }, requestContext,
+        );
+        items = mapAndRedact(page.items);
+        totalCount = page.totalCount;
       }
 
       // g. Build Relay connection
@@ -847,55 +860,60 @@ function generateSearchResolver(
         offset = decodeCursor(args.after) + 1;
       }
 
-      const searchQuery: SearchQuery = {
-        query: args.query,
-        fields: searchFields,
-        filter: combinedFilter,
-        limit: args.first ?? 20,
-        offset,
+      const limit = args.first ?? 20;
+      type Hit = { object: OntologyObject; score: number };
+      type ShapedHit = { node: Record<string, unknown>; score: number };
+      const searchWith = (l: number, o: number): SearchQuery => ({
+        query: args.query, fields: searchFields, filter: combinedFilter, limit: l, offset: o,
+      });
+      const mapHits = (rawHits: Hit[]): ShapedHit[] => {
+        const redacted = deps.authorizationService.redactFieldsBatch(
+          user.id, user.roles, typeName,
+          rawHits.map((h) => objectToGraphQL(h.object, obj)),
+        );
+        return redacted.map((r: RedactionResult<Record<string, unknown>>, i: number) => {
+          const data = r.data as Record<string, unknown>;
+          data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
+          data._consentRestricted = false;
+          return { node: data, score: rawHits[i]!.score };
+        });
       };
 
-      const result = await deps.objectManager.search(typeName, searchQuery, requestContext);
+      let hits: ShapedHit[];
+      let totalCount: number;
+      let hasNextPage: boolean;
 
-      // Map hits to GraphQL shape with field-level redaction
-      const rawItems = result.hits.map((hit) => objectToGraphQL(hit.object, obj));
-      const redactedItems = deps.authorizationService.redactFieldsBatch(
-        user.id,
-        user.roles,
-        typeName,
-        rawItems,
-      );
-
-      let hits = redactedItems.map((r: RedactionResult<Record<string, unknown>>, i: number) => {
-        const data = r.data as Record<string, unknown>;
-        data._redactedFields = r._redactedFields.length > 0 ? r._redactedFields : null;
-        data._consentRestricted = false;
-        return { node: data, score: result.hits[i]!.score };
-      });
-
-      // Consent filtering
-      let totalCount = result.totalCount;
       if (deps.consentService) {
-        const getPrimaryId = (hit: { node: Record<string, unknown>; score: number }) => {
+        const getPrimaryId = (hit: ShapedHit) => {
           const primaryField = obj.fields.find(f => isPrimaryField(f));
           return String(hit.node[primaryField?.name ?? 'id'] ?? '');
         };
-        const consentResult = await deps.consentService.filterList(
-          hits,
-          getPrimaryId,
-          DEFAULT_CONSENT_PURPOSE as DataPurpose,
-          user.id,
-          requestContext.tenantId,
+        const result = await paginateWithConsent<Hit, ShapedHit>(
+          offset,
+          limit,
+          async (windowLimit) => {
+            const r = await deps.objectManager.search(typeName, searchWith(windowLimit, 0), requestContext);
+            return { items: r.hits as Hit[], total: r.totalCount };
+          },
+          async (rawHits) => {
+            const consentResult = await deps.consentService!.filterList(
+              mapHits(rawHits), getPrimaryId, DEFAULT_CONSENT_PURPOSE as DataPurpose,
+              user.id, requestContext.tenantId,
+            );
+            return consentResult.edges as ShapedHit[];
+          },
         );
-        hits = consentResult.edges;
-        totalCount = consentResult.totalCount;
+        hits = result.items;
+        totalCount = result.totalCount;
+        hasNextPage = result.hasNextPage;
+      } else {
+        const r = await deps.objectManager.search(typeName, searchWith(limit, offset), requestContext);
+        hits = mapHits(r.hits as Hit[]);
+        totalCount = r.totalCount;
+        hasNextPage = offset + hits.length < totalCount;
       }
 
-      return {
-        hits,
-        totalCount,
-        hasNextPage: offset + hits.length < totalCount,
-      };
+      return { hits, totalCount, hasNextPage };
     } catch (err) {
       throw wrapError(err, ctx.requestContext.traceId);
     }

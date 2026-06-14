@@ -167,7 +167,8 @@ export class PostgresObjectSetStore implements ObjectSetStore {
     >,
   ): Promise<ObjectSetDefinition> {
     await this.ensureSchema();
-    const existing = await this.loadForMutation(ctx, id, 'update');
+    // Enforces tenant scope (NOT_FOUND) + creator-only access (FORBIDDEN).
+    await this.loadForMutation(ctx, id, 'update');
 
     // Build the SET clause from provided fields only (mirrors in-memory merge).
     const sets: string[] = [];
@@ -184,12 +185,9 @@ export class PostgresObjectSetStore implements ObjectSetStore {
     if (updates.limit !== undefined) addSet('limit', updates.limit);
     if (updates.aggregation !== undefined) addSet('aggregation', JSON.stringify(updates.aggregation));
     if (updates.isPublic !== undefined) addSet('is_public', updates.isPublic);
+    // Always advance updated_at, even for an empty update payload — matches
+    // InMemoryObjectSetStore so behaviour is backend-independent.
     sets.push(`"updated_at" = NOW()`);
-
-    if (sets.length === 1) {
-      // Nothing but updated_at — no field changes; return current row refreshed.
-      return existing;
-    }
 
     params.push(id);
     const result = await this.pool.query(

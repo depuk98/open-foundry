@@ -149,6 +149,17 @@ describeWithPg('PostgresObjectSetStore', () => {
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('advances updatedAt even for an empty update (parity with in-memory store)', async () => {
+    const store = new PostgresObjectSetStore(pool);
+    const created = await store.create(ctx({ actorId: 'alice' }), def());
+    await new Promise((r) => setTimeout(r, 10));
+    const updated = await store.update(ctx({ actorId: 'alice' }), created.id, {});
+    expect(updated.id).toBe(created.id);
+    expect(new Date(updated.updatedAt).getTime()).toBeGreaterThan(
+      new Date(created.updatedAt).getTime(),
+    );
+  });
+
   it('throws NOT_FOUND on update/delete of a missing or cross-tenant id', async () => {
     const store = new PostgresObjectSetStore(pool);
     const created = await store.create(ctx({ tenantId: 'tenant-a' }), def({ tenantId: 'tenant-a' }));
