@@ -56,6 +56,11 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # `pnpm --filter ... test` runs the package's vitest directly (bypasses
+      # turbo's test->build dependsOn), so workspace deps (e.g. @openfoundry/odl)
+      # must be built first or vite can't resolve them.
+      - name: Build workspace
+        run: pnpm run build
       - name: Initialise Apache AGE
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
@@ -72,6 +77,11 @@ jobs:
   docker-stack-integration:
     name: Docker-stack integration
     runs-on: ubuntu-latest
+    # docker-compose.yaml requires POSTGRES_PASSWORD (no default, by design —
+    # fails loud in prod). Supply a throwaway value for the CI stack; it stays
+    # consistent across the postgres container and the services' POSTGRES_URL.
+    env:
+      POSTGRES_PASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -116,6 +126,11 @@ jobs:
   image-scan:
     name: Trivy image scan (HIGH/CRITICAL)
     runs-on: ubuntu-latest
+    # `docker compose build` interpolates the whole compose file, which requires
+    # POSTGRES_PASSWORD (no default). Throwaway value — only the built image
+    # layers are scanned, not a running DB.
+    env:
+      POSTGRES_PASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - name: Build all images
