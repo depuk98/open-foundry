@@ -15,9 +15,9 @@
  *   fooChanged(id) → PubSub filter
  */
 
-import type { ParsedSchema, ObjectType, ActionType, FieldDefinition } from '@openfoundry/odl';
+import type { ParsedSchema, ObjectType, ActionType, FieldDefinition, LinkType, LinkDirective } from '@openfoundry/odl';
 import { DataPurpose } from '@openfoundry/spi';
-import type { OntologyObject, FilterExpression, AggregateQuery, AggregateField, AggregateFunction, SearchQuery } from '@openfoundry/spi';
+import type { OntologyObject, OntologyLink, FilterExpression, AggregateQuery, AggregateField, AggregateFunction, SearchQuery } from '@openfoundry/spi';
 import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import { PubSub } from 'graphql-subscriptions';
@@ -222,6 +222,148 @@ function objectToGraphQL(obj: OntologyObject, objectType: ObjectType): Record<st
   return result;
 }
 
+/**
+ * Map an OntologyLink record to its GraphQL shape (for link fields whose type
+ * IS the link type, e.g. Patient.admissions: [AdmittedTo!]!). Link properties
+ * are stored as top-level keys on the link record; the primary field maps to _id.
+ */
+function linkToGraphQL(link: OntologyLink, linkType: LinkType): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const field of linkType.fields) {
+    if (isPrimaryField(field)) {
+      result[field.name] = link[`_${field.name}`] ?? link[field.name];
+    } else {
+      result[field.name] = link[field.name];
+    }
+  }
+  return result;
+}
+
+/** The @link directive on a field, if present. */
+function linkDirectiveOf(field: FieldDefinition): LinkDirective | undefined {
+  return field.directives.find((d): d is LinkDirective => d.kind === 'link');
+}
+
+/**
+ * Generate type-level field resolvers for an object type's @link fields, so
+ * GraphQL nested relationship traversal works (e.g. patient.currentWard,
+ * ward.beds, patient.admissions). Without these the generated schema exposes
+ * link fields but graphql-tools returns the raw (absent) property → null.
+ *
+ * For a field whose type is an ObjectType (currentWard: Ward) we resolve the
+ * linked TARGET objects; for a field whose type IS the link type
+ * (admissions: [AdmittedTo!]!) we return the link records themselves. Both honour
+ * field-level redaction; target objects also honour consent (parity with the
+ * single-object query resolver). The parent object was already authorised when
+ * it was resolved, matching the REST /links endpoint (which checks the parent).
+ */
+function generateLinkFieldResolvers(
+  obj: ObjectType,
+  schema: ParsedSchema,
+  resolvers: ResolverMap,
+  deps: ApiDependencies,
+): void {
+  const linked = obj.fields
+    .map((field) => ({ field, link: linkDirectiveOf(field) }))
+    .filter((x): x is { field: FieldDefinition; link: LinkDirective } => x.link !== undefined);
+  if (linked.length === 0) return;
+
+  const primaryName = obj.fields.find(isPrimaryField)?.name ?? 'id';
+  const typeResolvers: Record<string, ResolverValue> = resolvers[obj.name] ?? {};
+
+  for (const { field, link } of linked) {
+    const direction: 'inbound' | 'outbound' = link.direction === 'INBOUND' ? 'inbound' : 'outbound';
+    const isList = field.type.isList;
+    const targetTypeName = field.type.name;
+    const linkTypeDef = schema.linkTypes.find((lt) => lt.name === link.type);
+    const targetObjectType = schema.objectTypes.find((ot) => ot.name === targetTypeName);
+    // Field type IS the link type → return link records (history); otherwise
+    // the field type is the linked object type → return target objects.
+    const returnsLinkRecords = targetTypeName === link.type;
+
+    typeResolvers[field.name] = async (
+      parent: Record<string, unknown>,
+      _args: unknown,
+      ctx: ResolverContext,
+    ) => {
+      try {
+        const parentId = parent[primaryName] as string | undefined;
+        if (!parentId) return isList ? [] : null;
+        const { user, requestContext } = ctx;
+
+        const page = await deps.linkManager.getLinks(
+          parentId,
+          link.type,
+          direction,
+          { limit: isList ? 1000 : 1, offset: 0 },
+          requestContext,
+        );
+        const links = page.items;
+
+        // Link-record fields (e.g. admissions): return the links themselves.
+        if (returnsLinkRecords) {
+          if (!linkTypeDef) return isList ? [] : null;
+          const mapped = deps.authorizationService
+            .redactFieldsBatch(
+              user.id,
+              user.roles,
+              link.type,
+              links.map((l) => linkToGraphQL(l, linkTypeDef)),
+            )
+            .map((r: RedactionResult<Record<string, unknown>>) => r.data as Record<string, unknown>);
+          return isList ? mapped : (mapped[0] ?? null);
+        }
+
+        // Target-object fields (e.g. currentWard): resolve the linked objects.
+        if (!targetObjectType) return isList ? [] : null;
+        const targets: Record<string, unknown>[] = [];
+        const seen = new Set<string>();
+        for (const l of links) {
+          const targetId = direction === 'outbound' ? l._toId : l._fromId;
+          if (seen.has(targetId)) continue;
+          seen.add(targetId);
+          const target = await deps.objectManager.get(targetTypeName, targetId, requestContext);
+          if (!target) continue;
+
+          let gqlObj = objectToGraphQL(target, targetObjectType);
+          const redacted = deps.authorizationService.redactFields(
+            user.id,
+            user.roles,
+            targetTypeName,
+            gqlObj,
+          );
+          gqlObj = redacted.data as Record<string, unknown>;
+          gqlObj._redactedFields = redacted._redactedFields.length > 0 ? redacted._redactedFields : null;
+
+          if (deps.consentService) {
+            const consentResult = await deps.consentService.checkSingleObject(
+              gqlObj,
+              targetId,
+              DEFAULT_CONSENT_PURPOSE as DataPurpose,
+              user.id,
+              requestContext.tenantId,
+            );
+            if (consentResult._consentRestricted) {
+              gqlObj._consentRestricted = true;
+              for (const f of targetObjectType.fields) {
+                if (!isPrimaryField(f)) gqlObj[f.name] = null;
+              }
+            }
+          }
+
+          targets.push(gqlObj);
+          if (!isList) break;
+        }
+        return isList ? targets : (targets[0] ?? null);
+      } catch (err) {
+        throw wrapError(err, ctx.requestContext.traceId);
+      }
+    };
+  }
+
+  resolvers[obj.name] = typeResolvers;
+}
+
 // ─── Resolver map type ───
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -254,6 +396,8 @@ export function generateResolvers(
     generateAggregateResolver(obj, resolvers, deps);
     generateSearchResolver(obj, resolvers, deps);
     generateSubscriptionResolvers(obj, resolvers, pubsub);
+    // Type-level resolvers for @link fields (nested relationship traversal).
+    generateLinkFieldResolvers(obj, schema, resolvers, deps);
   }
 
   // Generate mutation resolvers for each ActionType.

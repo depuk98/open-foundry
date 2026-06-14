@@ -61,6 +61,19 @@ const GET_PATIENT = `
   }
 `;
 
+const GET_PATIENT_LINKS = `
+  query GetPatientLinks($id: ID!) {
+    patient(id: $id) {
+      id
+      status
+      currentWard { id }
+      currentBed { id }
+      consultant { id }
+      admissions { id }
+    }
+  }
+`;
+
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -101,25 +114,31 @@ describe.skipIf(!dockerAvailable)('Patient Lifecycle E2E', () => {
     });
 
     it('should have created admission links after admit', async () => {
-      // Status reads correctly via GraphQL.
-      const result = await graphql<{ patient: { status: string } }>(
-        GET_PATIENT,
-        { id: data.patients.doe.id },
-      );
+      // GraphQL nested relationship traversal: the admit created AdmittedTo /
+      // OccupiesBed / UnderCareOf links, which surface as patient.currentWard /
+      // currentBed / consultant (target objects) and admissions (link records).
+      const result = await graphql<{
+        patient: {
+          status: string;
+          currentWard: { id: string } | null;
+          currentBed: { id: string } | null;
+          consultant: { id: string } | null;
+          admissions: Array<{ id: string }>;
+        };
+      }>(GET_PATIENT_LINKS, { id: data.patients.doe.id });
+
       expect(result.errors).toBeUndefined();
       expect(result.data?.patient.status).toBe('ACTIVE');
+      expect(result.data?.patient.currentWard?.id).toBe(data.wards.general.id);
+      expect(result.data?.patient.currentBed?.id).toBe(data.beds.a1.id);
+      expect(result.data?.patient.consultant?.id).toBe(data.consultants.smith.id);
+      expect(result.data?.patient.admissions.length).toBeGreaterThanOrEqual(1);
 
-      // Verify the admit created the relationship links via the REST traversal
-      // endpoint. NOTE: GraphQL nested link fields (patient.currentWard, etc.)
-      // are NOT resolved by the generated resolvers — relationship traversal is
-      // only wired into the REST/FHIR/CDM layers, not GraphQL. Tracked as a
-      // known gap.
-      for (const linkType of ['AdmittedTo', 'OccupiesBed', 'UnderCareOf']) {
-        const links = await restGet<RestListResponse>(
-          `/patients/${data.patients.doe.id}/links/${linkType}`,
-        );
-        expect(links.data.length, `${linkType} link`).toBeGreaterThanOrEqual(1);
-      }
+      // And the REST traversal endpoint agrees.
+      const links = await restGet<RestListResponse>(
+        `/patients/${data.patients.doe.id}/links/AdmittedTo`,
+      );
+      expect(links.data.length).toBeGreaterThanOrEqual(1);
     });
 
     it('should transfer a patient to another ward via GraphQL action', async () => {

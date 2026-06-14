@@ -897,3 +897,131 @@ describe('pagination utilities', () => {
     expect(conn.pageInfo.endCursor).toBeNull();
   });
 });
+
+// ─── Link field resolvers (nested relationship traversal) ───
+
+const LINKED_ODL = `
+extend schema @namespace(name: "test", version: "0.1.0")
+
+type Patient @objectType {
+  id: ID! @primary
+  name: String!
+  currentWard: Ward @link(type: "AdmittedTo", direction: OUTBOUND)
+  admissions: [AdmittedTo!]! @link(type: "AdmittedTo", direction: OUTBOUND, history: true)
+}
+
+type Ward @objectType {
+  id: ID! @primary
+  name: String!
+  patients: [Patient!]! @link(type: "AdmittedTo", direction: INBOUND)
+}
+
+type AdmittedTo @linkType(from: "Patient", to: "Ward", cardinality: MANY_TO_ONE) {
+  id: ID! @primary
+  admissionDate: DateTime!
+  reason: String
+}
+`;
+
+describe('GraphQL link field resolvers', () => {
+  function makeLink(fromId: string, toId: string) {
+    return {
+      _tenantId: 'tenant-1', _type: 'AdmittedTo', _id: 'lk-1',
+      _fromType: 'Patient', _fromId: fromId, _toType: 'Ward', _toId: toId,
+      _version: 1, _createdAt: '2026-01-01T00:00:00Z', _updatedAt: '2026-01-01T00:00:00Z',
+      id: 'lk-1', admissionDate: '2026-01-01T00:00:00Z', reason: 'chest pain',
+    };
+  }
+
+  it('registers type-level resolvers for @link fields', () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = { getLinks: vi.fn() } as unknown as ApiDependencies['linkManager'];
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    expect(resolvers['Patient']!['currentWard']).toBeTypeOf('function');
+    expect(resolvers['Patient']!['admissions']).toBeTypeOf('function');
+    expect(resolvers['Ward']!['patients']).toBeTypeOf('function');
+  });
+
+  it('resolves an OUTBOUND single link to the target object (currentWard)', async () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = {
+      getLinks: vi.fn().mockResolvedValue({ items: [makeLink('p-1', 'w-1')], totalCount: 1 }),
+    } as unknown as ApiDependencies['linkManager'];
+    (deps.objectManager.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _id: 'w-1', _type: 'Ward', name: 'Ward A',
+    });
+    const { resolvers } = generateResolvers(parsed, deps);
+    const ctx = createResolverContext(deps);
+
+    const ward = await (resolvers['Patient']!['currentWard'] as (...a: unknown[]) => Promise<Record<string, unknown>>)(
+      { id: 'p-1' }, {}, ctx,
+    );
+    expect(ward?.id).toBe('w-1');
+    expect(ward?.name).toBe('Ward A');
+    // outbound traversal looks up the target by _toId
+    expect(deps.objectManager.get).toHaveBeenCalledWith('Ward', 'w-1', expect.anything());
+    expect(deps.linkManager.getLinks).toHaveBeenCalledWith(
+      'p-1', 'AdmittedTo', 'outbound', expect.anything(), expect.anything(),
+    );
+  });
+
+  it('returns the link records for a link-typed field (admissions)', async () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = {
+      getLinks: vi.fn().mockResolvedValue({ items: [makeLink('p-1', 'w-1')], totalCount: 1 }),
+    } as unknown as ApiDependencies['linkManager'];
+    const { resolvers } = generateResolvers(parsed, deps);
+    const ctx = createResolverContext(deps);
+
+    const admissions = await (resolvers['Patient']!['admissions'] as (...a: unknown[]) => Promise<Record<string, unknown>[]>)(
+      { id: 'p-1' }, {}, ctx,
+    );
+    expect(Array.isArray(admissions)).toBe(true);
+    expect(admissions).toHaveLength(1);
+    expect(admissions[0]!.id).toBe('lk-1');
+    expect(admissions[0]!.reason).toBe('chest pain');
+    // link records do not require an object fetch
+    expect(deps.objectManager.get).not.toHaveBeenCalled();
+  });
+
+  it('resolves an INBOUND list link to target objects (ward.patients)', async () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = {
+      getLinks: vi.fn().mockResolvedValue({ items: [makeLink('p-1', 'w-1'), makeLink('p-2', 'w-1')], totalCount: 2 }),
+    } as unknown as ApiDependencies['linkManager'];
+    (deps.objectManager.get as ReturnType<typeof vi.fn>).mockImplementation(
+      (_type: string, id: string) => Promise.resolve({ _id: id, _type: 'Patient', name: `Patient ${id}` }),
+    );
+    const { resolvers } = generateResolvers(parsed, deps);
+    const ctx = createResolverContext(deps);
+
+    const patients = await (resolvers['Ward']!['patients'] as (...a: unknown[]) => Promise<Record<string, unknown>[]>)(
+      { id: 'w-1' }, {}, ctx,
+    );
+    // inbound traversal looks up by _fromId
+    expect(patients.map((p) => p.id).sort()).toEqual(['p-1', 'p-2']);
+    expect(deps.linkManager.getLinks).toHaveBeenCalledWith(
+      'w-1', 'AdmittedTo', 'inbound', expect.anything(), expect.anything(),
+    );
+  });
+
+  it('returns null for a single link with no links present', async () => {
+    const parsed = parseOdl(LINKED_ODL);
+    const deps = createMockDeps(parsed);
+    deps.linkManager = {
+      getLinks: vi.fn().mockResolvedValue({ items: [], totalCount: 0 }),
+    } as unknown as ApiDependencies['linkManager'];
+    const { resolvers } = generateResolvers(parsed, deps);
+    const ctx = createResolverContext(deps);
+
+    const ward = await (resolvers['Patient']!['currentWard'] as (...a: unknown[]) => Promise<unknown>)(
+      { id: 'p-1' }, {}, ctx,
+    );
+    expect(ward).toBeNull();
+  });
+});
