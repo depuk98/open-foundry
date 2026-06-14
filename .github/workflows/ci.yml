@@ -92,6 +92,14 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # Compose reads deploy/.env (project dir) for the two intentionally-
+      # required vars. Writing the file (not just job env) is essential: the
+      # integration tests run via turbo, whose strict env mode strips job env
+      # from the task, so the harness's `docker compose` children would
+      # otherwise not see the vars. This mirrors local dev (deploy/.env exists).
+      - name: Create deploy/.env for compose
+        run: |
+          printf 'POSTGRES_PASSWORD=postgres\nKEYCLOAK_ADMIN_PASSWORD=admin\n' > deploy/.env
       - name: Build stack images
         run: >-
           docker compose
