@@ -306,11 +306,11 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 ## Test Coverage
 
-1,865 unit tests and 109 Postgres integration tests across all packages:
+1,870 unit tests and 109 Postgres integration tests across all packages:
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Unit tests | 1,865 | Always run |
+| Unit tests | 1,870 | Always run |
 | Postgres integration tests | 109 | Run when `PG_TEST_URL` is set |
 | SPI conformance suite | 287 | Included in unit count; 10 categories |
 
