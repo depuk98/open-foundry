@@ -52,13 +52,34 @@ function error(status: number, message: string): CdmResponse {
 }
 
 /** Object-kind source types exposed via list/by-id routes. */
-const OBJECT_SOURCE_TYPES = NHS_ACUTE_CDM_PROFILE.resources
+export const OBJECT_SOURCE_TYPES = NHS_ACUTE_CDM_PROFILE.resources
   .filter(r => r.sourceKind === 'object')
   .map(r => r.sourceType);
 
+/**
+ * Build the public CDM metadata body (profile + compatibility matrix + gap
+ * register). Shared by the REST router and the GraphQL cdmMetadata resolver.
+ */
+export function buildCdmMetadata(): Record<string, unknown> {
+  const profile = NHS_ACUTE_CDM_PROFILE;
+  return {
+    profileVersion: profile.profileVersion,
+    cdmVersion: profile.cdmVersion,
+    cdmStatus: profile.cdmStatus,
+    subset: profile.subset,
+    resources: profile.resources.map(r => ({
+      cdmResource: r.cdmResource,
+      sourceType: r.sourceType,
+      sourceKind: r.sourceKind,
+      note: r.note,
+      fields: r.fields,
+    })),
+    gaps: profile.gaps,
+  };
+}
+
 export function createCdmRouter(config: CdmRouterConfig) {
   const { deps } = config;
-  const profile = NHS_ACUTE_CDM_PROFILE;
 
   return async (req: CdmRequest): Promise<CdmResponse> => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -78,20 +99,7 @@ export function createCdmRouter(config: CdmRouterConfig) {
       return {
         status: 200,
         headers: jsonHeaders(),
-        body: {
-          profileVersion: profile.profileVersion,
-          cdmVersion: profile.cdmVersion,
-          cdmStatus: profile.cdmStatus,
-          subset: profile.subset,
-          resources: profile.resources.map(r => ({
-            cdmResource: r.cdmResource,
-            sourceType: r.sourceType,
-            sourceKind: r.sourceKind,
-            note: r.note,
-            fields: r.fields,
-          })),
-          gaps: profile.gaps,
-        },
+        body: buildCdmMetadata(),
       };
     }
 
@@ -125,7 +133,7 @@ function isConsentSubject(sourceType: string): boolean {
   return sourceType === 'Patient';
 }
 
-async function handleObjectRead(
+export async function handleObjectRead(
   deps: ApiDependencies,
   user: AuthenticatedUserInfo,
   sourceType: string,
@@ -162,7 +170,7 @@ async function handleObjectRead(
   }
 }
 
-async function handleObjectList(
+export async function handleObjectList(
   deps: ApiDependencies,
   user: AuthenticatedUserInfo,
   sourceType: string,

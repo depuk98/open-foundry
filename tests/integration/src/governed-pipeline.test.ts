@@ -139,4 +139,24 @@ describeWithDocker('governed pipeline (live stack)', () => {
     expect(cap.resourceType).toBe('CapabilityStatement');
     expect(cap.fhirVersion).toBe('4.0.1');
   });
+
+  it('exposes the FDP/CDM projection over GraphQL', async () => {
+    // Public profile metadata.
+    const meta = await graphql<{ cdmMetadata: { profileVersion: string; resources: unknown[] } }>(
+      `{ cdmMetadata }`,
+    );
+    expect(meta.errors).toBeUndefined();
+    expect(meta.data?.cdmMetadata.profileVersion).toBeTruthy();
+    expect(meta.data?.cdmMetadata.resources.length).toBeGreaterThan(0);
+
+    // Single CDM record for the registered patient, with provenance.
+    const rec = await graphql<{ cdmRecord: { resourceType: string; id: string; _provenance: unknown } | null }>(
+      `query ($id: ID!) { cdmRecord(sourceType: "Patient", id: $id) }`,
+      { id: patientId },
+    );
+    expect(rec.errors).toBeUndefined();
+    expect(rec.data?.cdmRecord?.id).toBe(patientId);
+    expect(rec.data?.cdmRecord?.resourceType).toBeTruthy();
+    expect(rec.data?.cdmRecord?._provenance).toBeDefined();
+  });
 });

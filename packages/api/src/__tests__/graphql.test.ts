@@ -1025,3 +1025,59 @@ describe('GraphQL link field resolvers', () => {
     expect(ward).toBeNull();
   });
 });
+
+// ─── CDM (FDP) projection resolvers ───
+
+describe('GraphQL CDM projection resolvers', () => {
+  it('registers cdm query resolvers', () => {
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const deps = createMockDeps(parsed);
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    expect(resolvers['Query']!['cdmMetadata']).toBeTypeOf('function');
+    expect(resolvers['Query']!['cdmRecord']).toBeTypeOf('function');
+    expect(resolvers['Query']!['cdmRecords']).toBeTypeOf('function');
+  });
+
+  it('cdmMetadata returns the profile + gap register', async () => {
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const deps = createMockDeps(parsed);
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    const meta = await (resolvers['Query']!['cdmMetadata'] as (...a: unknown[]) => Promise<Record<string, unknown>>)(
+      null, {}, createResolverContext(deps),
+    );
+    expect(meta['profileVersion']).toBeDefined();
+    expect(Array.isArray(meta['resources'])).toBe(true);
+    expect(Array.isArray(meta['gaps'])).toBe(true);
+  });
+
+  it('cdmRecord rejects an unknown source type', async () => {
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const deps = createMockDeps(parsed);
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    await expect(
+      (resolvers['Query']!['cdmRecord'] as (...a: unknown[]) => Promise<unknown>)(
+        null, { sourceType: 'NotARealType', id: 'x' }, createResolverContext(deps),
+      ),
+    ).rejects.toThrow(/not exposed/);
+  });
+
+  it('cdmRecord projects a Patient via the shared handler', async () => {
+    const parsed = parseOdl(NHS_ACUTE_ODL);
+    const deps = createMockDeps(parsed);
+    (deps.objectManager.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      _id: 'p-1', _type: 'Patient', _version: 1,
+      nhsNumber: '9434765919', name: 'Jane Doe', dateOfBirth: '1990-05-15', status: 'ACTIVE',
+    });
+    const { resolvers } = generateResolvers(parsed, deps);
+
+    const record = await (resolvers['Query']!['cdmRecord'] as (...a: unknown[]) => Promise<Record<string, unknown>>)(
+      null, { sourceType: 'Patient', id: 'p-1' }, createResolverContext(deps),
+    );
+    expect(record['resourceType']).toBeDefined();
+    expect(record['id']).toBe('p-1');
+    expect(record['_provenance']).toBeDefined();
+  });
+});

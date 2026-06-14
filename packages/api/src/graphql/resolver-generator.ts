@@ -17,7 +17,7 @@
 
 import type { ParsedSchema, ObjectType, ActionType, FieldDefinition, LinkType, LinkDirective } from '@openfoundry/odl';
 import { DataPurpose } from '@openfoundry/spi';
-import type { OntologyObject, OntologyLink, FilterExpression, AggregateQuery, AggregateField, AggregateFunction, SearchQuery } from '@openfoundry/spi';
+import type { OntologyObject, OntologyLink, FilterExpression, AggregateQuery, AggregateField, AggregateFunction, SearchQuery, ErrorCategory } from '@openfoundry/spi';
 import type { ActionActor, ActionContext } from '@openfoundry/actions';
 import type { RedactionResult } from '@openfoundry/security';
 import { PubSub } from 'graphql-subscriptions';
@@ -30,6 +30,12 @@ import {
   createFilteredSubscription,
 } from '../subscriptions/subscription-manager.js';
 import { lowerFirst, toSnakeCase } from '../utils.js';
+import {
+  buildCdmMetadata,
+  handleObjectRead,
+  handleObjectList,
+  OBJECT_SOURCE_TYPES,
+} from '../cdm/index.js';
 
 // ─── Helpers ───
 
@@ -415,6 +421,9 @@ export function generateResolvers(
 
   // Object Set resolvers
   generateObjectSetResolvers(resolvers, deps);
+
+  // FDP/CDM read-only projection resolvers (cdmMetadata/cdmRecord/cdmRecords).
+  generateCdmResolvers(resolvers, deps);
 
   return { resolvers, pubsub };
 }
@@ -1164,6 +1173,63 @@ function generateObjectSetResolvers(
     } catch (err) {
       throw wrapError(err, ctx.requestContext.traceId);
     }
+  };
+}
+
+/**
+ * Map the CDM read-only projection onto GraphQL queries, reusing the exact same
+ * handlers as the REST /api/v1/cdm/* router (auth + redaction + consent +
+ * profile-driven projection). Records are returned via the JSON scalar because
+ * the CDM shape is profile-driven and intentionally flexible.
+ */
+function generateCdmResolvers(resolvers: ResolverMap, deps: ApiDependencies): void {
+  // Translate a non-200 CdmResponse into a GraphQL error.
+  const throwForStatus = (status: number, body: unknown, traceId: string | undefined): never => {
+    const message =
+      (body as { error?: { message?: string } })?.error?.message ?? 'CDM request failed';
+    const category: ErrorCategory =
+      status === 401 || status === 403 ? 'authorization'
+      : status === 404 ? 'not_found'
+      : status === 400 ? 'validation'
+      : 'system';
+    throw createOpenFoundryError({
+      code: `CDM_${status}`,
+      category,
+      message,
+      retryable: false,
+      traceId,
+    });
+  };
+
+  // Query: cdmMetadata: JSON! — public profile + compatibility matrix + gaps.
+  resolvers['Query']!['cdmMetadata'] = async () => buildCdmMetadata();
+
+  // Query: cdmRecord(sourceType, id): JSON
+  resolvers['Query']!['cdmRecord'] = async (
+    _parent: unknown,
+    args: { sourceType: string; id: string },
+    ctx: ResolverContext,
+  ) => {
+    if (!OBJECT_SOURCE_TYPES.includes(args.sourceType)) {
+      throwForStatus(404, { error: { message: `CDM source type '${args.sourceType}' is not exposed.` } }, ctx.requestContext.traceId);
+    }
+    const res = await handleObjectRead(deps, ctx.user, args.sourceType, args.id);
+    if (res.status !== 200) throwForStatus(res.status, res.body, ctx.requestContext.traceId);
+    return res.body;
+  };
+
+  // Query: cdmRecords(sourceType): JSON! — { resourceType, total, records }
+  resolvers['Query']!['cdmRecords'] = async (
+    _parent: unknown,
+    args: { sourceType: string },
+    ctx: ResolverContext,
+  ) => {
+    if (!OBJECT_SOURCE_TYPES.includes(args.sourceType)) {
+      throwForStatus(404, { error: { message: `CDM source type '${args.sourceType}' is not exposed.` } }, ctx.requestContext.traceId);
+    }
+    const res = await handleObjectList(deps, ctx.user, args.sourceType);
+    if (res.status !== 200) throwForStatus(res.status, res.body, ctx.requestContext.traceId);
+    return res.body;
   };
 }
 

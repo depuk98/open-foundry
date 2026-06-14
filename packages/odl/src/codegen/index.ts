@@ -635,6 +635,12 @@ export function generateGraphQLSchema(schema: ParsedSchema): string {
   queryFields.push('  availableTools(filter: ToolFilter): [ToolDescriptor!]!');
   queryFields.push('  objectSet(id: ID!): ObjectSet');
   queryFields.push('  objectSets(objectType: String): [ObjectSet!]!');
+  // FDP/CDM read-only projection (Section S1.0). Records are a version-pinned
+  // CDM shape with per-record provenance; returned as JSON since the projection
+  // is profile-driven and intentionally flexible (mirrors GET /api/v1/cdm/*).
+  queryFields.push('  cdmMetadata: JSON!');
+  queryFields.push('  cdmRecord(sourceType: String!, id: ID!): JSON');
+  queryFields.push('  cdmRecords(sourceType: String!): JSON!');
   sections.push(['type Query {', ...queryFields, '}'].join('\n'));
 
   // 11. Mutation type
