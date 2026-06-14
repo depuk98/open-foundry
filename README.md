@@ -39,7 +39,7 @@ Each layer communicates only with adjacent layers through defined interfaces. No
 ### Query & API
 
 - **GraphQL API** -- Auto-generated from ODL schema via Apollo Server 4. Includes queries, mutations, subscriptions, filtering, pagination, and aggregation.
-- **REST API** -- Full CRUD endpoints generated per object/link type with consistent error shapes.
+- **REST API** -- Per-object-type read endpoints (list, get, `/links`, `/history`, `/aggregate`), governed actions via `POST /api/v1/actions/{Name}`, and object-set CRUD, all with consistent error shapes. The platform is action-oriented: objects are created and mutated through governed actions, not generic per-type create/update/delete.
 - **FHIR R4** -- Read-only Patient/Encounter endpoints with `GET /fhir/metadata` CapabilityStatement.
 - **FDP/CDM projection** -- Read-only view (REST `/api/v1/cdm/*` and GraphQL `cdmMetadata`/`cdmRecord`/`cdmRecords`) that maps the operational ontology to an NHS Federated Data Platform Canonical Data Model shape, with provenance preserved per record and a published gap register. Starter slice for the NHS pilot (see [`docs/cdm-mapping-profile.md`](docs/cdm-mapping-profile.md)).
 - **API contract artifacts** -- OpenAPI 3.0.3, GraphQL SDL, and AsyncAPI 2.6.0 generated from the merged schema (`pnpm --filter @openfoundry/api spec:all`); OpenAPI served live at `/api/v1/openapi.json` and all three attached to tagged releases. See [`docs/api-spec.md`](docs/api-spec.md).
@@ -55,7 +55,7 @@ Each layer communicates only with adjacent layers through defined interfaces. No
 - **Full-text search** -- PostgreSQL `tsvector`-backed search across indexed fields.
 - **Object sets** -- Named, persistent collections of objects for batch operations.
 - **Versioned schema registry** -- Monotonic schema versions with automatic diff classification (SAFE / BREAKING) and breaking-change gating behind an approved migration plan. In-memory and PostgreSQL-backed (`PostgresSchemaRegistry`, advisory-lock serialised) implementations.
-- **Bootstrap seeds** -- Declarative `seed:` reference data in `pack.yaml`, applied idempotently at boot through the full action pipeline.
+- **Bootstrap seeds** -- Declarative `seed:` reference data in `pack.yaml`, applied idempotently at boot via the object/link managers (outside the action pipeline) under a configurable `SEED_TENANT`.
 
 ### Action Framework
 
@@ -332,7 +332,7 @@ All persistence goes through a pluggable SPI. The platform ships two implementat
 
 | Item | Description |
 |------|-------------|
-| Schema Registry persistence | PostgreSQL-backed registry shipped (`PostgresSchemaRegistry`); git-backed storage and boot-time wiring still pending |
+| Schema Registry persistence | PostgreSQL-backed registry shipped (`PostgresSchemaRegistry`) and wired into server boot; git-backed storage still pending |
 | FDP/CDM full coverage | Extend the S1.0 starter profile — dataset export, terminology validation, structured-name decomposition, first-class Transfer (GraphQL CDM view done) |
 | FHIR write operations | Mutation support for FHIR resources (currently read-only) |
 | Application framework | Embeddable UI components for common ontology operations |
@@ -385,7 +385,7 @@ A human engineer took over direction -- reviewing the codebase, revising the spe
 | Deployment config | ~2,200 lines |
 | Specification + docs | ~4,200 lines |
 | Packages | 20 |
-| Unit + integration tests | 1,963 |
+| Unit + integration tests | 2,030 (1,874 unit + 109 Postgres integration + 47 Docker-stack integration) |
 
 ---
 

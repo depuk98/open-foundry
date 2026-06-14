@@ -123,8 +123,9 @@ Local results (verified 2026-05-25):
 > conformance + **237 storage-postgres incl. all 109 PG integration tests** +
 > **47/47 full Docker-stack integration** + **all 6 container images build
 > clean** + **helm lint pass** + **trivy HIGH/CRITICAL clean on all 6 images
-> (0 findings)**). Remaining before a trust submission: cut the first `v*`
-> release tag from the verified HEAD and run these gates in CI.
+> (0 findings)**). These gates are now CI-enforced on every push/PR via
+> `.github/workflows/ci.yml`. Remaining before a trust submission: cut the
+> first `v*` release tag from the verified HEAD.
 
 Separating repo-claimed from locally-verified is mandatory because the IG and clinical safety reviewers will treat unpinned `main` as marketing rather than evidence.
 
