@@ -194,6 +194,15 @@ async function main(): Promise<void> {
   const bootCtx: RequestContext = { tenantId: 'system', actorId: 'boot' };
   await storage.applySchema(bootCtx, spiSchema);
 
+  // Tenant for bootstrap seed data. Defaults to 'system' (isolated from ordinary
+  // request tenants); set SEED_TENANT to the request tenant (e.g. 'default') when
+  // seeded reference data must be readable through the API — otherwise seeds are
+  // invisible to API reads in a different tenant.
+  const seedCtx: RequestContext = {
+    tenantId: process.env['SEED_TENANT'] ?? 'system',
+    actorId: 'boot',
+  };
+
   // ── Schema registry (versioned ODL schema history) ──
   // Records the merged ParsedSchema as a new version when it differs from the
   // latest stored one. PostgreSQL-backed when available (durable, shared across
@@ -286,7 +295,7 @@ async function main(): Promise<void> {
         const nameValue = obj.fields['name'] ?? obj.fields['title'];
         if (nameValue && typeof nameValue === 'string') {
           try {
-            const results = await storage.queryObjects(bootCtx, obj.type,
+            const results = await storage.queryObjects(seedCtx, obj.type,
               { field: 'name', operator: 'eq', value: nameValue },
               { limit: 1 },
             );
@@ -301,7 +310,7 @@ async function main(): Promise<void> {
           }
         }
         try {
-          const created = await objectManager.create(obj.type, obj.fields, bootCtx);
+          const created = await objectManager.create(obj.type, obj.fields, seedCtx);
           const createdId = created['_id'] as string;
           if (obj.ref) refMap.set(obj.ref, createdId);
           logger.info(`Seed: created ${obj.type} '${createdId}' (ref: ${obj.ref ?? 'none'}) from pack '${seed.packName}'`);
@@ -320,7 +329,7 @@ async function main(): Promise<void> {
         // idempotent), so re-boots backfill tuples for pre-existing seed links.
         seededLinkTuples.push({ type: lnk.type, fromId, toId });
         try {
-          await linkManager.createLink(lnk.type, fromId, toId, lnk.fields, bootCtx);
+          await linkManager.createLink(lnk.type, fromId, toId, lnk.fields, seedCtx);
           seededLinks++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

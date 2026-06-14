@@ -86,16 +86,32 @@ function objectToRest(obj: OntologyObject, objectType: ObjectType): Record<strin
  * Parse REST query params into a FilterExpression.
  * Supports filter[field]=value format for simple equality filters.
  */
-function parseQueryFilter(query: Record<string, string | string[] | undefined>): FilterExpression | undefined {
+function parseQueryFilter(
+  query: Record<string, unknown>,
+): FilterExpression | undefined {
   const predicates: FilterExpression[] = [];
 
+  const addPredicate = (fieldName: string, value: unknown): void => {
+    const fieldValue = Array.isArray(value) ? value[0] : value;
+    if (fieldValue == null) return;
+    predicates.push({ field: fieldName, operator: 'eq', value: fieldValue as string });
+  };
+
+  // Express's default (qs) query parser turns `filter[specialty]=x` into a
+  // nested object: req.query.filter = { specialty: 'x' }. Handle that form...
+  const nested = query['filter'];
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    for (const [fieldName, value] of Object.entries(nested as Record<string, unknown>)) {
+      addPredicate(fieldName, value);
+    }
+  }
+
+  // ...and the flat form `filter[specialty]` as a literal key (simple parsers).
   for (const [key, value] of Object.entries(query)) {
     if (value == null) continue;
     const match = key.match(/^filter\[(\w+)\]$/);
     if (match && match[1]) {
-      const fieldName = match[1];
-      const fieldValue = Array.isArray(value) ? value[0] : value;
-      predicates.push({ field: fieldName, operator: 'eq', value: fieldValue });
+      addPredicate(match[1], value);
     }
   }
 
@@ -305,7 +321,11 @@ function generateListRoute(
           return data;
         });
 
-        // Consent filtering (applied after pagination — see FHIR router for details)
+        // Consent filtering (applied after pagination — see FHIR router for details).
+        // filterList reports totalCount as the number of visible items in the
+        // page; for the paginated response we want the global total reduced by
+        // the items consent removed on this page (the global total is otherwise
+        // correct, and is preserved when consent removes nothing).
         let totalCount = page.totalCount;
         if (deps.consentService) {
           const getPrimaryId = (item: Record<string, unknown>) => {
@@ -319,8 +339,9 @@ function generateListRoute(
             user.id,
             requestContext.tenantId,
           );
+          const removedByConsent = items.length - consentResult.edges.length;
           items = consentResult.edges;
-          totalCount = consentResult.totalCount;
+          totalCount = Math.max(0, page.totalCount - removedByConsent);
         }
 
         return {

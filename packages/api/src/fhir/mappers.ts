@@ -52,8 +52,20 @@ export function mapPatientToFhir(obj: OntologyObject): FhirPatient {
           },
         ]
       : undefined,
-    birthDate: obj.dateOfBirth ? String(obj.dateOfBirth) : undefined,
+    birthDate: toFhirDate(obj.dateOfBirth),
   };
+}
+
+/**
+ * Format a date-like value as a FHIR `date` (YYYY-MM-DD). FHIR Patient.birthDate
+ * is a date, not a dateTime — emit just the calendar day. Accepts Date objects
+ * (as Postgres returns) and ISO strings; returns undefined for empty/invalid.
+ */
+function toFhirDate(value: unknown): string | undefined {
+  if (value == null || value === '') return undefined;
+  const d = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString().slice(0, 10);
 }
 
 /**
