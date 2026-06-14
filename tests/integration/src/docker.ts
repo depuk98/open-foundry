@@ -15,6 +15,11 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COMPOSE_FILE = resolve(__dirname, '../../../deploy/docker-compose.yaml');
+// Integration-test override: mounts the fixtures seed pack + sets SEED_TENANT so
+// the stack boots with the reference data the suites need. Layered on top of the
+// base file for every harness compose command.
+const COMPOSE_TEST_FILE = resolve(__dirname, '../../../deploy/docker-compose.test.yaml');
+const COMPOSE_FILES = `-f "${COMPOSE_FILE}" -f "${COMPOSE_TEST_FILE}"`;
 
 const EXEC_OPTS: ExecSyncOptionsWithStringEncoding = {
   encoding: 'utf-8',
@@ -40,7 +45,7 @@ export function isDockerAvailable(): boolean {
  */
 export function dockerComposeUp(): void {
   execSync(
-    `docker compose -f "${COMPOSE_FILE}" up -d --wait`,
+    `docker compose ${COMPOSE_FILES} up -d --wait`,
     { ...EXEC_OPTS, timeout: 300_000, stdio: 'inherit' },
   );
 }
@@ -50,7 +55,7 @@ export function dockerComposeUp(): void {
  */
 export function dockerComposeDown(): void {
   execSync(
-    `docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans`,
+    `docker compose ${COMPOSE_FILES} down -v --remove-orphans`,
     { ...EXEC_OPTS, timeout: 120_000, stdio: 'inherit' },
   );
 }
@@ -61,7 +66,7 @@ export function dockerComposeDown(): void {
 export function isStackHealthy(): boolean {
   try {
     const output = execSync(
-      `docker compose -f "${COMPOSE_FILE}" ps --format json`,
+      `docker compose ${COMPOSE_FILES} ps --format json`,
       EXEC_OPTS,
     );
     // Each line is a JSON object for a service

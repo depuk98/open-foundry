@@ -16,6 +16,31 @@ import type { SeededData } from './seed.js';
 import type { RestListResponse, RestItemResponse, ActionResponse } from './client.js';
 
 // ---------------------------------------------------------------------------
+// Helpers — register a fresh patient per test (own data, no cross-file
+// contention with patient-lifecycle's seeded doe/roe/moe). nhsNumber is @unique.
+// ---------------------------------------------------------------------------
+
+function makeNhsNumber(seed: number): string {
+  for (let s = seed; ; s++) {
+    const base = String(s).padStart(9, '0').slice(-9);
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += Number(base[i]) * (10 - i);
+    const check = 11 - (sum % 11);
+    const checkDigit = check === 11 ? 0 : check;
+    if (checkDigit !== 10) return base + String(checkDigit);
+  }
+}
+
+async function registerPatient(name: string, seed: number): Promise<string> {
+  const res = await restPost<ActionResponse>('/actions/RegisterPatient', {
+    nhsNumber: makeNhsNumber(seed),
+    name,
+    dateOfBirth: '1990-01-01',
+  });
+  return res.data.affectedObjects[0]!.id;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -101,17 +126,19 @@ describe.skipIf(!dockerAvailable)('REST API', () => {
 
   describe('Links endpoints', () => {
     it('GET /api/v1/patients/:id/links/AdmittedTo should return admission links', async () => {
-      // First admit a patient to create links
-      await restPost<ActionResponse>('/actions/AdmitPatient', {
-        patient: data.patients.roe.id,
-        ward: data.wards.general.id,
-        bed: data.beds.a1.id,
-        consultant: data.consultants.smith.id,
+      // Register + admit a fresh patient (own bed b4) to create links.
+      const patientId = await registerPatient('REST Links Patient', 401_000_000);
+      const admit = await restPost<ActionResponse>('/actions/AdmitPatient', {
+        patient: patientId,
+        ward: data.wards.cardiology.id,
+        bed: data.beds.b4.id,
+        consultant: data.consultants.jones.id,
         reason: 'REST API test',
       });
+      expect(admit.data.success).toBe(true);
 
       const result = await restGet<RestListResponse>(
-        `/patients/${data.patients.roe.id}/links/AdmittedTo`,
+        `/patients/${patientId}/links/AdmittedTo`,
       );
 
       expect(result.data).toBeDefined();
@@ -134,11 +161,12 @@ describe.skipIf(!dockerAvailable)('REST API', () => {
 
   describe('Action execution via REST', () => {
     it('POST /api/v1/actions/AdmitPatient should execute action', async () => {
+      const patientId = await registerPatient('REST Action Patient', 402_000_000);
       const result = await restPost<ActionResponse>('/actions/AdmitPatient', {
-        patient: data.patients.moe.id,
-        ward: data.wards.cardiology.id,
-        bed: data.beds.b2.id,
-        consultant: data.consultants.jones.id,
+        patient: patientId,
+        ward: data.wards.general.id,
+        bed: data.beds.a5.id,
+        consultant: data.consultants.smith.id,
         reason: 'REST action test',
       });
 

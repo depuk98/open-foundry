@@ -93,7 +93,10 @@ describe.skipIf(!dockerAvailable)('FHIR R4 Endpoint', () => {
 
   describe('Patient search', () => {
     it('should return a FHIR Bundle for Patient search', async () => {
-      const bundle = await fhirGet<FhirBundle>('Patient');
+      // Unfiltered Patient search is deliberately rejected (prevents unbounded
+      // patient scans), so search with a parameter — the response is a searchset
+      // Bundle either way.
+      const bundle = await fhirGet<FhirBundle>('Patient?name=Jane%20Doe');
 
       expect(bundle.resourceType).toBe('Bundle');
       expect(bundle.type).toBe('searchset');

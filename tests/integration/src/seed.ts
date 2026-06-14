@@ -1,17 +1,19 @@
 /**
- * Seed synthetic data into the running Docker stack via the API.
+ * Resolve the integration-test reference data from the running Docker stack.
  *
- * Creates a minimal dataset for integration tests:
- * - 2 Wards (General + Cardiology)
- * - 4 Beds (2 per ward)
- * - 2 Consultants
- * - 3 Patients (1 discharged, 2 unassigned)
+ * The platform is action-oriented: there is NO generic object-CRUD create path,
+ * so wards/beds/consultants cannot be created through the API. Instead the
+ * stack boots with a test-only fixtures pack (tests/integration/fixtures/
+ * seed-pack, wired via deploy/docker-compose.test.yaml) that seeds the
+ * reference data. This module READS that seeded data back by stable natural
+ * keys (ward name, bed number, consultant GMC number, patient NHS number) and
+ * returns it in the SeededData shape the suites consume.
  *
- * Uses the GraphQL mutation API to create objects, matching what
- * a real client would do.
+ * Patients are seeded as DISCHARGED; lifecycle tests admit/transfer/discharge
+ * them through governed actions.
  */
 
-import { graphql } from './client.js';
+import { restGet } from './client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,7 +21,14 @@ import { graphql } from './client.js';
 
 export interface SeededData {
   wards: { general: SeededObject; cardiology: SeededObject };
-  beds: { a1: SeededObject; a2: SeededObject; b1: SeededObject; b2: SeededObject };
+  beds: {
+    a1: SeededObject; a2: SeededObject; b1: SeededObject; b2: SeededObject;
+    // Spare beds for mutating tests (overlay-sync, performance, rest-api), each
+    // of which registers its own patient and admits to a dedicated bed so files
+    // don't contend (OccupiesBed is ONE_TO_ONE).
+    a3: SeededObject; a4: SeededObject; a5: SeededObject;
+    b3: SeededObject; b4: SeededObject;
+  };
   consultants: { smith: SeededObject; jones: SeededObject };
   patients: { doe: SeededObject; roe: SeededObject; moe: SeededObject };
 }
@@ -29,135 +38,79 @@ export interface SeededObject {
   [key: string]: unknown;
 }
 
-// ---------------------------------------------------------------------------
-// GraphQL mutations for seeding
-// ---------------------------------------------------------------------------
-
-const CREATE_WARD = `
-  mutation CreateWard($input: WardInput!) {
-    createWard(input: $input) { id name specialty capacity }
-  }
-`;
-
-const CREATE_BED = `
-  mutation CreateBed($input: BedInput!) {
-    createBed(input: $input) { id number status }
-  }
-`;
-
-const CREATE_CONSULTANT = `
-  mutation CreateConsultant($input: ConsultantInput!) {
-    createConsultant(input: $input) { id name gmcNumber specialty }
-  }
-`;
-
-const CREATE_PATIENT = `
-  mutation CreatePatient($input: PatientInput!) {
-    createPatient(input: $input) { id nhsNumber name dateOfBirth status }
-  }
-`;
-
-// ---------------------------------------------------------------------------
-// Seed function
-// ---------------------------------------------------------------------------
-
-async function createObject<T extends { id: string }>(
-  mutation: string,
-  input: Record<string, unknown>,
-  typeName: string,
-): Promise<T> {
-  const mutationName = `create${typeName}`;
-  const result = await graphql<Record<string, T>>(mutation, { input });
-  if (result.errors) {
-    throw new Error(
-      `Failed to create ${typeName}: ${result.errors.map((e) => e.message).join(', ')}`,
-    );
-  }
-  const obj = result.data?.[mutationName];
-  if (!obj) {
-    throw new Error(`No data returned for create${typeName}`);
-  }
-  return obj;
+interface ListResponse {
+  data: Array<Record<string, unknown> & { id: string }>;
+  pagination?: { totalCount: number };
 }
 
+// ---------------------------------------------------------------------------
+// Lookup helpers
+// ---------------------------------------------------------------------------
+
+/** Fetch all objects of a type (reference data sets are small). */
+async function listAll(plural: string): Promise<SeededObject[]> {
+  const res = await restGet<ListResponse>(`/${plural}`, { limit: '200' });
+  return (res.data ?? []) as SeededObject[];
+}
+
+/** Find one object by an exact field match, or throw a descriptive error. */
+function pick(
+  objects: SeededObject[],
+  field: string,
+  value: string,
+  label: string,
+): SeededObject {
+  const match = objects.find((o) => o[field] === value);
+  if (!match) {
+    throw new Error(
+      `Integration seed: expected reference object ${label} (${field}=${value}) ` +
+        `not found. Is the fixtures seed pack loaded? ` +
+        `(deploy/docker-compose.test.yaml mounts it and sets SEED_TENANT=default.)`,
+    );
+  }
+  return match;
+}
+
+// ---------------------------------------------------------------------------
+// Resolve seeded reference data
+// ---------------------------------------------------------------------------
+
 /**
- * Seed the Docker stack with test data via GraphQL API.
- * Returns references to all created objects.
+ * Read the bootstrapped reference data from the running stack.
+ * Throws if the fixtures seed pack was not loaded.
  */
 export async function seedTestData(): Promise<SeededData> {
-  // Wards
-  const general = await createObject<SeededObject>(CREATE_WARD, {
-    name: 'Ward A - General',
-    specialty: 'General',
-    capacity: 20,
-  }, 'Ward');
-
-  const cardiology = await createObject<SeededObject>(CREATE_WARD, {
-    name: 'Ward B - Cardiology',
-    specialty: 'Cardiology',
-    capacity: 15,
-  }, 'Ward');
-
-  // Beds
-  const a1 = await createObject<SeededObject>(CREATE_BED, {
-    number: 'A-1',
-    status: 'AVAILABLE',
-  }, 'Bed');
-
-  const a2 = await createObject<SeededObject>(CREATE_BED, {
-    number: 'A-2',
-    status: 'AVAILABLE',
-  }, 'Bed');
-
-  const b1 = await createObject<SeededObject>(CREATE_BED, {
-    number: 'B-1',
-    status: 'AVAILABLE',
-  }, 'Bed');
-
-  const b2 = await createObject<SeededObject>(CREATE_BED, {
-    number: 'B-2',
-    status: 'AVAILABLE',
-  }, 'Bed');
-
-  // Consultants
-  const smith = await createObject<SeededObject>(CREATE_CONSULTANT, {
-    name: 'Dr Smith',
-    gmcNumber: 'GMC100001',
-    specialty: 'General',
-  }, 'Consultant');
-
-  const jones = await createObject<SeededObject>(CREATE_CONSULTANT, {
-    name: 'Dr Jones',
-    gmcNumber: 'GMC100002',
-    specialty: 'Cardiology',
-  }, 'Consultant');
-
-  // Patients
-  const doe = await createObject<SeededObject>(CREATE_PATIENT, {
-    nhsNumber: '9434765919',
-    name: 'Jane Doe',
-    dateOfBirth: '1990-05-15',
-    status: 'DISCHARGED',
-  }, 'Patient');
-
-  const roe = await createObject<SeededObject>(CREATE_PATIENT, {
-    nhsNumber: '9434765927',
-    name: 'John Roe',
-    dateOfBirth: '1985-03-20',
-    status: 'DISCHARGED',
-  }, 'Patient');
-
-  const moe = await createObject<SeededObject>(CREATE_PATIENT, {
-    nhsNumber: '9434765935',
-    name: 'Mary Moe',
-    dateOfBirth: '1975-11-01',
-    status: 'DISCHARGED',
-  }, 'Patient');
+  const [wards, beds, consultants, patients] = await Promise.all([
+    listAll('wards'),
+    listAll('beds'),
+    listAll('consultants'),
+    listAll('patients'),
+  ]);
 
   return {
-    wards: { general, cardiology },
-    beds: { a1, a2, b1, b2 },
-    consultants: { smith, jones },
-    patients: { doe, roe, moe },
+    wards: {
+      general: pick(wards, 'name', 'Ward A - General', 'wards.general'),
+      cardiology: pick(wards, 'name', 'Ward B - Cardiology', 'wards.cardiology'),
+    },
+    beds: {
+      a1: pick(beds, 'number', 'A-1', 'beds.a1'),
+      a2: pick(beds, 'number', 'A-2', 'beds.a2'),
+      b1: pick(beds, 'number', 'B-1', 'beds.b1'),
+      b2: pick(beds, 'number', 'B-2', 'beds.b2'),
+      a3: pick(beds, 'number', 'A-3', 'beds.a3'),
+      a4: pick(beds, 'number', 'A-4', 'beds.a4'),
+      a5: pick(beds, 'number', 'A-5', 'beds.a5'),
+      b3: pick(beds, 'number', 'B-3', 'beds.b3'),
+      b4: pick(beds, 'number', 'B-4', 'beds.b4'),
+    },
+    consultants: {
+      smith: pick(consultants, 'gmcNumber', 'GMC100001', 'consultants.smith'),
+      jones: pick(consultants, 'gmcNumber', 'GMC100002', 'consultants.jones'),
+    },
+    patients: {
+      doe: pick(patients, 'nhsNumber', '9434765919', 'patients.doe'),
+      roe: pick(patients, 'nhsNumber', '9434765927', 'patients.roe'),
+      moe: pick(patients, 'nhsNumber', '9434765935', 'patients.moe'),
+    },
   };
 }

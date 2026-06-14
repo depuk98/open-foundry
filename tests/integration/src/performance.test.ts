@@ -18,6 +18,32 @@ import type { SeededData } from './seed.js';
 import type { RestItemResponse, RestListResponse, ActionResponse } from './client.js';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Unique-per-run NHS number (10 digits, mod-11 check); nhsNumber is @unique.
+function makeNhsNumber(seed: number): string {
+  for (let s = seed; ; s++) {
+    const base = String(s).padStart(9, '0').slice(-9);
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += Number(base[i]) * (10 - i);
+    const check = 11 - (sum % 11);
+    const checkDigit = check === 11 ? 0 : check;
+    if (checkDigit !== 10) return base + String(checkDigit);
+  }
+}
+
+/** Create a patient through the governed RegisterPatient action; return its id. */
+async function registerPatient(name: string, seed: number): Promise<string> {
+  const res = await restPost<ActionResponse>('/actions/RegisterPatient', {
+    nhsNumber: makeNhsNumber(seed),
+    name,
+    dateOfBirth: '1992-07-20',
+  });
+  return (res as { data: { affectedObjects: { id: string }[] } }).data.affectedObjects[0]!.id;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -113,19 +139,8 @@ describe.skipIf(!dockerAvailable)('Performance Smoke Tests (MVP Section 8)', () 
 
   describe('Action execution', () => {
     it(`AdmitPatient action should execute within ${CONFIG.perf.actionExecutionMs}ms`, async () => {
-      // Create a fresh patient for this test
-      const createResult = await graphql<{
-        createPatient: { id: string };
-      }>(
-        `mutation { createPatient(input: {
-          nhsNumber: "9000000301",
-          name: "Perf Test Patient",
-          dateOfBirth: "1992-07-20",
-          status: "DISCHARGED"
-        }) { id } }`,
-      );
-
-      const patientId = createResult.data?.createPatient.id;
+      // Create a fresh patient for this test via the governed action.
+      const patientId = await registerPatient('Perf Test Patient', 301_000_000);
       expect(patientId).toBeDefined();
 
       // Measure action execution
@@ -133,7 +148,7 @@ describe.skipIf(!dockerAvailable)('Performance Smoke Tests (MVP Section 8)', () 
         restPost<ActionResponse>('/actions/AdmitPatient', {
           patient: patientId,
           ward: data.wards.general.id,
-          bed: data.beds.a1.id,
+          bed: data.beds.a4.id,
           consultant: data.consultants.smith.id,
           reason: 'Performance test',
         }),
@@ -143,24 +158,13 @@ describe.skipIf(!dockerAvailable)('Performance Smoke Tests (MVP Section 8)', () 
     });
 
     it(`GraphQL AdmitPatient mutation should execute within ${CONFIG.perf.actionExecutionMs}ms`, async () => {
-      // Create a fresh patient
-      const createResult = await graphql<{
-        createPatient: { id: string };
-      }>(
-        `mutation { createPatient(input: {
-          nhsNumber: "9000000302",
-          name: "Perf Test Patient 2",
-          dateOfBirth: "1993-08-25",
-          status: "DISCHARGED"
-        }) { id } }`,
-      );
-
-      const patientId = createResult.data?.createPatient.id;
+      // Create a fresh patient via the governed action.
+      const patientId = await registerPatient('Perf Test Patient 2', 302_000_000);
       expect(patientId).toBeDefined();
 
       const mutation = `
         mutation AdmitPatient($input: AdmitPatientInput!) {
-          executeAdmitPatient(input: $input) {
+          admitPatient(input: $input) {
             success actionId
           }
         }
@@ -172,7 +176,7 @@ describe.skipIf(!dockerAvailable)('Performance Smoke Tests (MVP Section 8)', () 
           input: {
             patient: patientId,
             ward: data.wards.cardiology.id,
-            bed: data.beds.b1.id,
+            bed: data.beds.b3.id,
             consultant: data.consultants.jones.id,
             reason: 'GraphQL perf test',
           },

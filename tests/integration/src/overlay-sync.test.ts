@@ -1,163 +1,129 @@
 /**
- * Overlay mode and CDC sync integration tests against Docker stack.
+ * Overlay mode and CDC sync integration tests against the Docker stack.
  *
- * Tests:
- * - Overlay mode read-through: objects created via direct DB inserts
- *   should be visible through the API (overlay facade).
- * - CDC sync: changes in the source system (simulated PAS updates)
- *   should be captured by Debezium and propagated.
- *
- * These tests interact with both the API and the sync engine.
+ * The platform is action-oriented (no generic object-CRUD mutations), so these
+ * tests write through governed actions (RegisterPatient, AdmitPatient) and
+ * verify the result is consistently readable across the REST and GraphQL
+ * surfaces (the overlay facade reads the same underlying store), and that
+ * action-driven state changes are reflected in subsequent reads.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { restGet, graphql } from './client.js';
+import { restGet, restPost, graphql } from './client.js';
 import { ensureStack, dockerAvailable } from './setup.js';
 import { CONFIG } from './config.js';
 import type { SeededData } from './seed.js';
 import type { RestListResponse, RestItemResponse } from './client.js';
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+// A valid, unique-per-run NHS number (10 digits, mod-11 check). nhsNumber is
+// @unique, so fixed values would collide on the persistent DB across reruns.
+function makeNhsNumber(seed: number): string {
+  for (let s = seed; ; s++) {
+    const base = String(s).padStart(9, '0').slice(-9);
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += Number(base[i]) * (10 - i);
+    const check = 11 - (sum % 11);
+    const checkDigit = check === 11 ? 0 : check;
+    if (checkDigit !== 10) return base + String(checkDigit);
+  }
+}
+
+interface ActionResult {
+  data: {
+    success: boolean;
+    errors: { code: string; message: string }[] | null;
+    affectedObjects: { typeName: string; id: string; changeType: string }[];
+  };
+}
+
+async function registerPatient(nhsNumber: string, name: string): Promise<string> {
+  const res = await restPost<ActionResult>('/actions/RegisterPatient', {
+    nhsNumber,
+    name,
+    dateOfBirth: '1990-01-01',
+  });
+  expect(res.data.success).toBe(true);
+  return res.data.affectedObjects[0]!.id;
+}
 
 describe.skipIf(!dockerAvailable)('Overlay Mode & CDC Sync', () => {
   let data: SeededData;
 
   beforeAll(async () => {
     data = await ensureStack();
-  });
+  }, 180_000);
 
   describe('Overlay mode read-through', () => {
-    it('should read objects created via API (simulating overlay facade)', async () => {
-      // Create a patient via GraphQL (simulating overlay write)
-      const createResult = await graphql<{
-        createPatient: { id: string; nhsNumber: string };
-      }>(
-        `mutation CreatePatient($input: PatientInput!) {
-          createPatient(input: $input) { id nhsNumber name status }
-        }`,
-        {
-          input: {
-            nhsNumber: '9000000101',
-            name: 'Overlay Test Patient',
-            dateOfBirth: '1995-06-15',
-            status: 'DISCHARGED',
-          },
-        },
+    it('reads action-created objects consistently across REST and GraphQL', async () => {
+      const nhsNumber = makeNhsNumber(Date.now() % 1_000_000_000);
+      const patientId = await registerPatient(nhsNumber, 'Overlay Test Patient');
+
+      // Read back via REST.
+      const restResult = await restGet<RestItemResponse>(`/patients/${patientId}`);
+      expect((restResult.data as Record<string, unknown>).nhsNumber).toBe(nhsNumber);
+
+      // Read back via GraphQL (different surface, same underlying store).
+      const gql = await graphql<{ patient: { id: string; nhsNumber: string } | null }>(
+        `query ($id: ID!) { patient(id: $id) { id nhsNumber name } }`,
+        { id: patientId },
       );
-
-      expect(createResult.errors).toBeUndefined();
-      const patientId = createResult.data?.createPatient.id;
-      expect(patientId).toBeDefined();
-
-      // Read back via REST (different API surface, same underlying store)
-      const restResult = await restGet<RestItemResponse>(
-        `/patients/${patientId}`,
-      );
-
-      expect(restResult.data).toBeDefined();
-      expect((restResult.data as Record<string, unknown>).nhsNumber).toBe('9000000101');
-      expect((restResult.data as Record<string, unknown>).name).toBe('Overlay Test Patient');
+      expect(gql.data?.patient?.id).toBe(patientId);
+      expect(gql.data?.patient?.nhsNumber).toBe(nhsNumber);
     });
 
-    it('should list objects across both API surfaces consistently', async () => {
-      // Get total count via REST
+    it('lists objects across both API surfaces consistently', async () => {
       const restResult = await restGet<RestListResponse>('/patients');
       const restCount = restResult.pagination.totalCount;
 
-      // Get total count via GraphQL
-      const gqlResult = await graphql<{
-        patients: { totalCount: number };
-      }>(`query { patients { totalCount } }`);
-
-      const gqlCount = gqlResult.data?.patients.totalCount;
-
-      // Both should report the same total
-      expect(gqlCount).toBe(restCount);
+      const gqlResult = await graphql<{ patients: { totalCount: number } }>(
+        `query { patients { totalCount } }`,
+      );
+      expect(gqlResult.data?.patients.totalCount).toBe(restCount);
     });
   });
 
   describe('CDC sync (Debezium)', () => {
     it('should verify Debezium connector is running', async () => {
-      // Check Debezium Connect REST API
       try {
         const response = await fetch(`${CONFIG.debeziumUrl}/connectors`);
         if (response.ok) {
-          const connectors = await response.json() as string[];
+          const connectors = (await response.json()) as string[];
           expect(Array.isArray(connectors)).toBe(true);
         }
       } catch {
-        // Debezium may not be fully configured yet — informational test
+        // Debezium may not be fully configured yet — informational test.
       }
     });
 
-    it('should propagate changes created via API to queryable state', async () => {
-      // Create a ward via GraphQL
-      const createResult = await graphql<{
-        createWard: { id: string; name: string };
-      }>(
-        `mutation CreateWard($input: WardInput!) {
-          createWard(input: $input) { id name specialty capacity }
-        }`,
-        {
-          input: {
-            name: 'CDC Test Ward',
-            specialty: 'Neurology',
-            capacity: 10,
-          },
-        },
-      );
+    it('propagates action-created objects to queryable state', async () => {
+      const nhsNumber = makeNhsNumber((Date.now() % 1_000_000_000) + 17);
+      const patientId = await registerPatient(nhsNumber, 'CDC Test Patient');
 
-      const wardId = createResult.data?.createWard.id;
-      expect(wardId).toBeDefined();
-
-      // The object should be immediately queryable (CDC captures the write)
-      const readResult = await restGet<RestItemResponse>(`/wards/${wardId}`);
-      expect(readResult.data).toBeDefined();
-      expect((readResult.data as Record<string, unknown>).name).toBe('CDC Test Ward');
+      // Immediately queryable through the read surface.
+      const readResult = await restGet<RestItemResponse>(`/patients/${patientId}`);
+      expect((readResult.data as Record<string, unknown>).id).toBe(patientId);
+      expect((readResult.data as Record<string, unknown>).nhsNumber).toBe(nhsNumber);
     });
 
-    it('should reflect updates in subsequent reads (eventual consistency)', async () => {
-      // Create patient
-      const createResult = await graphql<{
-        createPatient: { id: string };
-      }>(
-        `mutation CreatePatient($input: PatientInput!) {
-          createPatient(input: $input) { id status }
-        }`,
-        {
-          input: {
-            nhsNumber: '9000000201',
-            name: 'CDC Update Patient',
-            dateOfBirth: '1988-03-10',
-            status: 'DISCHARGED',
-          },
-        },
-      );
+    it('reflects action-driven state changes in subsequent reads', async () => {
+      const nhsNumber = makeNhsNumber((Date.now() % 1_000_000_000) + 31);
+      const patientId = await registerPatient(nhsNumber, 'CDC Update Patient');
 
-      const patientId = createResult.data?.createPatient.id;
-      expect(patientId).toBeDefined();
-
-      // Read via REST — should see initial state
+      // Initial state is DISCHARGED.
       const initial = await restGet<RestItemResponse>(`/patients/${patientId}`);
       expect((initial.data as Record<string, unknown>).status).toBe('DISCHARGED');
 
-      // Update via GraphQL (simulating PAS update via CDC pipeline)
-      await graphql(
-        `mutation UpdatePatient($id: ID!, $input: PatientInput!) {
-          updatePatient(id: $id, input: $input) { id status }
-        }`,
-        {
-          id: patientId,
-          input: { status: 'ACTIVE' },
-        },
-      );
+      // Admit via the governed action (changes status to ACTIVE).
+      const admit = await restPost<ActionResult>('/actions/AdmitPatient', {
+        patient: patientId,
+        ward: data.wards.general.id,
+        bed: data.beds.a3.id,
+        consultant: data.consultants.smith.id,
+        reason: 'CDC update test',
+      });
+      expect(admit.data.success).toBe(true);
 
-      // Allow brief propagation time for CDC
-      await new Promise((r) => setTimeout(r, 1_000));
-
-      // Read again — should see updated state
+      // Subsequent read reflects the new state.
       const updated = await restGet<RestItemResponse>(`/patients/${patientId}`);
       expect((updated.data as Record<string, unknown>).status).toBe('ACTIVE');
     });
