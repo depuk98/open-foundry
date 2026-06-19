@@ -20,6 +20,7 @@ type Event implements Identifiable & Auditable & Locatable & Temporal @objectTyp
 
   type: EventType! @indexed
   subtype: String @indexed
+  _normalizedName: String! @indexed
   description: String! @searchable
 
   location: GeoPoint!

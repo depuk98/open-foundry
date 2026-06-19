@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
+import constants
 import ner_pb2
 import logging_config
 
@@ -22,12 +23,8 @@ logger = logging_config.get_logger(__name__)
 
 # Flair tag -> our internal type mapping (repeated from flair_stage for
 # independence — merge module shouldn't import flair_stage directly).
-FLAIR_TAG_MAP = {
-    "PER": "Person",
-    "ORG": "Organization",
-    "LOC": "Location",
-    "MISC": "Miscellaneous",
-}
+# Flair tag -> internal type mapping (from shared constants)
+FLAIR_TAG_MAP = constants.FLAIR_TAG_MAP
 
 # GLiNER label + Flair tag -> resolved type mapping.
 # When both give specific types and they match, it's CONFIRMED.
@@ -82,12 +79,17 @@ def merge(
     merged: dict[str, MergedEntity] = {}
     conflicts = 0
 
-    # Index Flair entities by normalized span for lookup
+    # Index Flair entities by normalized span for lookup.
+    # Also track original lengths so we can avoid case-only collisions
+    # where a short span (e.g. "us" Flair MISC) collides with a longer
+    # span (e.g. "U.S." GLiNER Location) that share the same normalized key.
     flair_by_span: dict[str, dict] = {}
+    flair_orig_text: dict[str, str] = {}
     for fe in flair_entities:
         key = fe["text"].strip().lower()
         if key:
             flair_by_span[key] = fe
+            flair_orig_text[key] = fe["text"].strip()
 
     # ---- Pass 1: GLiNER entities ----
     for ge in gliner_entities:
@@ -103,6 +105,27 @@ def merge(
 
         if flair_match is None:
             # Only GLiNER found it — accept if confidence is sufficient
+            merged[norm] = MergedEntity(
+                text=name,
+                type=etype,
+                confidence=conf,
+                context=ge.get("context", ""),
+                status=ner_pb2.ENTITY_STATUS_SINGLE_SOURCE,
+                gliner_confidence=conf,
+            )
+            continue
+
+        # Both found this span — check for case-only collision.
+        # If the original texts have materially different lengths,
+        # they're likely different entities. Treat as separate to
+        # avoid false merges (e.g. "U.S." Location vs "us" pronoun).
+        flair_orig = flair_orig_text.get(norm, "")
+        len_diff = abs(len(name) - len(flair_orig))
+        is_length_collision = (len(name) <= 3 and len(flair_orig) > 3) or \
+                              (len(flair_orig) <= 3 and len(name) > 3) or \
+                              len_diff > max(len(name), len(flair_orig))
+
+        if is_length_collision:
             merged[norm] = MergedEntity(
                 text=name,
                 type=etype,

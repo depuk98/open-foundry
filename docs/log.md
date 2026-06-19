@@ -663,3 +663,167 @@ Word-boundary substring check in `EntityExtractionService.processReport()`. Same
 
 Components touched: [[ner-extraction]], [[sync-engine]]
 Features touched: [[osint-domain-pack]], [[ner-dedup-fix-spec]]
+
+---
+
+## [2026-06-19] review | Comprehensive five-axis code review of all session-built features
+
+Reviewed entire OSINT platform built in this session — Twitter/X connector (645 lines), NER entity extraction pipeline (18 files TypeScript), Python gRPC NER microservice (276 lines + 6 modules), server.ts connector wiring (1512 lines), Docker deployment, documentation system.
+
+**Methodology:** Ran `code-review-and-quality` skill. Evaluated across 5 axes:
+1. **Correctness** — operational behavior, edge cases, error handling
+2. **Readability** — naming, control flow, maintainability
+3. **Architecture** — module boundaries, coupling, abstraction level
+4. **Security** — secrets, input validation, attack surface
+5. **Performance** — N+1 patterns, rate limiting, latency
+
+**Results:** 302/302 tests pass. 11 issues found (2 🔴 Critical, 5 🟡 Should Fix, 4 💡 Consider):
+- 🔴 #1: `incrementalExtract` fetches only 1 page (40 tweets), no pagination loop
+- 🔴 #2: `searchTweets` stale-cursor bug — cursor declared but never updated
+- 🔴 #11: Hardcoded Twitter Bearer token in source (line 329)
+- 🟡 #3: `authorScreenName` silently returns empty string on null path
+- 🟡 #4: Location entities created with fake coords (lat:0, lng:0)
+- 🟡 #5: Ensemble merge case-only collisions ("U.S." vs "us")
+- 🟡 #10: No gRPC retry with backoff before falling back to compromise
+- 💡 #6: `extractTweets()` at 100+ lines needs decomposition
+- 💡 #7/#9: NER setup embedded inline; server.ts is 1512-line god file
+- 💡 #8: Magic strings in Python NER action handling
+
+**Deliverable:** Created `specs/raw/session-review-fixes.md` — consolidated spec with all 11 issues, acceptance criteria, test strategy, and 4 open questions.
+
+Components touched: [[twitter-connector]], [[ner-extraction]], [[ner-service]], [[api-gateway]]
+Features touched: [[osint-domain-pack]]
+Decisions made: [[session-review-fixes-spec]]
+
+---
+
+## [2026-06-19] review | Merged 7 validated issues from secondary independent review into fix spec
+
+Received a secondary five-axis review report (from another session) covering the NER pipeline codebase. Validated all 20 findings against the actual source code — 13 confirmed as not-applicable (by design, cosmetic, or scope-limited), 7 confirmed as valid and actionable.
+
+**Merged into** `specs/raw/session-review-fixes.md`:
+
+| # | Severity | Area | Issue |
+|---|----------|------|-------|
+| 12 | 🟡 Should Fix | EntityDedup | DB query uses exact LOWER() match but title-stripped input — cross-restart miss |
+| 13 | 💡 Consider | EntityDedup | Per-entity DB query on cache miss — cold-start DB spam |
+| 14 | 🟡 Should Fix | gRPC server | `t.join()` with no timeout — hangs forever on stuck model |
+| 8b | 💡 Consider | llm_reviewer | Magic number `4` instead of `ner_pb2.ENTITY_STATUS_CONFLICT` |
+| 8c | 💡 Consider | NER modules | Duplicate `FLAIR_TAG_MAP` across `flair_stage.py` and `ensemble_merge.py` |
+| 15 | 🟡 Should Fix | llm_reviewer | Raw tweet text in WARNING logs (`raw[:200]`) — PII/log leak |
+| 16 | 💡 Consider | EntityExtractionService | O(n²) deduplicateOverlappingSpans — bounded but undocumented |
+
+Issues 8b/8c folded into existing #8 (renamed "Python magic strings/constants"). Total: 16 issues in fix spec. Added 2 new open questions (#5: LIKE vs normalized column; #6: thread timeout value).
+
+**Rejected findings (13):** C3 (cosmetic confidence loss), R3 (scope note), R4 (same normalization function), A1/A2/A3/A4 (design decisions/commendations), S2/S3/S4 (niche/low-risk), P4 (acceptable tradeoff). All rejection rationales documented inline.
+
+Components touched: [[ner-extraction]], [[ner-service]], [[entity-dedup]]
+Features touched: [[osint-domain-pack]]
+Decisions made: [[session-review-fixes-spec]]
+
+---
+
+## [2026-06-19] plan | Implementation plan for session review fixes (16 issues)
+
+Read the fix spec, mapped dependencies, decomposed into 17 tasks across 3 phases with 4 parallel workstreams.
+
+**Phase 1 (4 tasks, all parallel):**
+- Task A: `_normalized_name` DDL migration (#12 foundation)
+- Task B: Python `constants.py` with shared maps/strings (#8)
+- Task C: Twitter Bearer token env-overridable (#11)
+- Task G: `incrementalExtract` pagination loop (#1)
+
+**Phase 2 (8 tasks, domain-parallel):**
+- DB layer: D (normalize write + query) → E (batch lookup / #13), F (null coords / #4)
+- Twitter: H (search cursor / #2) → I (authorScreenName / #3) → J (extractTweets refactor / #6)
+- Python: K (case collisions / #5), L (constants refactor / #8), M (thread timeout / #14), N (log hygiene / #15)
+
+**Phase 3 (6 tasks, sequential on server.ts):**
+- O (NER bootstrap / #7) → P (connector bootstrap) → Q (middleware setup) → R (gRPC retry / #10)
+- S: O(n²) comment (#16)
+
+**Key decisions:** `_normalized_name` column over LIKE (exact index vs false positives), 500-600 line target for server.ts, 30s thread timeout, 3-retries with 1s backoff.
+
+**Plan document:** `specs/raw/session-review-fixes-plan.md`
+
+Components touched: [[twitter-connector]], [[ner-extraction]], [[ner-service]], [[api-gateway]], [[entity-dedup]]
+Features touched: [[osint-domain-pack]]
+Decisions made: [[session-review-fixes-spec]]
+
+---
+
+## [2026-06-19] decide | Resolved all 6 open questions from fix spec
+
+User provided answers to all open questions in `specs/raw/session-review-fixes.md`:
+
+| Q | Decision |
+|---|----------|
+| 1 | `server.ts` target: 500-600 lines |
+| 2 | Bearer token: keep as-is (env-overridable with hardcoded fallback) |
+| 3 | Geocoding: deferred (future work) |
+| 4 | gRPC retry: 3 retries with 1s exponential backoff |
+| 5 | DB dedup: `_normalized_name` column over LIKE (exact index, no false positives) |
+| 6 | Thread timeout: 30 seconds confirmed |
+
+For Q5, provided detailed design walkthrough of `_normalized_name` approach: normalization rules per entity type, dedup key format unchanged (`{type}:{normalized_name}`), migration SQL with partial indexes, end-to-end flow showing how `normalizeForDedup()` bridges write path and read path.
+
+Components touched: [[entity-dedup]], [[ner-service]]
+Features touched: [[osint-domain-pack]]
+Decisions made: [[session-review-fixes-spec]]
+
+---
+
+## [2026-06-19] review | Adversarial doubt-driven review of implementation plan
+
+Loaded `doubt-driven-development` skill. Submitted the plan artifact + contract (fix spec) to a fresh-context adversarial reviewer. **14 issues found:**
+
+**🔴 Critical (4):**
+- Line count targets impossible (1512 → 500 needs ~900 lines extracted, plan only accounts for ~300)
+- No `_normalized_name` backfill task (risk in table, no task)
+- `_normalizedName` not declared in ODL schema → `ObjectManager.create()` may drop it
+- Contract item #17 (magic number 4 → protobuf constant) has zero tasks
+
+**🟡 Should Fix (8):**
+- `normalizeForDedup` is private on EntityDedupCache — createEntity() in different file can't call it
+- Task F missed Event type fake coordinates
+- SearchTimeline cursor lives at `search_metadata.next_cursor` (different path than UserTweets)
+- Log leak fix only covers 1 of 3 sites (llm_validation.py lines 47, 81 also log raw text)
+- gRPC retry-on-empty is wrong semantic (empty ≠ failure)
+- Task O closure dependency underspecified (changeApplier captures entityExtractionService)
+- Pagination boundary page behavior undefined (straddling sinceTweetId)
+- O(n²) guard needs maxEntities parameter threaded through
+
+**Trade-off accepted:** Abandoned threads after timeout (Python can't kill threads, daemon threads + warning is best available)
+
+**Noise:** batchResolve duplicate-name note (reviewer acknowledged correct behavior)
+
+User chose Option B for line count: relax target to 800-900 lines instead of 500-600.
+
+Components touched: [[twitter-connector]], [[ner-extraction]], [[ner-service]], [[api-gateway]], [[entity-dedup]]
+Features touched: [[osint-domain-pack]]
+Decisions made: [[session-review-fixes-spec]]
+
+---
+
+## [2026-06-19] plan | Applied 12 adversarial review fixes to implementation plan
+
+Updated `specs/raw/session-review-fixes-plan.md` with all actionable findings:
+
+- **#2**: Line count relaxed to 800-900. Task Q scope expanded to extract GraphQL, MCP, health endpoints, shutdown handler (~430 lines)
+- **#5**: Added **Task T** — `tools/backfill-normalized-names.ts` one-shot script using same `normalizeForDedup()`
+- **#6**: Task A expanded to declare `_normalized_name` field in 5 entity ODL/DDL schema files
+- **#17**: Task B expanded — `status == 4` → `ner_pb2.ENTITY_STATUS_CONFLICT`
+- **#3**: Task A creates public `dedup-utils.ts` exporting `normalizeForDedup` before Tasks D/E/F
+- **#4**: Task F expanded — Event entities also get `location: null`
+- **#7**: Task H clarified — search cursor from `search_metadata.next_cursor`, not timeline instructions
+- **#8**: Task N expanded — fixes all 3 sites (`llm_reviewer.py:119`, `llm_validation.py:47,81`)
+- **#9**: Task R fixed — retries on **errors only**, not empty results
+- **#10**: Task O clarified — variable declared in server.ts, assigned from bootstrap, captured by closure
+- **#11**: Task G specified — boundary page yields only newer tweets, exits on older
+- **#13**: Task S refactored — `deduplicateOverlappingSpans(entities, maxInput)`, call site passes `maxEntities * 2`
+
+**Final plan:** 18 tasks (A-S + T), 8 new files, ~24 files touched, 3 checkpoints, 7 updated risks.
+
+Components touched: [[twitter-connector]], [[ner-extraction]], [[ner-service]], [[api-gateway]], [[entity-dedup]]
+Features touched: [[osint-domain-pack]]
+Decisions made: [[session-review-fixes-spec]]

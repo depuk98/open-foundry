@@ -85,6 +85,10 @@ LLM_MAX_RETRIES = _env_int("LLM_MAX_RETRIES", 1)
 LOG_LEVEL = _env("LOG_LEVEL", "INFO")
 """Python logging level (DEBUG, INFO, WARNING, ERROR)."""
 
+EXTRACTION_TIMEOUT = _env_float("EXTRACTION_TIMEOUT", 30.0)
+"""Maximum seconds to wait for a Stage 1 model (GLiNER/Flair) to complete
+before proceeding with partial results. A hung model is logged and skipped."""
+
 # ---- Model cache directories -------------------------------------------------
 
 HF_HOME = _env("HF_HOME", os.path.expanduser("~/.cache/huggingface"))

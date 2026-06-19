@@ -17,6 +17,7 @@ import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 
 import config
+import constants
 import ensemble_merge
 import flair_stage
 import gliner_stage
@@ -43,10 +44,10 @@ def _build_proto_entity(me: ensemble_merge.MergedEntity) -> ner_pb2.Entity:
 
 def _build_proto_entity_from_dict(d: dict) -> ner_pb2.Entity:
     """Convert a review result dict to a protobuf Entity."""
-    action = d.get("action", "confirm")
-    if action == "correct":
+    action = d.get("action", constants.LLM_ACTION_CONFIRM)
+    if action == constants.LLM_ACTION_CORRECT:
         status = ner_pb2.ENTITY_STATUS_LLM_CORRECTED
-    elif action == "add":
+    elif action == constants.LLM_ACTION_ADD:
         status = ner_pb2.ENTITY_STATUS_LLM_ADDED
     else:
         status = ner_pb2.ENTITY_STATUS_LLM_VERIFIED
@@ -114,7 +115,9 @@ class NerService(ner_pb2_grpc.NerServiceServicer):
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=config.EXTRACTION_TIMEOUT)
+            if t.is_alive():
+                logger.warning("Stage 1 model hung beyond timeout", extra={"thread": t.name})
 
         stage1_latency = round((time.monotonic() - stage1_start) * 1000, 2)
 

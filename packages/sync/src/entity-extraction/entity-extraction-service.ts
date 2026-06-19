@@ -2,6 +2,7 @@ import type { StorageProvider, RequestContext } from '@openfoundry/spi';
 import type { EntityExtractor, EntityExtractionResult, ExtractedEntity, ValidationConfig } from './types.js';
 import { EntityDedupCache } from './entity-dedup.js';
 import { validateEntity } from './entity-validation.js';
+import { normalizeForDedup } from './dedup-utils.js';
 
 interface EntityCreateResult {
   _id: string;
@@ -25,8 +26,12 @@ interface LinkManagerLike {
  * Remove entities whose name is a whole-word substring of another same-type entity
  * from the same extraction batch. Keeps the longer span.
  * Uses word boundaries so "US" is NOT removed by "Russia" or "Eva" by "Evan".
+ *
+ * O(n²) time complexity — caller must bound input via slice(0, maxEntities).
+ * At n=20 (default cap), this is 400 comparisons — acceptable.
  */
-function deduplicateOverlappingSpans(entities: ExtractedEntity[]): ExtractedEntity[] {
+function deduplicateOverlappingSpans(entities: ExtractedEntity[], maxInput = 200): ExtractedEntity[] {
+  if (entities.length > maxInput) entities = entities.slice(0, maxInput);
   return entities.filter((entity, i) =>
     !entities.some((other, j) =>
       i !== j &&
@@ -94,9 +99,17 @@ export class EntityExtractionService {
 
     // Remove intra-text substring overlaps before dedup/storage.
     // "Gen Keane" + "Keane" from same tweet → keep only "Gen Keane".
-    entities = deduplicateOverlappingSpans(entities);
+    entities = deduplicateOverlappingSpans(entities, this.config.maxEntities * 2);
 
     result.entitiesExtracted = entities.length;
+
+    // Batch resolve all entities against the dedup cache + DB.
+    // Reduces cold-start DB load from N queries to ≤4 (one per table).
+    const dedupResults = await this.dedupCache.batchResolve(
+      entities.map(e => ({ type: e.type, name: e.name })),
+      this.storage,
+      ctx,
+    );
 
     for (const entity of entities) {
       try {
@@ -108,9 +121,8 @@ export class EntityExtractionService {
         }
         const cleanEntity = validation.entity;
 
-        let entityId = await this.dedupCache.resolve(
-          cleanEntity.type, cleanEntity.name, this.storage, ctx,
-        );
+        const dedupKey = `${cleanEntity.type}:${normalizeForDedup(cleanEntity.type, cleanEntity.name)}`;
+        let entityId = dedupResults.get(dedupKey) ?? null;
 
         if (!entityId) {
           const created = await this.createEntity(cleanEntity, ctx);
@@ -151,12 +163,14 @@ export class EntityExtractionService {
       updatedAt: now,
       updatedBy: 'ner-pipeline',
     };
+    const normalizedName = normalizeForDedup(entity.type, entity.name);
 
     switch (entity.type) {
       case 'Person': {
         const created = await this.objectManager.create('Person', {
           ...base,
           fullName: entity.name,
+          _normalizedName: normalizedName,
           watchlistStatus: 'NONE',
           isPersonOfInterest: false,
         }, ctx);
@@ -167,6 +181,7 @@ export class EntityExtractionService {
         const created = await this.objectManager.create('Organization', {
           ...base,
           name: entity.name,
+          _normalizedName: normalizedName,
           type: entity.type === 'MilitaryUnit' ? 'MILITARY_UNIT' : 'OTHER',
           isDesignated: false,
         }, ctx);
@@ -176,6 +191,7 @@ export class EntityExtractionService {
         const created = await this.objectManager.create('Organization', {
           ...base,
           name: entity.name,
+          _normalizedName: normalizedName,
           type: 'ARMED_GROUP',
           isDesignated: false,
         }, ctx);
@@ -186,10 +202,10 @@ export class EntityExtractionService {
         const created = await this.objectManager.create('Location', {
           ...base,
           name: entity.name,
+          _normalizedName: normalizedName,
           type: 'CITY',
           country: 'UNKNOWN',
           status: entity.type === 'ConflictZone' ? 'CONTESTED' : 'UNKNOWN',
-          location: { latitude: 0, longitude: 0 },
         }, ctx);
         return created._id;
       }
@@ -198,6 +214,7 @@ export class EntityExtractionService {
         const created = await this.objectManager.create('Equipment', {
           ...base,
           designation: entity.name,
+          _normalizedName: normalizedName,
           category: 'OTHER',
         }, ctx);
         return created._id;
@@ -206,11 +223,11 @@ export class EntityExtractionService {
         const created = await this.objectManager.create('Event', {
           ...base,
           eventDate: now,
+          _normalizedName: normalizedName,
           type: 'OTHER',
           description: `NER-extracted event: ${entity.name}`,
           locationName: 'UNKNOWN',
           country: 'UNKNOWN',
-          location: { latitude: 0, longitude: 0 },
         }, ctx);
         return created._id;
       }

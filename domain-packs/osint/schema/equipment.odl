@@ -14,6 +14,7 @@ type Equipment implements Identifiable & Auditable @objectType {
 
   designation: String! @searchable(weight: 1.8)
   commonName: String @searchable
+  _normalizedName: String! @indexed
   category: EquipmentCategory! @indexed
   manufacturer: String
   originCountry: Country @indexed

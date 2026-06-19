@@ -14,6 +14,7 @@ type Organization implements Identifiable & Auditable & Locatable @objectType {
 
   name: String! @searchable(weight: 2.0)
   aliases: [String!] @searchable
+  _normalizedName: String! @indexed
   acronym: String @indexed
 
   type: OrgType! @indexed

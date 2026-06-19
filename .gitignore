@@ -62,3 +62,15 @@ yarn.lock
 *.tar.gz
 .cardinal/
 .avril/__pycache__/
+
+pyc files
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyzwz
+*.pyzwzw
+*.pyzwzwz

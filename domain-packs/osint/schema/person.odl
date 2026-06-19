@@ -14,6 +14,7 @@ type Person implements Identifiable & Auditable & Locatable @objectType {
 
   fullName: String! @searchable(weight: 2.0)
   aliases: [String!] @searchable
+  _normalizedName: String! @indexed
   title: String
 
   nationality: Country @indexed

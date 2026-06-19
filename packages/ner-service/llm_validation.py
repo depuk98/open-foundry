@@ -5,6 +5,7 @@ and candidate entity spans to catch hallucinations before they reach the
 knowledge graph.
 """
 
+import hashlib
 from typing import Optional
 
 import config
@@ -44,7 +45,9 @@ def validate_llm_output(
 
     for i, item in enumerate(reviewed):
         if not isinstance(item, dict):
-            logger.warning("LLM returned non-dict item in validation, skipping", extra={"item": str(item)[:200]})
+            logger.warning("LLM returned non-dict item in validation, skipping", extra={
+                "index": i, "item_type": type(item).__name__, "item_length": len(str(item)),
+            })
             continue
 
         action = item.get("action", "").lower()
@@ -78,7 +81,9 @@ def validate_llm_output(
         if action in ("correct", "add"):
             if name.lower() not in source_text.lower() and name.lower() not in candidate_spans:
                 logger.warning("LLM returned entity with span not in source text", extra={
-                    "index": i, "action": action, "entity": name, "text_snippet": source_text[:100],
+                    "index": i, "action": action, "entity": name,
+                    "source_length": len(source_text),
+                    "source_hash": hashlib.sha256(source_text.encode()).hexdigest()[:16],
                 })
                 continue
 

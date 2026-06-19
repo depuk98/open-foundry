@@ -1,4 +1,5 @@
 import type { StorageProvider, RequestContext } from '@openfoundry/spi';
+import { normalizeForDedup } from './dedup-utils.js';
 
 interface CacheEntry {
   entityId: string;
@@ -14,12 +15,6 @@ interface StorageWithPool {
     query: (sql: string, params: unknown[]) => Promise<PoolQueryResult>;
   };
 }
-
-// Title prefixes to strip before computing dedup cache keys.
-// Only applied to Person type. Organization/Location names are preserved.
-const TITLE_PATTERN = /^(President|General|Gen|Admiral|Colonel|Col\.?|Captain|Capt\.?|Major|Maj\.?|Lieutenant|Lt\.?|Sergeant|Sgt\.?|Secretary|Minister|Dr\.?|Mr\.?|Ms\.?|Mrs\.?|King|Queen|Prince|Princess|Sheikh|Ayatollah|Crown Prince|Sir|Lord|Lady|Dame|Bishop|Archbishop|Cardinal|Rabbi|Imam|Chancellor|Governor|Senator|Congressman|Congresswoman|Ambassador|Marshal|Commander|Chief)\s+/i;
-
-const TITLE_STRIP_TYPES = new Set(['Person']);
 
 /**
  * In-memory LRU cache for entity deduplication.
@@ -49,7 +44,7 @@ export class EntityDedupCache {
       return cached.entityId;
     }
 
-    const existingId = await this.queryByName(type, this.normalizeForDedup(type, name), storage, ctx);
+    const existingId = await this.queryByName(type, normalizeForDedup(type, name), storage, ctx);
     if (existingId) {
       this.setRaw(key, existingId);
       return existingId;
@@ -71,6 +66,84 @@ export class EntityDedupCache {
 
   get size(): number {
     return this.cache.size;
+  }
+
+  /**
+   * Batch resolve multiple entity lookups.
+   * Groups entities by table, sends one query per table using ANY($2),
+   * and populates the cache for all hits. Reduces cold-start DB load
+   * from N queries (one per entity) to at most 4 (one per table).
+   */
+  async batchResolve(
+    entities: Array<{ type: string; name: string }>,
+    storage: StorageProvider,
+    ctx: RequestContext,
+  ): Promise<Map<string, string | null>> {
+    const results = new Map<string, string | null>();
+
+    // Skip entities already in cache
+    const uncached: Array<{ type: string; name: string; key: string }> = [];
+    for (const e of entities) {
+      const normalized = normalizeForDedup(e.type, e.name);
+      const key = `${e.type}:${normalized}`;
+      const cached = this.cache.get(key);
+      if (cached) {
+        results.set(key, cached.entityId);
+      } else {
+        uncached.push({ type: e.type, name: normalized, key });
+      }
+    }
+
+    if (uncached.length === 0) return results;
+
+    const pgStorage = storage as unknown as StorageWithPool;
+    if (!pgStorage.pool) {
+      for (const e of uncached) results.set(e.key, null);
+      return results;
+    }
+
+    // Group by table
+    const byTable = new Map<string, typeof uncached>();
+    for (const e of uncached) {
+      const table = this.tableNameFor(e.type);
+      if (!byTable.has(table)) byTable.set(table, []);
+      byTable.get(table)!.push(e);
+    }
+
+    // One query per table
+    for (const [table, items] of byTable) {
+      try {
+        const names = items.map(e => e.name);
+        const placeholders = names.map((_, i) => `$${i + 2}`);
+        const result = await pgStorage.pool.query(
+          `SELECT "_id", "_normalized_name" FROM public.${table}
+           WHERE "_tenant_id" = $1 AND "_normalized_name" = ANY($2)
+           AND "_deleted_at" IS NULL`,
+          [ctx.tenantId, names],
+        );
+
+        // Build lookup map from DB results
+        const dbMap = new Map<string, string>();
+        for (const row of result.rows) {
+          if (row && row._id && row._normalized_name) {
+            dbMap.set(row._normalized_name as string, row._id as string);
+          }
+        }
+
+        // Populate results and cache
+        for (const e of items) {
+          const dbId = dbMap.get(e.name) ?? null;
+          results.set(e.key, dbId);
+          if (dbId) {
+            this.setRaw(e.key, dbId);
+          }
+        }
+      } catch {
+        for (const e of items) results.set(e.key, null);
+      }
+    }
+
+    return results;
   }
 
   private setRaw(key: string, entityId: string): void {
@@ -99,14 +172,13 @@ export class EntityDedupCache {
   ): Promise<string | null> {
     try {
       const tableName = this.tableNameFor(type);
-      const fieldName = this.fieldNameFor(type);
 
       const pgStorage = storage as unknown as StorageWithPool;
       if (!pgStorage.pool) return null;
 
       const result = await pgStorage.pool.query(
         `SELECT "_id" FROM public.${tableName}
-         WHERE "_tenant_id" = $1 AND LOWER("${fieldName}") = LOWER($2)
+         WHERE "_tenant_id" = $1 AND "_normalized_name" = $2
          AND "_deleted_at" IS NULL LIMIT 1`,
         [ctx.tenantId, name],
       );
@@ -127,28 +199,11 @@ export class EntityDedupCache {
       case 'Location': return 'location';
       case 'Equipment': return 'equipment';
       case 'Event': return 'event';
-      // Mapped types — stored in parent tables
       case 'WeaponSystem': return 'equipment';
       case 'MilitaryUnit': return 'organization';
       case 'ArmedGroup': return 'organization';
       case 'ConflictZone': return 'location';
       default: return type.toLowerCase();
-    }
-  }
-
-  private fieldNameFor(type: string): string {
-    switch (type) {
-      case 'Person': return 'full_name';
-      case 'Organization': return 'name';
-      case 'Location': return 'name';
-      case 'Equipment': return 'designation';
-      case 'Event': return 'description';
-      // Mapped types — use parent table field
-      case 'WeaponSystem': return 'designation';
-      case 'MilitaryUnit': return 'name';
-      case 'ArmedGroup': return 'name';
-      case 'ConflictZone': return 'name';
-      default: return 'name';
     }
   }
 
@@ -158,26 +213,7 @@ export class EntityDedupCache {
    * resolve to the same cache key.
    */
   private dedupKey(type: string, name: string): string {
-    const normalized = this.normalizeForDedup(type, name);
+    const normalized = normalizeForDedup(type, name);
     return `${type}:${normalized}`;
-  }
-
-  /**
-   * Normalize an entity name for dedup. Strips known title prefixes from
-   * Person names. Loops to handle multi-title names ("Mr President Trump").
-   * Organization, Location, Equipment names are never stripped.
-   */
-  private normalizeForDedup(type: string, name: string): string {
-    const trimmed = name.trim().normalize('NFC');
-    if (!TITLE_STRIP_TYPES.has(type)) return trimmed.toLowerCase();
-    let result = trimmed;
-    for (;;) {
-      const stripped = result.replace(TITLE_PATTERN, '').trim();
-      if (stripped === result) break;
-      result = stripped;
-    }
-    // Guard: if all titles were stripped leaving empty, return original
-    if (result.length === 0) return trimmed.toLowerCase();
-    return result.toLowerCase();
   }
 }

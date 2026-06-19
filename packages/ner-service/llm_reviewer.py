@@ -5,6 +5,7 @@ reject entity candidates from Stage 2. Only invoked when the merged result
 contains conflicts or low-confidence entities.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -14,8 +15,10 @@ from typing import Optional
 import httpx
 
 import config
+import constants
 import logging_config
 import text_utils
+import ner_pb2
 
 logger = logging_config.get_logger(__name__)
 
@@ -116,7 +119,10 @@ def _parse_llm_response(raw: str) -> list[dict]:
         if results:
             return results
 
-    logger.warning("Failed to parse LLM response JSON", extra={"raw": raw[:200]})
+    logger.warning("Failed to parse LLM response JSON", extra={
+        "response_length": len(raw),
+        "response_hash": hashlib.sha256(raw.encode()).hexdigest()[:16],
+    })
     return []
 
 
@@ -239,7 +245,7 @@ def apply_review(
         name = item.get("text", "").strip()
         norm = name.lower()
 
-        if action == "reject":
+        if action == constants.LLM_ACTION_REJECT:
             continue
 
         # Recover context from original merged entity
@@ -248,31 +254,31 @@ def apply_review(
         if not context and source_text:
             context = text_utils.extract_context(source_text, name)
 
-        if action == "add":
+        if action == constants.LLM_ACTION_ADD:
             final.append({
                 "text": name,
                 "type": item.get("type", ""),
                 "confidence": float(item.get("confidence", 0.8)),
                 "context": context,
-                "action": "add",
+                "action": constants.LLM_ACTION_ADD,
                 "reasoning": item.get("reasoning", ""),
             })
-        elif action == "correct":
+        elif action == constants.LLM_ACTION_CORRECT:
             final.append({
                 "text": name,
                 "type": item.get("type", ""),
                 "confidence": float(item.get("confidence", 0.8)),
                 "context": context,
-                "action": "correct",
+                "action": constants.LLM_ACTION_CORRECT,
                 "reasoning": item.get("reasoning", ""),
             })
-        elif action == "confirm":
+        elif action == constants.LLM_ACTION_CONFIRM:
             final.append({
                 "text": name,
                 "type": item.get("type", ""),
                 "confidence": float(item.get("confidence", 0.8)),
                 "context": context,
-                "action": "confirm",
+                "action": constants.LLM_ACTION_CONFIRM,
                 "reasoning": item.get("reasoning", ""),
             })
 
@@ -297,7 +303,7 @@ def should_review(merged: list[dict], conflict_count: int, enable_llm: bool) -> 
     # Check for explicitly conflicted or low-confidence entities
     for ent in merged:
         status = ent.get("status", 0)
-        if status == 4:  # ENTITY_STATUS_CONFLICT
+        if status == ner_pb2.ENTITY_STATUS_CONFLICT:
             return True
 
         conf = ent.get("confidence", 0.0)

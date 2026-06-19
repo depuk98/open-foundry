@@ -565,81 +565,13 @@ async function main(): Promise<void> {
   const objectSetManager = new ObjectSetManager(objectSetStore, objectManager);
 
   // ── Entity Extraction (NER) Setup ──
-  // Initializes the NER pipeline for extracting Person/Organization/Location/Equipment
-  // from IntelReport content. Best-effort — failures never block report storage.
-  // Primary: Python gRPC sidecar (GLiNER + Flair + phi4-mini LLM).
-  // Fallback: compromise inline JS (WinkExtractor).
-  const { existsSync } = await import('node:fs');
-  const { join, resolve } = await import('node:path');
+  // Delegated to bootstrap/ner-bootstrap.ts.
   let entityExtractionService: InstanceType<typeof import('@openfoundry/sync').EntityExtractionService> | null = null;
   try {
-    const nerModule = await import('@openfoundry/sync');
-    const {
-      GrpcNerExtractor, WinkExtractor, GazetteerExtractor,
-      CompositeExtractor, EntityDedupCache, EntityExtractionService,
-    } = nerModule;
-
-    // Entity labels matching GLiNER zero-shot types
-    const nerLabels = [
-      'Person', 'Organization', 'Location',
-      'Equipment', 'WeaponSystem', 'MilitaryUnit',
-      'ArmedGroup', 'ConflictZone', 'Event',
-    ];
-
-    // Primary: Python gRPC NER service (three-stage: GLiNER + Flair + phi4-mini)
-    const grpcAddress = process.env['NER_SERVICE_URL'] ?? 'localhost:50052';
-    const grpcClient = 'NerGrpcClient' in nerModule
-      ? new nerModule.NerGrpcClient({ address: grpcAddress })
-      : null;
-    const grpcExtractor = grpcClient ? new GrpcNerExtractor(grpcClient, nerLabels, 0.4) : null;
-
-    // Fallback: compromise inline JS
-    const winkExtractor = new WinkExtractor(0.6);
-
-    // Equipment gazetteer as supplement to compromise fallback
-    const gazetteerPath = resolve(
-      process.env['DOMAIN_PACKS_DIR'] ?? join(process.cwd(), 'domain-packs'),
-      'osint', 'entity-extraction', 'equipment-gazetteer.yaml',
-    );
-    let gazetteerExtractor: InstanceType<typeof GazetteerExtractor> | null = null;
-    if (existsSync(gazetteerPath)) {
-      try {
-        gazetteerExtractor = new GazetteerExtractor(gazetteerPath);
-      } catch (err) {
-        logger.warn({ err }, 'NER: failed to load equipment gazetteer');
-      }
-    }
-
-    // Fallback-aware extractor: tries gRPC first. Only runs compromise if gRPC returns empty.
-    // This ensures gRPC (GLiNER+Flair+LLM) quality is never diluted by compromise noise.
-    const fallbackExtractor: import('@openfoundry/sync').EntityExtractor = {
-      name: 'gRPC-primary-with-fallback',
-      async extract(text: string) {
-        if (grpcExtractor) {
-          const result = await grpcExtractor.extract(text);
-          if (result.length > 0) return result;
-        }
-        // gRPC returned empty or unavailable — try compromise
-        const winkResult = await winkExtractor.extract(text);
-        const gazResult = gazetteerExtractor ? await gazetteerExtractor.extract(text) : [];
-        return [...winkResult, ...gazResult];
-      },
-    };
-
-    const compositeExtractor = new CompositeExtractor([fallbackExtractor]);
-
-    const entityDedupCache = new EntityDedupCache(10000);
-    entityExtractionService = new EntityExtractionService(
-      compositeExtractor,
-      entityDedupCache,
-      objectManager,
-      linkManager,
-      storage,
-      { minConfidence: 0.4, maxEntities: 20, minTextLength: 30 },
-      // Validation enabled by default for all rules. Connector YAML can override.
-      { enabled: true },
-    );
-    logger.info('NER: entity extraction pipeline initialized');
+    const { initializeNerPipeline } = await import('./bootstrap/ner-bootstrap.js');
+    entityExtractionService = await initializeNerPipeline({
+      objectManager, linkManager, storage, logger: { info: (msg: string) => logger.info(msg), warn: (data: object, msg: string) => logger.warn(data, msg) },
+    }) as typeof entityExtractionService;
   } catch (err) {
     logger.warn({ err }, 'NER: failed to initialize entity extraction pipeline, NER disabled');
   }

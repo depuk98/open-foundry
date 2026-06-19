@@ -52,6 +52,10 @@ interface GraphQLEndpoints {
   SearchTimeline: string;
 }
 
+// Twitter public anonymous guest token — overridable via env for rotation
+const TWITTER_BEARER_TOKEN = process.env["TWITTER_BEARER_TOKEN"]
+  ?? "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
 // ─── Connector ──────────────────────────────────────────────────────────
 
 export class TwitterConnector implements Connector {
@@ -191,9 +195,19 @@ export class TwitterConnector implements Connector {
     // Fetch from search queries
     for (const query of this.queries) {
       let cursor: string | undefined;
-      const tweets = await this.searchTweets(query, cursor);
-      for (const tweet of tweets) {
-        yield tweetToSourceRecord(tweet, table);
+      let page = 0;
+      const maxPages = 5;
+
+      while (page < maxPages) {
+        const tweets = await this.searchTweets(query, cursor);
+        if (tweets.length === 0) break;
+
+        for (const tweet of tweets) {
+          yield tweetToSourceRecord(tweet, table);
+        }
+
+        cursor = tweets.length > 0 ? tweets[tweets.length - 1]!.tweet_id : undefined;
+        page++;
       }
     }
   }
@@ -223,18 +237,36 @@ export class TwitterConnector implements Connector {
       // Stagger API calls — 10s between users to avoid 429
       await new Promise(r => setTimeout(r, 10_000));
 
-      const tweets = await this.fetchUserTweets(userId, undefined);
-      console.error(`[twitter-connector] @${username}: fetched ${tweets.length} tweets`);
-      for (const tweet of tweets) {
-        if (sinceTweetId && tweet.tweet_id <= sinceTweetId) continue;
+      let cursor: string | undefined;
+      let page = 0;
+      const maxPages = 5;
+      let foundOlderTweets = false;
 
-        const now = Date.now();
-        if (now - lastYield < rateLimitMs) {
-          await new Promise((r) => setTimeout(r, rateLimitMs - (now - lastYield)));
+      while (page < maxPages && !foundOlderTweets) {
+        const tweets = await this.fetchUserTweets(userId, cursor);
+        if (tweets.length === 0) break;
+
+        console.error(`[twitter-connector] @${username}: fetched ${tweets.length} tweets (page ${page + 1})`);
+
+        for (const tweet of tweets) {
+          if (sinceTweetId && tweet.tweet_id <= sinceTweetId) {
+            foundOlderTweets = true;
+            break;
+          }
+
+          const now = Date.now();
+          if (now - lastYield < rateLimitMs) {
+            await new Promise((r) => setTimeout(r, rateLimitMs - (now - lastYield)));
+          }
+          lastYield = Date.now();
+
+          yield tweetToSourceRecord(tweet, table);
         }
-        lastYield = Date.now();
 
-        yield tweetToSourceRecord(tweet, table);
+        if (!foundOlderTweets) {
+          cursor = tweets.length > 0 ? tweets[tweets.length - 1]!.tweet_id : undefined;
+        }
+        page++;
       }
     }
   }
@@ -325,8 +357,7 @@ export class TwitterConnector implements Connector {
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       "Content-Type": "application/json",
-      Authorization:
-        "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+      Authorization: `Bearer ${TWITTER_BEARER_TOKEN}`,
       Cookie: `auth_token=${this.auth.authToken}; ct0=${this.auth.ct0}`,
       "x-csrf-token": this.auth.ct0,
       "X-Twitter-Active-User": "yes",
@@ -493,7 +524,12 @@ function extractTweets(
       const userResults = core?.["user_results"] as Record<string, unknown>;
       const userResultObj = userResults?.["result"] as Record<string, unknown>;
       const userResultCore = userResultObj?.["core"] as Record<string, unknown> | undefined;
-      const authorScreenName = (userResultCore?.["screen_name"] as string) ?? "";
+      let authorScreenName = (userResultCore?.["screen_name"] as string) ?? "";
+      const restId = (userResultObj?.["rest_id"] as string) ?? "";
+      if (!authorScreenName && restId) {
+        console.warn(`[twitter-connector] authorScreenName empty for rest_id=${restId}, tweet_id=${leg["id_str"]}`);
+        authorScreenName = restId;
+      }
 
       const entities = (leg["entities"] as Record<string, unknown>) ?? {};
       const hashtags = (

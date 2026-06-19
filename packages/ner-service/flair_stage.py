@@ -14,6 +14,7 @@ import time
 from typing import Optional
 
 import config
+import constants
 import logging_config
 import text_utils
 
@@ -26,13 +27,9 @@ _predict_lock = threading.Lock()
 _load_attempted = False
 _load_error: Optional[str] = None
 
-# Flair tag -> our internal type mapping
-FLAIR_TYPE_MAP = {
-    "PER": "Person",
-    "ORG": "Organization",
-    "LOC": "Location",
-    "MISC": "Miscellaneous",
-}
+# Flair tag -> our internal type mapping (imported from shared constants)
+# noqa — imported for module-level access by tests
+from constants import FLAIR_TAG_MAP as FLAIR_TYPE_MAP  # noqa: F401
 
 
 def is_available() -> bool:
