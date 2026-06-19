@@ -61,4 +61,4 @@ yarn.lock
 *.tgz
 *.tar.gz
 .cardinal/
-.avril/
+.avril/__pycache__/

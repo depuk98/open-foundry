@@ -1,0 +1,11 @@
+{
+  "name": "@openfoundry/ner-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Python gRPC sidecar for three-stage NER (GLiNER + Flair + phi4-mini)",
+  "scripts": {
+    "build": "bash compile_proto.sh",
+    "typecheck": "echo 'Python: use mypy or ruff check'",
+    "test": "python -m pytest tests/ -v"
+  }
+}

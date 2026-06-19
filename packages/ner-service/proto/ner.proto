@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package ner.v1;
+
+// NerService provides named entity extraction with an optional multi-stage
+// pipeline (parallel GLiNER + Flair extraction, ensemble merge, and LLM
+// verification via phi4-mini).
+service NerService {
+  // Extract entities from text using the configured pipeline stages.
+  rpc ExtractEntities(ExtractRequest) returns (ExtractResponse);
+}
+
+message ExtractRequest {
+  // Raw text to extract entities from.
+  string text = 1;
+
+  // Entity types to extract (e.g. ["Person", "Organization", "Equipment"]).
+  // Passed directly to GLiNER's zero-shot labels. Flair uses its fixed
+  // PER/ORG/LOC/MISC classification regardless of these labels.
+  repeated string labels = 2;
+
+  // Minimum confidence threshold (0.0–1.0). Entities below this are discarded.
+  float min_confidence = 3;
+
+  // Maximum number of entities to return.
+  int32 max_entities = 4;
+
+  // Whether to invoke the Stage 3 LLM reviewer for conflict resolution.
+  // When false, the merge stage output is returned directly.
+  bool enable_llm_review = 5;
+}
+
+message ExtractResponse {
+  // The extracted and optionally verified entities.
+  repeated Entity entities = 1;
+
+  // Pipeline execution metadata for observability.
+  PipelineMetadata metadata = 2;
+}
+
+message Entity {
+  // The exact text span from the source.
+  string text = 1;
+
+  // The resolved entity type (e.g. "Person", "Equipment", "MilitaryUnit").
+  string type = 2;
+
+  // Confidence score (0.0–1.0).
+  float confidence = 3;
+
+  // Surrounding text context (~50 chars) for analyst reference.
+  string context = 4;
+
+  // Pipeline status indicating how this entity was produced.
+  EntityStatus status = 5;
+}
+
+// How the entity was produced in the pipeline.
+enum EntityStatus {
+  ENTITY_STATUS_UNSPECIFIED = 0;
+  ENTITY_STATUS_CONFIRMED = 1;       // Both GLiNER and Flair agree
+  ENTITY_STATUS_SINGLE_SOURCE = 2;   // Only one model found it
+  ENTITY_STATUS_GLINER_ENRICHED = 3; // Flair MISC classified by GLiNER
+  ENTITY_STATUS_CONFLICT = 4;        // Same span, different types — needs LLM review
+  ENTITY_STATUS_LLM_VERIFIED = 5;    // LLM confirmed
+  ENTITY_STATUS_LLM_CORRECTED = 6;   // LLM changed type or span
+  ENTITY_STATUS_LLM_ADDED = 7;       // LLM added a missing entity
+  ENTITY_STATUS_CONFLICT_RESOLVED = 8; // LLM resolved a type conflict
+}
+
+// Pipeline execution metadata for monitoring and debugging.
+message PipelineMetadata {
+  // Number of entities returned by GLiNER.
+  int32 gliner_count = 1;
+
+  // Number of entities returned by Flair.
+  int32 flair_count = 2;
+
+  // Number of type conflicts detected during merge.
+  int32 conflicts = 3;
+
+  // Number of entities reviewed by the LLM.
+  int32 llm_reviewed = 4;
+
+  // Final number of entities after all stages.
+  int32 final_count = 5;
+
+  // Wall-clock time for Stage 1 in milliseconds.
+  float stage1_latency_ms = 6;
+
+  // Wall-clock time for Stage 3 in milliseconds (0 if skipped).
+  float stage3_latency_ms = 7;
+
+  // Whether the LLM reviewer was invoked for this request.
+  bool llm_invoked = 8;
+
+  // Whether GLiNER was available for this request.
+  bool gliner_available = 9;
+
+  // Whether Flair was available for this request.
+  bool flair_available = 10;
+}
