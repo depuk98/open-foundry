@@ -30,6 +30,7 @@ export { ConnectorRegistry } from "./connectors/index.js";
 // Connector implementations
 export { JdbcConnector, jdbcPlugin } from "./connectors/index.js";
 export { RestConnector, restPlugin } from "./connectors/index.js";
+export { TwitterConnector, twitterPlugin } from "./connectors/index.js";
 
 // Default registry
 export { createDefaultRegistry } from "./connectors/index.js";
@@ -121,3 +122,22 @@ export type {
 } from "./conflict/index.js";
 
 export { ConflictResolver } from "./conflict/index.js";
+
+// Entity extraction (NER pipeline)
+export type {
+  ExtractedEntity,
+  EntityExtractor,
+  EntityExtractionResult,
+  EntityExtractionConfig,
+} from "./entity-extraction/index.js";
+
+export {
+  WinkExtractor,
+  GazetteerExtractor,
+  CompositeExtractor,
+  EntityDedupCache,
+  EntityExtractionService,
+  GrpcNerExtractor,
+} from "./entity-extraction/index.js";
+
+export { NerGrpcClient } from "./entity-extraction/ner-grpc-client.js";
