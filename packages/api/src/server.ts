@@ -564,14 +564,265 @@ async function main(): Promise<void> {
     : new InMemoryObjectSetStore();
   const objectSetManager = new ObjectSetManager(objectSetStore, objectManager);
 
+  // ── Entity Extraction (NER) Setup ──
+  // Initializes the NER pipeline for extracting Person/Organization/Location/Equipment
+  // from IntelReport content. Best-effort — failures never block report storage.
+  // Primary: Python gRPC sidecar (GLiNER + Flair + phi4-mini LLM).
+  // Fallback: compromise inline JS (WinkExtractor).
+  const { existsSync } = await import('node:fs');
+  const { join, resolve } = await import('node:path');
+  let entityExtractionService: InstanceType<typeof import('@openfoundry/sync').EntityExtractionService> | null = null;
+  try {
+    const nerModule = await import('@openfoundry/sync');
+    const {
+      GrpcNerExtractor, WinkExtractor, GazetteerExtractor,
+      CompositeExtractor, EntityDedupCache, EntityExtractionService,
+    } = nerModule;
+
+    // Entity labels matching GLiNER zero-shot types
+    const nerLabels = [
+      'Person', 'Organization', 'Location',
+      'Equipment', 'WeaponSystem', 'MilitaryUnit',
+      'ArmedGroup', 'ConflictZone', 'Event',
+    ];
+
+    // Primary: Python gRPC NER service (three-stage: GLiNER + Flair + phi4-mini)
+    const grpcAddress = process.env['NER_SERVICE_URL'] ?? 'localhost:50052';
+    const grpcClient = 'NerGrpcClient' in nerModule
+      ? new nerModule.NerGrpcClient({ address: grpcAddress })
+      : null;
+    const grpcExtractor = grpcClient ? new GrpcNerExtractor(grpcClient, nerLabels, 0.4) : null;
+
+    // Fallback: compromise inline JS
+    const winkExtractor = new WinkExtractor(0.6);
+
+    // Equipment gazetteer as supplement to compromise fallback
+    const gazetteerPath = resolve(
+      process.env['DOMAIN_PACKS_DIR'] ?? join(process.cwd(), 'domain-packs'),
+      'osint', 'entity-extraction', 'equipment-gazetteer.yaml',
+    );
+    let gazetteerExtractor: InstanceType<typeof GazetteerExtractor> | null = null;
+    if (existsSync(gazetteerPath)) {
+      try {
+        gazetteerExtractor = new GazetteerExtractor(gazetteerPath);
+      } catch (err) {
+        logger.warn({ err }, 'NER: failed to load equipment gazetteer');
+      }
+    }
+
+    // Fallback-aware extractor: tries gRPC first. Only runs compromise if gRPC returns empty.
+    // This ensures gRPC (GLiNER+Flair+LLM) quality is never diluted by compromise noise.
+    const fallbackExtractor: import('@openfoundry/sync').EntityExtractor = {
+      name: 'gRPC-primary-with-fallback',
+      async extract(text: string) {
+        if (grpcExtractor) {
+          const result = await grpcExtractor.extract(text);
+          if (result.length > 0) return result;
+        }
+        // gRPC returned empty or unavailable — try compromise
+        const winkResult = await winkExtractor.extract(text);
+        const gazResult = gazetteerExtractor ? await gazetteerExtractor.extract(text) : [];
+        return [...winkResult, ...gazResult];
+      },
+    };
+
+    const compositeExtractor = new CompositeExtractor([fallbackExtractor]);
+
+    const entityDedupCache = new EntityDedupCache(10000);
+    entityExtractionService = new EntityExtractionService(
+      compositeExtractor,
+      entityDedupCache,
+      objectManager,
+      linkManager,
+      storage,
+      { minConfidence: 0.4, maxEntities: 20, minTextLength: 30 },
+      // Validation enabled by default for all rules. Connector YAML can override.
+      { enabled: true },
+    );
+    logger.info('NER: entity extraction pipeline initialized');
+  } catch (err) {
+    logger.warn({ err }, 'NER: failed to initialize entity extraction pipeline, NER disabled');
+  }
+
   // ── Connector Registry ──
-  // Create the default registry (jdbc + rest built-in), then validate that
-  // all pack-declared connectors reference a registered plugin type.
-  const { createDefaultRegistry } = await import('@openfoundry/sync');
+  // Create the default registry (jdbc + rest + twitter built-in), then validate
+  // and instantiate all pack-declared connectors. For POLLING/CDC modes,
+  // start extraction loops that feed records into the ontology engine.
+  const { createDefaultRegistry, parseMappingConfig, CdcConsumer } = await import('@openfoundry/sync');
   const connectorRegistry = createDefaultRegistry();
+
   for (const cm of connectorManifests) {
     if (connectorRegistry.has(cm.connector)) {
       logger.info(`Connector: '${cm.config['datasource'] ?? cm.connector}' (${cm.connector}) from pack '${cm.packName}'`);
+
+      // Instantiate and initialize the connector
+      const connection = cm.config['connection'] as Record<string, unknown> | undefined;
+      const syncCfg = cm.config['sync'] as Record<string, unknown> | undefined;
+      const mode = (syncCfg?.['mode'] as string) ?? 'BATCH';
+      const interval = (syncCfg?.['interval'] as string) ?? 'PT60S';
+
+      try {
+        const connectorConfig = {
+          url: (connection?.['url'] as string) ?? '',
+          table: (connection?.['table'] as string) ?? 'default',
+          properties: (connection?.['properties'] as Record<string, unknown>) ?? {},
+        };
+        const connector = connectorRegistry.create(cm.connector, connectorConfig);
+        await connector.initialize(connectorConfig);
+
+        // For POLLING / CDC modes, start a background extraction loop
+        if (mode === 'POLLING' || mode === 'CDC') {
+          const intervalMs = parseISO8601Duration(interval);
+          const mappingConfig = parseMappingConfig(JSON.stringify(cm.config));
+
+          // Build a changeApplier that feeds mapped objects into the engine
+          const changeApplier: import('@openfoundry/sync').ChangeApplier = async (mapped) => {
+            const ctx = { tenantId: 'default', actorId: 'sync-engine', traceId: `sync-${Date.now()}` };
+            try {
+              if (mapped.operation === 'DELETE') {
+                return;
+              }
+
+              // Ensure SourceProfile exists before creating IntelReport + links
+              const sourceChannel = mapped.properties['sourceChannel'] as string | undefined;
+              let actualProfileId: string | null = null;
+
+              if (sourceChannel && sourceChannel.trim()) {
+                const handle = sourceChannel.trim();
+                // Query by handle — use the storage layer directly since ObjectManager 
+                // only supports lookup by _id
+                try {
+                  const existingRows = await (storage as any).pool.query(
+                    `SELECT "_id" FROM public.source_profile WHERE "_tenant_id" = $1 AND "handle" = $2`,
+                    ['default', handle]
+                  );
+                  if (existingRows.rows.length > 0) {
+                    actualProfileId = (existingRows.rows[0] as Record<string, unknown>)._id as string;
+                  }
+                } catch { /* table may not exist yet */ }
+
+                if (!actualProfileId) {
+                  try {
+                    const created = await objectManager.create('SourceProfile', {
+                      handle,
+                      displayName: handle,
+                      platform: mapped.properties['sourcePlatform'] ?? 'twitter',
+                      categories: ['OSINT_ANALYST'],
+                      credibilityScore: 0.7,
+                      credibilityBasis: 'track_record',
+                      isMonitored: true,
+                      status: 'ACTIVE',
+                      createdAt: new Date().toISOString(),
+                      createdBy: 'sync-engine',
+                      updatedAt: new Date().toISOString(),
+                      updatedBy: 'sync-engine',
+                    }, ctx);
+                    actualProfileId = created._id;
+                    logger.info({ handle, id: actualProfileId }, 'Connector: created SourceProfile');
+                  } catch (createErr) {
+                    // May be duplicate handle — try lookup again
+                    try {
+                      const retryRows = await (storage as any).pool.query(
+                        `SELECT "_id" FROM public.source_profile WHERE "_tenant_id" = $1 AND "handle" = $2`,
+                        ['default', handle]
+                      );
+                      if (retryRows.rows.length > 0) {
+                        actualProfileId = retryRows.rows[0]._id as string;
+                      }
+                    } catch { /* give up */ }
+                  }
+                }
+
+                // Update link targets to use actual profile ID
+                if (actualProfileId) {
+                  mapped.links = mapped.links.map(l => ({
+                    ...l,
+                    toId: l.linkType === 'ReportedBy' ? actualProfileId! : l.toId,
+                  }));
+                }
+              }
+
+              // Fill engine-managed @readonly fields and required defaults
+              const now = new Date().toISOString();
+              const props = {
+                ...mapped.properties,
+                createdAt: mapped.properties['createdAt'] ?? now,
+                createdBy: mapped.properties['createdBy'] ?? 'sync-engine',
+                updatedAt: mapped.properties['updatedAt'] ?? now,
+                updatedBy: mapped.properties['updatedBy'] ?? 'sync-engine',
+                retrievedAt: mapped.properties['retrievedAt'] ?? now,
+                status: mapped.properties['status'] ?? 'RAW',
+                sourceCredibilityScore: mapped.properties['sourceCredibilityScore'] ?? 0.7,
+              };
+              const created = await objectManager.create(mapped.objectType, props, ctx);
+              const actualReportId = created._id;
+              // ── NER: Entity Extraction (best-effort, non-blocking) ──
+              const reportText = mapped.properties['content'] as string;
+              const entityConfig = mappingConfig.entityExtraction;
+              if (entityExtractionService && entityConfig?.enabled !== false && reportText?.trim()) {
+                try {
+                  const result = await entityExtractionService.processReport(
+                    actualReportId, reportText, ctx,
+                  );
+                  if (result.entitiesExtracted > 0) {
+                    logger.info({
+                      reportId: actualReportId,
+                      ...result,
+                    }, 'NER: extracted entities from report');
+                  }
+                } catch (nerErr) {
+                  logger.warn({ nerErr, reportId: actualReportId },
+                    'NER: entity extraction failed, report stored without entities');
+                }
+              }
+              for (const link of mapped.links) {
+                try {
+                  const linkProps = { ...(link.properties ?? {}) };
+                  // ReportedBy requires fetchedAt (NOT NULL in schema)
+                  if (link.linkType === 'ReportedBy') {
+                    linkProps['fetchedAt'] = now;
+                  }
+                  await linkManager.createLink(link.linkType, actualReportId, link.toId, linkProps, ctx);
+                } catch (linkErr) {
+                  logger.warn({ linkErr, linkType: link.linkType, fromId: actualReportId, toId: link.toId }, 'Connector: failed to create link');
+                }
+              }
+            } catch (err) {
+              logger.warn({ err, objectType: mapped.objectType, id: mapped.id }, 'Connector: failed to apply mapped object');
+            }
+          };
+
+          const consumer = new CdcConsumer({
+            mappingConfig,
+            changeApplier,
+              checkpointStore: {
+                async getCheckpoint(_datasource: string) { return null; },
+                async saveCheckpoint(_datasource: string, _checkpoint: unknown) { /* TODO: persist */ },
+              },
+          });
+
+          // Start extraction loop
+          const datasourceName = (cm.config['datasource'] as string) ?? cm.connector;
+          void (async () => {
+            logger.info({ datasource: datasourceName, intervalMs, mode }, 'Connector: starting extraction loop');
+            while (true) {
+              try {
+                const checkpoint = await consumer.getLastCheckpoint();
+                const records = connector.incrementalExtract(
+                  (connection?.['table'] as string) ?? 'default',
+                  checkpoint ?? '',
+                );
+                await consumer.consume(records);
+              } catch (err) {
+                logger.error({ err, datasource: datasourceName }, 'Connector: extraction error, retrying');
+              }
+              await new Promise(r => setTimeout(r, intervalMs));
+            }
+          })();
+        }
+      } catch (err) {
+        logger.error({ err, connector: cm.connector, pack: cm.packName }, 'Connector: failed to initialize');
+      }
     } else {
       logger.warn(`Connector: unknown type '${cm.connector}' in pack '${cm.packName}', skipping`);
     }
@@ -1231,6 +1482,17 @@ export function fgaDslToJson(dsl: string): FgaAuthorizationModel {
   flushType();
 
   return { schema_version: '1.1', type_definitions: typeDefs };
+}
+
+// ── Utility: Parse ISO 8601 duration (PT30S, PT15M, PT1H) to milliseconds ──
+
+function parseISO8601Duration(duration: string): number {
+  const match = duration.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/);
+  if (!match) return 60_000; // default 60s
+  const hours = parseInt(match[1] ?? '0', 10);
+  const minutes = parseInt(match[2] ?? '0', 10);
+  const seconds = parseFloat(match[3] ?? '0');
+  return (hours * 3600 + minutes * 60 + seconds) * 1000;
 }
 
 // Fatal error handlers — log and exit rather than silently dying.
