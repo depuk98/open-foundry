@@ -1,0 +1,42 @@
+# actions/contradict-report.yaml
+action: ContradictReport
+version: 1
+reversible: true
+
+preconditions:
+  - expr: "sourceReport.id != targetReport.id"
+    error: "Cannot contradict a report with itself"
+  - expr: "sourceReport.status != 'ARCHIVED' && targetReport.status != 'ARCHIVED'"
+    error: "Archived reports cannot be used for contradiction analysis"
+  - expr: "actor.hasRole('intelligence_analyst') || actor.hasRole('senior_analyst')"
+    error: "Only intelligence analysts can flag contradictions"
+
+effects:
+  - type: createLink
+    linkType: "Contradicts"
+    from: "sourceReport"
+    to: "targetReport"
+    properties:
+      conflictDescription: "params.conflictDescription"
+      flaggedBy: "actor.id"
+      flaggedAt: "now"
+
+  - type: updateObject
+    target: "sourceReport"
+    set:
+      status: "DISPUTED"
+      analystNotes: "concat(sourceReport.analystNotes, '\n[CONTRADICTED] by report ', targetReport.id, ': ', params.conflictDescription)"
+
+sideEffects:
+  - name: emitContradictionEvent
+    type: event
+    config:
+      type: "osint.report.contradicted"
+      data:
+        sourceReportId: "sourceReport.id"
+        targetReportId: "targetReport.id"
+        analystId: "actor.id"
+        conflict: "params.conflictDescription"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

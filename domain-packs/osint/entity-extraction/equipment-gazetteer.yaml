@@ -1,0 +1,214 @@
+# Military Equipment Gazetteer for OSINT NER
+# Format: designation + aliases (case-insensitive matching)
+
+equipment:
+  # Main Battle Tanks
+  - designation: "T-90M"
+    aliases: ["T-90", "T90", "T-90M Proryv"]
+    category: MAIN_BATTLE_TANK
+  - designation: "T-72"
+    aliases: ["T72", "T-72B", "T-72B3", "T-72M1"]
+    category: MAIN_BATTLE_TANK
+  - designation: "T-80"
+    aliases: ["T80", "T-80BVM", "T-80U"]
+    category: MAIN_BATTLE_TANK
+  - designation: "T-64"
+    aliases: ["T64", "T-64BV"]
+    category: MAIN_BATTLE_TANK
+  - designation: "Leopard 2"
+    aliases: ["Leopard2", "Leopard 2A4", "Leopard 2A6"]
+    category: MAIN_BATTLE_TANK
+  - designation: "Challenger 2"
+    aliases: ["Challenger2"]
+    category: MAIN_BATTLE_TANK
+  - designation: "Abrams"
+    aliases: ["M1 Abrams", "M1A1", "M1A2"]
+    category: MAIN_BATTLE_TANK
+  - designation: "Merkava"
+    aliases: ["Merkava IV", "Merkava Mk4"]
+    category: MAIN_BATTLE_TANK
+
+  # Armored Vehicles
+  - designation: "BMP-3"
+    aliases: ["BMP3", "BMP-2", "BMP2", "BMP-1", "BMP1"]
+    category: ARMORED_VEHICLE
+  - designation: "BTR-82A"
+    aliases: ["BTR-82", "BTR82A", "BTR-80", "BTR80"]
+    category: ARMORED_VEHICLE
+  - designation: "Bradley"
+    aliases: ["M2 Bradley", "M2A2", "M3 Bradley"]
+    category: ARMORED_VEHICLE
+  - designation: "Stryker"
+    aliases: ["M1126 Stryker"]
+    category: ARMORED_VEHICLE
+  - designation: "MT-LB"
+    aliases: ["MTLB"]
+    category: ARMORED_VEHICLE
+  - designation: "Humvee"
+    aliases: ["HMMWV", "M1151"]
+    category: ARMORED_VEHICLE
+
+  # Artillery & MLRS
+  - designation: "HIMARS"
+    aliases: ["M142 HIMARS"]
+    category: MULTIPLE_ROCKET_LAUNCHER
+  - designation: "M270 MLRS"
+    aliases: ["M270", "MLRS"]
+    category: MULTIPLE_ROCKET_LAUNCHER
+  - designation: "BM-21 Grad"
+    aliases: ["Grad", "BM21"]
+    category: MULTIPLE_ROCKET_LAUNCHER
+  - designation: "BM-30 Smerch"
+    aliases: ["Smerch", "BM30", "Tornado-S"]
+    category: MULTIPLE_ROCKET_LAUNCHER
+  - designation: "M777"
+    aliases: ["M777 howitzer", "M777A2"]
+    category: ARTILLERY
+  - designation: "2S19 Msta-S"
+    aliases: ["Msta-S", "2S19", "2S19M2"]
+    category: ARTILLERY
+  - designation: "CAESAR"
+    aliases: ["CAESAR howitzer", "CAESAR 6x6", "CAESAR 8x8"]
+    category: ARTILLERY
+  - designation: "PzH 2000"
+    aliases: ["PzH2000", "Panzerhaubitze 2000"]
+    category: ARTILLERY
+  - designation: "Archer"
+    aliases: ["Archer howitzer", "FH77 BW L52"]
+    category: ARTILLERY
+
+  # Air Defense
+  - designation: "S-400"
+    aliases: ["S400", "SA-21 Growler", "S-300", "S300"]
+    category: AIR_DEFENSE
+  - designation: "Patriot"
+    aliases: ["MIM-104 Patriot", "PAC-2", "PAC-3"]
+    category: AIR_DEFENSE
+  - designation: "IRIS-T"
+    aliases: ["IRIS-T SLM", "IRIS-T SLS"]
+    category: AIR_DEFENSE
+  - designation: "NASAMS"
+    aliases: []
+    category: AIR_DEFENSE
+  - designation: "Buk"
+    aliases: ["Buk-M1", "Buk-M2", "Buk-M3", "SA-11", "SA-17"]
+    category: AIR_DEFENSE
+  - designation: "Tor"
+    aliases: ["Tor-M2", "SA-15 Gauntlet"]
+    category: AIR_DEFENSE
+  - designation: "Pantsir-S1"
+    aliases: ["Pantsir", "Pantsir-S", "SA-22 Greyhound"]
+    category: AIR_DEFENSE
+
+  # Aircraft
+  - designation: "Su-35"
+    aliases: ["Su35", "Su-35S", "Flanker-E"]
+    category: FIXED_WING_AIRCRAFT
+  - designation: "Su-34"
+    aliases: ["Su34", "Fullback"]
+    category: FIXED_WING_AIRCRAFT
+  - designation: "Su-25"
+    aliases: ["Su25", "Frogfoot", "Su-25SM3"]
+    category: FIXED_WING_AIRCRAFT
+  - designation: "MiG-31"
+    aliases: ["MiG31", "Foxhound", "MiG-31K"]
+    category: FIXED_WING_AIRCRAFT
+  - designation: "F-16"
+    aliases: ["F16", "F-16AM", "F-16BM", "Viper"]
+    category: FIXED_WING_AIRCRAFT
+  - designation: "F-35"
+    aliases: ["F35", "Lightning II", "F-35A", "F-35B"]
+    category: FIXED_WING_AIRCRAFT
+  - designation: "A-50"
+    aliases: ["A50", "A-50U", "Mainstay"]
+    category: FIXED_WING_AIRCRAFT
+
+  # Helicopters
+  - designation: "Ka-52"
+    aliases: ["Ka52", "Alligator", "Hokum-B"]
+    category: HELICOPTER
+  - designation: "Mi-8"
+    aliases: ["Mi8", "Mi-17", "Mi-8MTV-5", "Hip"]
+    category: HELICOPTER
+  - designation: "Mi-24"
+    aliases: ["Mi24", "Mi-35", "Hind"]
+    category: HELICOPTER
+  - designation: "Mi-28"
+    aliases: ["Mi28", "Havoc", "Mi-28NM"]
+    category: HELICOPTER
+  - designation: "AH-64 Apache"
+    aliases: ["Apache", "AH-64", "AH-64E"]
+    category: HELICOPTER
+
+  # Drones / UAVs
+  - designation: "Bayraktar TB2"
+    aliases: ["TB2", "Bayraktar"]
+    category: DRONE
+  - designation: "Shahed-136"
+    aliases: ["Shahed136", "Shahed-131", "Geran-2", "Geranium"]
+    category: DRONE
+  - designation: "Lancet"
+    aliases: ["Lancet-3", "ZALA Lancet", "Izdeliye-52"]
+    category: LOITERING_MUNITION
+  - designation: "Orlan-10"
+    aliases: ["Orlan10", "Orlan-30"]
+    category: DRONE
+  - designation: "MQ-9 Reaper"
+    aliases: ["Reaper", "MQ-9", "Predator B"]
+    category: DRONE
+  - designation: "Switchblade"
+    aliases: ["Switchblade 300", "Switchblade 600"]
+    category: LOITERING_MUNITION
+
+  # Missiles
+  - designation: "Iskander"
+    aliases: ["Iskander-M", "Iskander-K", "SS-26 Stone", "9K720"]
+    category: MISSILE_SYSTEM
+  - designation: "Kalibr"
+    aliases: ["Kalibr cruise missile", "3M-54", "3M14"]
+    category: MISSILE_SYSTEM
+  - designation: "Kh-101"
+    aliases: ["Kh101", "Kh-555", "Kh-55"]
+    category: MISSILE_SYSTEM
+  - designation: "Storm Shadow"
+    aliases: ["SCALP-EG", "SCALP"]
+    category: MISSILE_SYSTEM
+  - designation: "ATACMS"
+    aliases: ["MGM-140 ATACMS"]
+    category: MISSILE_SYSTEM
+  - designation: "Kinzhal"
+    aliases: ["Kh-47M2 Kinzhal", "Dagger"]
+    category: MISSILE_SYSTEM
+  - designation: "Zircon"
+    aliases: ["3M22 Zircon", "Tsirkon"]
+    category: MISSILE_SYSTEM
+  - designation: "Oreshnik"
+    aliases: []
+    category: MISSILE_SYSTEM
+
+  # Naval
+  - designation: "Admiral Grigorovich"
+    aliases: ["Project 11356R", "Grigorovich-class"]
+    category: NAVAL_VESSEL
+
+  # Electronic Warfare
+  - designation: "Krasukha-4"
+    aliases: ["Krasukha", "1RL257"]
+    category: ELECTRONIC_WARFARE
+  - designation: "Borisoglebsk-2"
+    aliases: ["Borisoglebsk", "R-330Zh"]
+    category: ELECTRONIC_WARFARE
+  - designation: "Leer-3"
+    aliases: ["Leer3", "RB-341V"]
+    category: ELECTRONIC_WARFARE
+
+  # Radar
+  - designation: "Zoopark-1"
+    aliases: ["Zoopark", "1L219M"]
+    category: RADAR
+  - designation: "Counter-battery radar"
+    aliases: ["AN/TPQ-36", "AN/TPQ-53", "COBRA"]
+    category: RADAR
+  - designation: "ZALA"
+    aliases: ["ZALA Aero"]
+    category: DRONE

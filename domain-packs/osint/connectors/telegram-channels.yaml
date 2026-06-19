@@ -1,0 +1,52 @@
+# Telegram OSINT connector — ingests messages from monitored
+# Telegram channels via MTProto client API.
+#
+# Relies on environment variables:
+#   TG_API_ID    — Telegram API application ID
+#   TG_API_HASH  — Telegram API application hash
+
+datasource: Telegram_OSINT_Feed
+connector: telegram
+connection:
+  url: "mtproto://tg-channel-monitor"
+  table: "messages"
+  properties:
+    apiId: "${TG_API_ID}"
+    apiHash: "${TG_API_HASH}"
+    channels:
+      - "@rybar_en"
+      - "@suriyak_maps"
+      - "@bellingcat"
+      - "@IntelSlava"
+      - "@DDGeopolitics"
+      - "@TheIntelLab"
+
+mapping:
+  objectType: IntelReport
+  primaryKey:
+    source: "message_id"
+    target: "id"
+    transform: "concat('rpt-tg-', channel_name, '-', message_id)"
+  properties:
+    content: { source: "text" }
+    source: { source: "platform", transform: "coalesce('TELEGRAM')" }
+    sourcePlatform: { source: "platform", transform: "coalesce('telegram')" }
+    sourceChannel: { source: "channel_username" }
+    publishedAt: { source: "date", transform: "parseDateTime('yyyy-MM-dd HH:mm:ss')" }
+    mediaUrls: { source: "media_files" }
+    language: { source: "detected_lang", transform: "coalesce('unknown')" }
+    rawMetadata: { source: "raw_message" }
+  links:
+    - linkType: ReportedBy
+      toType: SourceProfile
+      toKey:
+        source: "channel_username"
+        target: "id"
+        transform: "prefix('src-tg-')"
+
+sync:
+  mode: CDC
+  conflictResolution: SOURCE_PRIORITY
+  rateLimit:
+    maxRecordsPerSecond: 10
+  writeback: false

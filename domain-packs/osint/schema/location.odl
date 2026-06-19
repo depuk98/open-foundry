@@ -1,0 +1,43 @@
+# OSINT Domain Pack — Location ObjectType
+#
+# Models geospatial points of interest: cities, military bases, airfields,
+# ports, border crossings, infrastructure nodes, and natural features.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type Location implements Identifiable & Auditable & Locatable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  name: String! @searchable(weight: 2.0)
+  aliases: [String!] @searchable
+  type: LocationType! @indexed
+
+  location: GeoPoint!
+  address: String
+  boundingBox: JSON
+  country: Country! @indexed
+  region: String @indexed
+  adminDivision: String
+
+  strategicValue: String @searchable
+  controlledBy: Organization @link(type: "OrgControlsLocation", direction: INBOUND)
+  controlConfidence: ConfidenceLevel
+  contestedBy: [String!]
+
+  isMilitaryBase: Boolean @indexed
+  baseType: String
+  facilities: [String!]
+
+  eventsHere: [Event!]! @link(type: "OccurredAtLocation", direction: INBOUND, history: true)
+  equipmentSighted: [Equipment!]! @link(type: "EquipmentSightedAtLocation", direction: INBOUND, history: true)
+
+  mentionedIn: [IntelReport!]! @link(type: "MentionsLocation", direction: INBOUND, history: true)
+
+  isActiveFrontline: Boolean @indexed
+  populationEstimate: Int
+  status: LocationStatus!
+}

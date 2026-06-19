@@ -1,0 +1,39 @@
+# actions/create-assessment.yaml
+action: CreateAssessment
+version: 1
+reversible: false
+
+preconditions:
+  - expr: "params.sourceReportIds.size() >= 1"
+    error: "At least one source report is required to create an assessment"
+  - expr: "actor.hasRole('intelligence_analyst') || actor.hasRole('senior_analyst')"
+    error: "Only intelligence analysts can create assessments"
+
+effects:
+  - type: createObject
+    objectType: "Assessment"
+    properties:
+      title: "params.title"
+      executiveSummary: "params.executiveSummary"
+      fullContent: "params.fullContent"
+      author: "actor.id"
+      publishedAt: "now"
+      status: "DRAFT"
+      region: "params.region"
+      country: "params.country"
+      overallConfidence: "params.overallConfidence"
+
+sideEffects:
+  - name: emitAssessmentCreatedEvent
+    type: event
+    config:
+      type: "osint.assessment.created"
+      data:
+        title: "params.title"
+        author: "actor.id"
+        region: "params.region"
+        country: "params.country"
+        sourceReportCount: "params.sourceReportIds.size()"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

@@ -1,0 +1,41 @@
+# ACLED API connector — ingests conflict event data from the
+# Armed Conflict Location & Event Data Project.
+#
+# Relies on environment variable:
+#   ACLED_API_KEY  — ACLED API key (register at acleddata.com)
+
+datasource: ACLED_Conflict_Data
+connector: rest
+connection:
+  url: "https://api.acleddata.com/acled/read"
+  table: "events"
+  properties:
+    apiKey: "${ACLED_API_KEY}"
+    regions: ["Europe", "Middle East", "Africa"]
+    eventTypes: ["Battles", "Explosions/Remote violence", "Violence against civilians"]
+    lookbackDays: 7
+
+mapping:
+  objectType: Event
+  primaryKey:
+    source: "event_id_cnty"
+    target: "id"
+    transform: "prefix('evt-acled-')"
+  properties:
+    eventDate: { source: "event_date", transform: "parseDate('yyyy-MM-dd')" }
+    type: { source: "event_type", transform: "custom('mapAcledEventType')" }
+    subtype: { source: "sub_event_type" }
+    description: { source: "notes" }
+    location: { source: "coordinates" }
+    locationName: { source: "location" }
+    locationPrecision: { source: "geo_precision" }
+    country: { source: "country" }
+    region: { source: "region" }
+    fatalities: { source: "fatalities", transform: "parseInt()" }
+    impactAssessment: { source: "notes" }
+
+sync:
+  mode: OVERLAY
+  cacheStrategy: TTL
+  cacheTTL: "PT1H"
+  writeback: false

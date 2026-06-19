@@ -1,0 +1,122 @@
+model
+  schema 1.1
+
+type user
+
+# ─── IntelReport ───
+
+type intel_report
+  relations
+    define viewer: [user]
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define geospatial_analyst: [user]
+    define collection_manager: [user]
+    define admin: [user]
+    define can_read: viewer or intelligence_analyst or senior_analyst or geospatial_analyst or collection_manager or admin
+    define can_escalate: intelligence_analyst or senior_analyst
+    define can_corroborate: intelligence_analyst or senior_analyst
+    define can_verify: intelligence_analyst or senior_analyst or geospatial_analyst
+    define can_flag_disinfo: intelligence_analyst or senior_analyst
+
+# ─── SourceProfile ───
+
+type source_profile
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define collection_manager: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or collection_manager or admin
+    define can_edit_credibility: senior_analyst or admin
+
+# ─── Person ───
+
+type person
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or admin
+    define can_edit: senior_analyst or admin
+
+# ─── Organization ───
+
+type organization
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or admin
+    define can_edit: senior_analyst or admin
+    define can_designate: senior_analyst or admin
+
+# ─── Location ───
+
+type location
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or admin
+    define can_edit: senior_analyst or admin
+
+# ─── Event ───
+
+type event
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define collection_manager: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or collection_manager or admin
+    define can_create: intelligence_analyst or senior_analyst
+    define can_edit: senior_analyst or admin
+
+# ─── Equipment ───
+
+type equipment
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or admin
+    define can_edit: senior_analyst or admin
+
+# ─── Assessment ───
+
+type assessment
+  relations
+    define author: [user]
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define collection_manager: [user]
+    define admin: [user]
+    define can_read: author or intelligence_analyst or senior_analyst or collection_manager or admin
+    define can_create: intelligence_analyst or senior_analyst
+    define can_publish: senior_analyst or admin
+    define can_retract: author or senior_analyst or admin
+    define can_supersede: senior_analyst or admin
+
+# ─── Narrative ───
+
+type narrative
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or admin
+    define can_create: intelligence_analyst or senior_analyst
+    define can_debunk: senior_analyst or admin
+
+# ─── Indicator ───
+
+type indicator
+  relations
+    define intelligence_analyst: [user]
+    define senior_analyst: [user]
+    define admin: [user]
+    define can_read: intelligence_analyst or senior_analyst or admin
+    define can_create: senior_analyst or admin
+    define can_edit: senior_analyst or admin
+    define can_dismiss: senior_analyst or admin

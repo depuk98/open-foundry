@@ -1,0 +1,34 @@
+# ISW RSS connector — polls the Institute for the Study of War
+# Ukraine campaign assessment RSS feed for daily intelligence updates.
+#
+# No authentication required. Public RSS feed.
+
+datasource: ISW_Ukraine_Assessment
+connector: rss
+connection:
+  url: "https://understandingwar.org/analysis/russia-ukraine/feed"
+  table: "items"
+
+mapping:
+  objectType: Assessment
+  primaryKey:
+    source: "guid"
+    target: "id"
+    transform: "prefix('asmt-isw-')"
+  properties:
+    title: { source: "title" }
+    executiveSummary: { source: "contentSnippet" }
+    fullContent: { source: "content" }
+    author: { source: "creator", transform: "coalesce('ISW')" }
+    publishedAt: { source: "pubDate", transform: "parseDateTime('yyyy-MM-ddTHH:mm:ssZ')" }
+    sourceUrl: { source: "link" }
+    region: { source: "categories", transform: "coalesce('Ukraine')" }
+    country: { source: "country_code", transform: "coalesce('UA')" }
+    status: { source: "status", transform: "coalesce('PUBLISHED')" }
+    classification: { source: "classification", transform: "coalesce('UNCLASSIFIED')" }
+
+sync:
+  mode: POLLING
+  interval: "PT15M"
+  conflictResolution: SOURCE_PRIORITY
+  writeback: false

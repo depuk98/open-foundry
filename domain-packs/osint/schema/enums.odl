@@ -1,0 +1,304 @@
+# OSINT Domain Pack — Enumerations
+#
+# Covers source classification, event types, organization types,
+# equipment categories, credibility ratings, and country codes.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+enum IntelSource {
+  TWITTER
+  TELEGRAM
+  RSS
+  ACLED
+  LIVEUAMAP
+  ISW
+  BELLINGCAT
+  CUSTOM
+}
+
+enum SourceCategory {
+  CONFLICT_MONITOR
+  GEOSPATIAL_ANALYST
+  ARMS_IDENTIFIER
+  OSINT_ANALYST
+  INSTITUTIONAL
+  INVESTIGATIVE_JOURNALISM
+  ACADEMIC
+  GOVERNMENT_OFFICIAL
+  NEWS_WIRE
+  STATE_MEDIA
+  ACTIVIST
+  UNKNOWN
+}
+
+enum CredibilityRating {
+  VERIFIED
+  LIKELY
+  POSSIBLE
+  DOUBTFUL
+  DISPROVEN
+  UNEVALUATED
+}
+
+enum IntelReportStatus {
+  RAW
+  TRIAGED
+  VERIFIED
+  CORROBORATED
+  DISPUTED
+  ESCALATED
+  ARCHIVED
+}
+
+enum EventType {
+  AIR_STRIKE
+  ARTILLERY_SHELLING
+  DRONE_ATTACK
+  MISSILE_ATTACK
+  GROUND_ENGAGEMENT
+  NAVAL_ENGAGEMENT
+  EXPLOSION
+  TROOP_MOVEMENT
+  CIVILIAN_CASUALTY
+  INFRASTRUCTURE_DAMAGE
+  PROTEST
+  RIOT
+  POLITICAL_VIOLENCE
+  ASSASSINATION
+  DIPLOMATIC
+  HUMANITARIAN_CRISIS
+  NATURAL_DISASTER
+  CYBER_ATTACK
+  OTHER
+}
+
+enum OrgType {
+  MILITARY_UNIT
+  GOVERNMENT_AGENCY
+  INTELLIGENCE_AGENCY
+  NGO
+  ARMED_GROUP
+  CORPORATION
+  MEDIA_ORGANIZATION
+  POLITICAL_PARTY
+  INTERNATIONAL_ORG
+  RESEARCH_INSTITUTE
+  OTHER
+}
+
+enum EquipmentCategory {
+  MAIN_BATTLE_TANK
+  ARMORED_VEHICLE
+  ARTILLERY
+  MULTIPLE_ROCKET_LAUNCHER
+  AIR_DEFENSE
+  FIXED_WING_AIRCRAFT
+  HELICOPTER
+  NAVAL_VESSEL
+  SMALL_ARMS
+  MISSILE_SYSTEM
+  DRONE
+  LOITERING_MUNITION
+  RADAR
+  ELECTRONIC_WARFARE
+  LOGISTICS_VEHICLE
+  OTHER
+}
+
+enum AssessmentStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  RETRACTED
+  SUPERSEDED
+}
+
+enum AssessmentClassification {
+  UNCLASSIFIED
+  OFFICIAL
+  SECRET
+  TOP_SECRET
+}
+
+enum IndicatorStatus {
+  ACTIVE
+  TRIGGERED
+  DISMISSED
+  EXPIRED
+}
+
+enum NarrativeType {
+  DISINFORMATION
+  MISINFORMATION
+  PROPAGANDA
+  CONSPIRACY_THEORY
+  INFORMATION_OPERATION
+}
+
+enum NarrativeStatus {
+  ACTIVE
+  WANING
+  RESURGENT
+  CONTAINED
+  DEBUNKED
+}
+
+enum Country {
+  UNKNOWN
+  AF
+  AL
+  DZ
+  UA
+  GB
+  US
+  RU
+  CN
+  IR
+  IL
+  SY
+  IQ
+  YE
+  SD
+  ET
+  MM
+  KP
+  TW
+  PS
+  LB
+  LY
+  SO
+  ML
+  BF
+  NE
+  NG
+  CD
+  VE
+  CU
+  BY
+  IN
+  PK
+  AFG
+  KR
+  JP
+  DE
+  FR
+  TR
+  SA
+  AE
+  EG
+  BR
+  ZA
+  AU
+  CA
+  MX
+  AR
+  CO
+  ID
+  PH
+  VN
+  TH
+  BD
+  PL
+  RO
+  HU
+  CZ
+  SK
+  BG
+  RS
+  HR
+  GR
+  IT
+  ES
+  PT
+  NL
+  BE
+  SE
+  NO
+  FI
+  DK
+  AT
+  CH
+  IE
+  KZ
+  UZ
+  GE
+  AM
+  AZ
+  TJ
+  KG
+  TM
+  MN
+}
+
+enum SourceStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  BANNED
+  UNKNOWN
+}
+
+enum ConfidenceLevel {
+  HIGH
+  MEDIUM
+  LOW
+  UNKNOWN
+}
+
+enum WatchlistStatus {
+  NONE
+  MONITORED
+  FLAGGED
+  SANCTIONED
+}
+
+enum UnitSize {
+  SQUAD
+  PLATOON
+  COMPANY
+  BATTALION
+  REGIMENT
+  BRIGADE
+  DIVISION
+  CORPS
+  ARMY
+  UNKNOWN
+}
+
+enum LocationType {
+  CITY
+  TOWN
+  VILLAGE
+  MILITARY_BASE
+  AIRFIELD
+  PORT
+  BORDER_CROSSING
+  INFRASTRUCTURE_NODE
+  OIL_FIELD
+  POWER_PLANT
+  DAM
+  BRIDGE
+  RAILWAY_JUNCTION
+  NATURAL_FEATURE
+  OTHER
+}
+
+enum LocationStatus {
+  UNDER_CONTROL
+  CONTESTED
+  OCCUPIED
+  LIBERATED
+  DESTROYED
+  ABANDONED
+  UNKNOWN
+}
+
+enum EquipmentStatus {
+  OPERATIONAL
+  DAMAGED
+  DESTROYED
+  CAPTURED
+  ABANDONED
+  RETIRED
+  UNKNOWN
+}

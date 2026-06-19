@@ -1,0 +1,175 @@
+# OSINT Domain Pack Seed Data
+#
+# Bootstrap data applied idempotently at boot.
+# Provides initial source profiles with credibility scores
+# for the monitored OSINT feeds.
+
+seed:
+  - type: SourceProfile
+    ref: src_tw_sentdefender
+    properties:
+      handle: "@sentdefender"
+      displayName: "Sentdefender"
+      platform: "twitter"
+      categories: ["CONFLICT_MONITOR", "OSINT_ANALYST"]
+      primaryCountry: US
+      credibilityScore: 0.85
+      credibilityBasis: "track_record"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_osinttechnical
+    properties:
+      handle: "@Osinttechnical"
+      displayName: "OSINTtechnical"
+      platform: "twitter"
+      categories: ["GEOSPATIAL_ANALYST", "OSINT_ANALYST"]
+      primaryCountry: US
+      credibilityScore: 0.92
+      credibilityBasis: "peer_reviewed"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_geoconfirmed
+    properties:
+      handle: "@GeoConfirmed"
+      displayName: "GeoConfirmed"
+      platform: "twitter"
+      categories: ["GEOSPATIAL_ANALYST", "OSINT_ANALYST"]
+      primaryCountry: UNKNOWN
+      credibilityScore: 0.93
+      credibilityBasis: "peer_reviewed"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_tendar
+    properties:
+      handle: "@Tendar"
+      displayName: "Tendar"
+      platform: "twitter"
+      categories: ["CONFLICT_MONITOR", "GEOSPATIAL_ANALYST"]
+      primaryCountry: UNKNOWN
+      credibilityScore: 0.85
+      credibilityBasis: "track_record"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_studyofwar
+    properties:
+      handle: "@TheStudyofWar"
+      displayName: "Institute for the Study of War"
+      platform: "twitter"
+      categories: ["INSTITUTIONAL", "RESEARCH_INSTITUTE"]
+      primaryCountry: US
+      credibilityScore: 0.98
+      credibilityBasis: "institutional"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_bellingcat
+    properties:
+      handle: "@bellingcat"
+      displayName: "Bellingcat"
+      platform: "twitter"
+      categories: ["INVESTIGATIVE_JOURNALISM", "OSINT_ANALYST"]
+      primaryCountry: NL
+      credibilityScore: 0.95
+      credibilityBasis: "institutional"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_calibreobscura
+    properties:
+      handle: "@CalibreObscura"
+      displayName: "Calibre Obscura"
+      platform: "twitter"
+      categories: ["ARMS_IDENTIFIER", "OSINT_ANALYST"]
+      primaryCountry: UNKNOWN
+      credibilityScore: 0.90
+      credibilityBasis: "track_record"
+      isMonitored: true
+      monitoringPriority: 2
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tw_defencehq
+    properties:
+      handle: "@DefenceHQ"
+      displayName: "UK Ministry of Defence"
+      platform: "twitter"
+      categories: ["GOVERNMENT_OFFICIAL"]
+      primaryCountry: GB
+      credibilityScore: 0.97
+      credibilityBasis: "institutional"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tg_rybar
+    properties:
+      handle: "@rybar_en"
+      displayName: "Rybar (English)"
+      platform: "telegram"
+      categories: ["CONFLICT_MONITOR", "STATE_MEDIA"]
+      primaryCountry: RU
+      credibilityScore: 0.55
+      credibilityBasis: "track_record"
+      knownBiases: ["Pro-Russian perspective", "May amplify state narratives"]
+      isMonitored: true
+      monitoringPriority: 3
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_tg_suriyak
+    properties:
+      handle: "@suriyak_maps"
+      displayName: "Suriyak Maps"
+      platform: "telegram"
+      categories: ["CONFLICT_MONITOR", "GEOSPATIAL_ANALYST"]
+      primaryCountry: UNKNOWN
+      credibilityScore: 0.70
+      credibilityBasis: "track_record"
+      isMonitored: true
+      monitoringPriority: 2
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_rss_isw
+    properties:
+      handle: "ISW RSS Feed"
+      displayName: "Institute for the Study of War (RSS)"
+      platform: "rss"
+      categories: ["INSTITUTIONAL", "RESEARCH_INSTITUTE"]
+      primaryCountry: US
+      credibilityScore: 0.98
+      credibilityBasis: "institutional"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE
+
+  - type: SourceProfile
+    ref: src_api_acled
+    properties:
+      handle: "ACLED API"
+      displayName: "Armed Conflict Location & Event Data Project"
+      platform: "api"
+      categories: ["INSTITUTIONAL", "RESEARCH_INSTITUTE"]
+      primaryCountry: US
+      credibilityScore: 0.96
+      credibilityBasis: "institutional"
+      isMonitored: true
+      monitoringPriority: 1
+      status: ACTIVE

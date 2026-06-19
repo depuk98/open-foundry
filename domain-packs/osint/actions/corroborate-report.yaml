@@ -1,0 +1,43 @@
+# actions/corroborate-report.yaml
+action: CorroborateReport
+version: 1
+reversible: false
+
+preconditions:
+  - expr: "sourceReport.id != targetReport.id"
+    error: "Cannot corroborate a report with itself"
+  - expr: "sourceReport.status != 'ARCHIVED' && targetReport.status != 'ARCHIVED'"
+    error: "Archived reports cannot be used for corroboration"
+  - expr: "actor.hasRole('intelligence_analyst') || actor.hasRole('senior_analyst')"
+    error: "Only intelligence analysts can corroborate reports"
+
+effects:
+  - type: createLink
+    linkType: "Corroborates"
+    from: "sourceReport"
+    to: "targetReport"
+    properties:
+      overlapScore: "params.overlapScore"
+      analysis: "params.analysis"
+      corroboratedBy: "actor.id"
+      corroboratedAt: "now"
+
+  - type: updateObject
+    target: "sourceReport"
+    set:
+      status: "CORROBORATED"
+      analystNotes: "concat(sourceReport.analystNotes, '\n[CORROBORATED] with report ', targetReport.id, ': ', params.analysis)"
+
+sideEffects:
+  - name: emitCorroborationEvent
+    type: event
+    config:
+      type: "osint.report.corroborated"
+      data:
+        sourceReportId: "sourceReport.id"
+        targetReportId: "targetReport.id"
+        overlapScore: "params.overlapScore"
+        analystId: "actor.id"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

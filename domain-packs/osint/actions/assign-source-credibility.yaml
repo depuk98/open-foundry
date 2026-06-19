@@ -1,0 +1,31 @@
+# actions/assign-source-credibility.yaml
+action: AssignSourceCredibility
+version: 1
+reversible: true
+
+preconditions:
+  - expr: "actor.hasRole('senior_analyst') || actor.hasRole('admin')"
+    error: "Only senior analysts can adjust source credibility scores"
+
+effects:
+  - type: updateObject
+    target: "source"
+    set:
+      credibilityScore: "params.newScore"
+      credibilityBasis: "params.reason"
+
+sideEffects:
+  - name: emitCredibilityUpdateEvent
+    type: event
+    config:
+      type: "osint.source.credibility_updated"
+      data:
+        sourceId: "source.id"
+        sourceHandle: "source.handle"
+        previousScore: "source.credibilityScore"
+        newScore: "params.newScore"
+        reason: "params.reason"
+        updatedBy: "actor.id"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

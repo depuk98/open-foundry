@@ -1,0 +1,35 @@
+# actions/flag-disinformation.yaml
+action: FlagDisinformation
+version: 1
+reversible: true
+
+preconditions:
+  - expr: "report.status != 'ARCHIVED'"
+    error: "Archived reports cannot be flagged"
+  - expr: "actor.hasRole('intelligence_analyst') || actor.hasRole('senior_analyst')"
+    error: "Only intelligence analysts can flag disinformation"
+
+effects:
+  - type: updateObject
+    target: "report"
+    set:
+      status: "DISPUTED"
+      reportCredibility: "DISPROVEN"
+      priority: 5
+      analystNotes: "concat(report.analystNotes, '\n[DISINFORMATION] ', params.reason)"
+
+sideEffects:
+  - name: emitDisinfoFlagEvent
+    type: event
+    config:
+      type: "osint.report.disinformation"
+      data:
+        reportId: "report.id"
+        reason: "params.reason"
+        evidenceUrls: "params.evidenceUrls"
+        flaggedBy: "actor.id"
+        sourceChannel: "report.sourceChannel"
+        sourcePlatform: "report.sourcePlatform"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

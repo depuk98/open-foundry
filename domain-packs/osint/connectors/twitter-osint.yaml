@@ -1,0 +1,121 @@
+# Twitter OSINT connector — ingests tweets from monitored accounts
+# and saved searches via Twitter's internal GraphQL API using
+# browser auth cookies (no X API v2 key required).
+#
+# Authentication: auto-extracts auth_token + ct0 from the browser
+# cookie store (Chrome/Edge/Firefox) — same approach as twitter-cli
+# in agent-reach. No API keys, no user input needed.
+#
+# How it works:
+#   1. Connector detects installed browsers (Chrome → Edge → Firefox)
+#   2. Reads x.com cookies from the browser's SQLite cookie DB
+#   3. Decrypts encrypted values using the OS keychain (macOS Keychain,
+#      Linux gnome-keyring/libsecret, Windows DPAPI)
+#   4. Falls back to TWITTER_AUTH_TOKEN / TWITTER_CT0 env vars if
+#      browser cookies are unavailable (e.g., headless/server deploy)
+#
+# Requires: a logged-in x.com session in Chrome/Firefox
+
+datasource: Twitter_OSINT_Feed
+connector: twitter
+connection:
+  url: "https://x.com/i/api/graphql"
+  table: "tweets"
+  properties:
+    browserAuth: true
+    users:
+      - "sentdefender"
+      - "Osinttechnical"
+      - "GeoConfirmed"
+      - "Tendar"
+      - "RALee85"
+      - "CalibreObscura"
+      - "ELINTNews"
+      - "TheStudyofWar"
+      - "CriticalThreats"
+      - "bellingcat"
+      - "Cen4infoRes"
+      - "CITeam_en"
+      - "DefenceHQ"
+      - "DefMon3"
+      - "IntelCrab"
+    queries:
+      - "ukraine conflict verified"
+      - "from:NATO OR from:DeptofDefense geopolitical"
+      - "#OSINT verified"
+
+mapping:
+  objectType: IntelReport
+  primaryKey:
+    source: "tweet_id"
+    target: "id"
+    transform: "prefix('rpt-tw-')"
+  properties:
+    content: { source: "text" }
+    source: { source: "platform", transform: "coalesce('TWITTER')" }
+    sourcePlatform: { source: "platform", transform: "coalesce('twitter')" }
+    sourceChannel: { source: "author_handle" }
+    sourceUrl: { source: "tweet_id", transform: "prefix('https://x.com/i/status/')" }
+    publishedAt: { source: "created_at" }
+    language: { source: "lang" }
+    mediaUrls: { source: "media_urls" }
+    mediaTypes: { source: "media_types" }
+    tags: { source: "hashtags" }
+    country: { source: "derived_country" }
+    rawMetadata: { source: "raw_data" }
+  links:
+    - linkType: ReportedBy
+      toType: SourceProfile
+      toKey:
+        source: "author_handle"
+        target: "id"
+        transform: "prefix('src-tw-')"
+
+sync:
+  mode: POLLING
+  interval: "PT5M"
+  conflictResolution: SOURCE_PRIORITY
+  rateLimit:
+    maxRecordsPerSecond: 5
+  writeback: false
+
+entityExtraction:
+  enabled: true
+  types:
+    - Person
+    - Organization
+    - Location
+    - Equipment
+  minConfidence: 0.4
+  maxEntitiesPerReport: 20
+  minTextLength: 30
+  validation:
+    enabled: true
+    clean:
+      stripPossessive: true
+      stripTrailingPunct: true
+      stripEmoji: true
+      stripQuotes: true
+      stripHashtag: true
+      normalizeWhitespace: true
+    rules:
+      person:
+        - no-handles
+        - no-numbers
+        - no-titles-only
+        - min-length
+        - no-descriptions
+      organization:
+        - no-handles
+        - no-roles
+        - no-generic-nouns
+        - min-length
+      equipment:
+        - no-commercial
+        - no-alert-systems
+        - no-generic-only
+        - no-truncated
+        - min-designation
+      location:
+        - no-descriptions
+        - min-length

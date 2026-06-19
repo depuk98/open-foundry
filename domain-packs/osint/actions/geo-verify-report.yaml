@@ -1,0 +1,44 @@
+# actions/geo-verify-report.yaml
+action: GeoVerifyReport
+version: 1
+reversible: false
+
+preconditions:
+  - expr: "report.status != 'ARCHIVED'"
+    error: "Archived reports cannot be geo-verified"
+  - expr: "actor.hasRole('intelligence_analyst') || actor.hasRole('senior_analyst') || actor.hasRole('geospatial_analyst')"
+    error: "Only analysts with geospatial training can verify report locations"
+
+effects:
+  - type: updateObject
+    target: "report"
+    set:
+      reportedLocation: "params.verifiedLocation"
+      locationName: "params.locationName"
+      status: "VERIFIED"
+      verificationMethod: "params.method"
+      reportCredibility: "LIKELY"
+      analystNotes: "concat(report.analystNotes, '\n[GEO-VERIFIED] Location: ', params.locationName, ' Method: ', params.method)"
+
+  - type: createLink
+    linkType: "MentionsLocation"
+    from: "report"
+    to: "params.locationName"
+    properties:
+      confidence: 1.0
+      context: "concat('Geo-verified by ', actor.id, ' using ', params.method)"
+
+sideEffects:
+  - name: emitGeoVerifyEvent
+    type: event
+    config:
+      type: "osint.report.geoverified"
+      data:
+        reportId: "report.id"
+        location: "params.locationName"
+        coordinates: "params.verifiedLocation"
+        method: "params.method"
+        verifiedBy: "actor.id"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE

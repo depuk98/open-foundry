@@ -1,0 +1,57 @@
+# OSINT Domain Pack — Action Types
+#
+# Governed mutations for the intelligence workflow: corroboration,
+# contradiction, escalation, assessment creation, geo-verification,
+# disinformation flagging, and source credibility assignment.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type CorroborateReport @actionType {
+  sourceReport: IntelReport! @param
+  targetReport: IntelReport! @param
+  overlapScore: Float! @param @constraint(expr: "value >= 0.0 && value <= 1.0")
+  analysis: String! @param
+}
+
+type ContradictReport @actionType {
+  sourceReport: IntelReport! @param
+  targetReport: IntelReport! @param
+  conflictDescription: String! @param
+}
+
+type EscalateReport @actionType {
+  report: IntelReport! @param
+  priority: Int! @param @constraint(expr: "value >= 1 && value <= 5")
+  reason: String! @param
+}
+
+type CreateAssessment @actionType {
+  title: String! @param
+  executiveSummary: String! @param
+  fullContent: String! @param
+  region: String @param
+  country: Country @param
+  sourceReportIds: [ID!]! @param
+  overallConfidence: ConfidenceLevel! @param
+}
+
+type GeoVerifyReport @actionType {
+  report: IntelReport! @param
+  verifiedLocation: GeoPoint! @param
+  locationName: String! @param
+  proofUrls: [URI!] @param
+  method: String! @param
+}
+
+type FlagDisinformation @actionType {
+  report: IntelReport! @param
+  narrative: Narrative @param
+  reason: String! @param
+  evidenceUrls: [URI!] @param
+}
+
+type AssignSourceCredibility @actionType {
+  source: SourceProfile! @param
+  newScore: Float! @param @constraint(expr: "value >= 0.0 && value <= 1.0")
+  reason: String! @param
+}

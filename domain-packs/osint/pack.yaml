@@ -1,0 +1,50 @@
+# pack.yaml
+name: osint
+version: 0.2.0
+description: "Geopolitical OSINT domain pack — raw intelligence ingestion, entity extraction, source credibility tracking, corroboration, and intelligence assessment production"
+namespace: osint
+
+dependencies:
+  openfoundry.core: ">=1.0.0"
+
+provides:
+  objectTypes: 10
+  linkTypes: 30
+  actionTypes: 7
+  functions: 2
+  connectors: 4
+  widgets: 0
+  qualityRules: 2
+
+schema:
+  - schema/enums.odl
+  - schema/intel-report.odl
+  - schema/source-profile.odl
+  - schema/person.odl
+  - schema/organization.odl
+  - schema/location.odl
+  - schema/event.odl
+  - schema/equipment.odl
+  - schema/assessment.odl
+  - schema/indicator.odl
+  - schema/narrative.odl
+  - schema/links.odl
+  - schema/actions.odl
+
+actions:
+  - actions/corroborate-report.yaml
+  - actions/contradict-report.yaml
+  - actions/escalate-report.yaml
+  - actions/create-assessment.yaml
+  - actions/geo-verify-report.yaml
+  - actions/flag-disinformation.yaml
+  - actions/assign-source-credibility.yaml
+
+connectors:
+  - connectors/twitter-osint.yaml
+  - connectors/telegram-channels.yaml
+  - connectors/isw-rss.yaml
+  - connectors/acled-api.yaml
+
+permissions:
+  - permissions/osint-roles.fga

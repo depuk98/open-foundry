@@ -1,0 +1,36 @@
+# actions/escalate-report.yaml
+action: EscalateReport
+version: 1
+reversible: true
+
+preconditions:
+  - expr: "report.status != 'ARCHIVED'"
+    error: "Archived reports cannot be escalated"
+  - expr: "actor.hasRole('intelligence_analyst') || actor.hasRole('senior_analyst')"
+    error: "Only intelligence analysts can escalate reports"
+
+effects:
+  - type: updateObject
+    target: "report"
+    set:
+      status: "ESCALATED"
+      priority: "params.priority"
+      escalatedAt: "now"
+      escalatedBy: "actor.id"
+      analystNotes: "concat(report.analystNotes, '\n[ESCALATED] Priority ', string(params.priority), ': ', params.reason)"
+
+sideEffects:
+  - name: emitEscalationEvent
+    type: event
+    config:
+      type: "osint.report.escalated"
+      data:
+        reportId: "report.id"
+        priority: "params.priority"
+        reason: "params.reason"
+        escalatedBy: "actor.id"
+        sourceChannel: "report.sourceChannel"
+        country: "report.country"
+
+rollback:
+  onSideEffectFailure: LOG_AND_CONTINUE
