@@ -35,6 +35,7 @@ export type {
   LinkMapping,
   ObjectMapping,
   DatasourceMappingConfig,
+  EntityExtractionConfig,
 } from "./mapping-parser.js";
 export { parseMappingConfig } from "./mapping-parser.js";
 

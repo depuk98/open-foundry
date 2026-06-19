@@ -78,6 +78,15 @@ export interface ObjectMapping {
   links: LinkMapping[];
 }
 
+/** Entity extraction configuration. */
+export interface EntityExtractionConfig {
+  enabled: boolean;
+  types?: string[];
+  minConfidence?: number;
+  maxEntitiesPerReport?: number;
+  minTextLength?: number;
+}
+
 /** Complete parsed datasource mapping config. */
 export interface DatasourceMappingConfig {
   datasource: string;
@@ -85,6 +94,7 @@ export interface DatasourceMappingConfig {
   connection: ConnectionConfig;
   mapping: ObjectMapping;
   sync: SyncConfig;
+  entityExtraction?: EntityExtractionConfig;
 }
 
 // ── Raw YAML shape (pre-parse) ────────────────────────────────────────
@@ -130,12 +140,21 @@ interface RawSync {
   writeback?: boolean;
 }
 
+interface RawEntityExtraction {
+  enabled?: boolean;
+  types?: string[];
+  minConfidence?: number;
+  maxEntitiesPerReport?: number;
+  minTextLength?: number;
+}
+
 interface RawConfig {
   datasource: string;
   connector: string;
   connection: { url: string; table: string; [k: string]: unknown };
   mapping: RawMapping;
   sync: RawSync;
+  entityExtraction?: RawEntityExtraction;
 }
 
 // ── Parser ────────────────────────────────────────────────────────────
@@ -160,6 +179,15 @@ function buildConfig(raw: RawConfig): DatasourceMappingConfig {
     connection: buildConnection(raw.connection),
     mapping: buildMapping(raw.mapping),
     sync: buildSync(raw.sync),
+    ...(raw.entityExtraction ? {
+      entityExtraction: {
+        enabled: raw.entityExtraction.enabled ?? true,
+        types: raw.entityExtraction.types,
+        minConfidence: raw.entityExtraction.minConfidence ?? 0.6,
+        maxEntitiesPerReport: raw.entityExtraction.maxEntitiesPerReport ?? 20,
+        minTextLength: raw.entityExtraction.minTextLength ?? 30,
+      },
+    } : {}),
   };
 }
 
