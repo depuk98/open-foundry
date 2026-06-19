@@ -177,6 +177,44 @@ services:
     networks:
       - foundry
 
+  ner-service:
+    build:
+      context: ..
+      dockerfile: packages/ner-service/Dockerfile
+      args:
+        GIT_REVISION: ${GIT_REVISION:-unknown}
+    ports:
+      - "50052:50052"
+    environment:
+      GRPC_PORT: "50052"
+      GLINER_MODEL: ${NER_GLINER_MODEL:-gliner-community/gliner_small-v2.5}
+      FLAIR_MODEL: ${NER_FLAIR_MODEL:-ner-large}
+      OLLAMA_HOST: ${OLLAMA_HOST:-host.docker.internal:11434}
+      OLLAMA_MODEL: ${NER_OLLAMA_MODEL:-phi4-mini}
+      LLM_TIMEOUT_SECONDS: "10"
+      ENABLE_FLAIR: "${NER_ENABLE_FLAIR:-true}"
+      ENABLE_LLM: "${NER_ENABLE_LLM:-true}"
+      DEVICE: cpu
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ner_models:/home/neruser/.cache/huggingface
+      - ner_flair:/home/neruser/.flair
+      - ../packages/ner-service:/app:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "grpc-health-probe", "-addr=:50052"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 420s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    networks:
+      - foundry
+
   api-gateway:
     build:
       context: ..
@@ -192,6 +230,7 @@ services:
       OPENFGA_URL: "http://openfga:8080"
       OPENFGA_STORE_ID: ${OPENFGA_STORE_ID:-}
       CEL_EVALUATOR_URL: "cel-evaluator:50051"
+      NER_SERVICE_URL: "ner-service:50052"
       REDPANDA_BROKERS: "redpanda:9092"
       REDIS_URL: "redis://redis:6379"
       KEYCLOAK_URL: "http://keycloak:8080/auth"
@@ -200,6 +239,8 @@ services:
       OTEL_SERVICE_NAME: api-gateway
       DOMAIN_PACKS: ${DOMAIN_PACKS:-}
       DOMAIN_PACKS_EXTRA_DIRS: ${DOMAIN_PACKS_EXTRA_DIRS:-}
+      TWITTER_AUTH_TOKEN: ${TWITTER_AUTH_TOKEN:-}
+      TWITTER_CT0: ${TWITTER_CT0:-}
     volumes:
       - ${DOMAIN_PACKS_HOST_DIR:-./empty-packs}:/external-packs:ro
     depends_on:
@@ -209,6 +250,8 @@ services:
         condition: service_started
       cel-evaluator:
         condition: service_started
+      ner-service:
+        condition: service_healthy
       redpanda:
         condition: service_healthy
       redis:
@@ -342,7 +385,16 @@ volumes:
   pg_data:
   redpanda_data:
   redis_data:
+  ner_models:
+  ner_flair:
 
 networks:
   foundry:
     driver: bridge
+
+  # Dev mode: mount source for hot-reload (comment out for production)
+  # ner-service-dev:
+  #   extends: ner-service
+  #   volumes:
+  #     - ../packages/ner-service:/app
+  #   command: python server.py
