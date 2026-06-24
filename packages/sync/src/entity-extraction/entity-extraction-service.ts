@@ -105,15 +105,20 @@ export class EntityExtractionService {
 
     // Batch resolve all entities against the dedup cache + DB.
     // Reduces cold-start DB load from N queries to ≤4 (one per table).
+    // Uses JOIN on link tables to translate domain IDs to Intel extension IDs.
     const dedupResults = await this.dedupCache.batchResolve(
       entities.map(e => ({ type: e.type, name: e.name })),
       this.storage,
       ctx,
     );
 
+    // Phase 1: Create or resolve all entities.
+    // Collect link metadata for phases 1.5 and 2.
+    const pendingDataLinks: Array<{ linkType: string; intelId: string; domainId: string }> = [];
+    const pendingMentionsLinks: Array<{ linkType: string; entityId: string; linkProps: Record<string, unknown> }> = [];
+
     for (const entity of entities) {
       try {
-        // Validate and clean entity before storage
         const validation = validateEntity(entity, text, this.validationConfig);
         if (!validation.valid) {
           result.entitiesRejected++;
@@ -127,9 +132,16 @@ export class EntityExtractionService {
         if (!entityId) {
           const created = await this.createEntity(cleanEntity, ctx);
           if (created) {
-            entityId = created;
+            entityId = created.intelId;
             this.dedupCache.set(cleanEntity.type, cleanEntity.name, entityId);
             result.entitiesCreated++;
+            if (created.domainId) {
+              pendingDataLinks.push({
+                linkType: created.linkType,
+                intelId: created.intelId,
+                domainId: created.domainId,
+              });
+            }
           }
         } else {
           result.entitiesDedupHit++;
@@ -137,15 +149,57 @@ export class EntityExtractionService {
 
         if (entityId) {
           const linkType = this.linkTypeFor(cleanEntity.type);
-          await this.linkManager.createLink(
-            linkType, reportId, entityId,
-            { context: cleanEntity.context, confidence: cleanEntity.confidence },
-            ctx,
-          );
-          result.linksCreated++;
+          const linkProps = linkType === 'ReportedEvent'
+            ? { relationship_type: 'mentioned' }
+            : { context: cleanEntity.context, confidence: cleanEntity.confidence };
+          pendingMentionsLinks.push({ linkType, entityId, linkProps });
         }
-      } catch {
+      } catch (err) {
         result.errors++;
+        const msg = err instanceof Error ? err.message
+          : typeof err === 'object' && err !== null ? JSON.stringify(err)
+          : String(err);
+        console.warn('[NER] entity processing failed', {
+          error: msg,
+          entityType: entity?.type,
+          entityName: entity?.name?.slice(0, 50),
+          reportId,
+        });
+      }
+    }
+
+    // Phase 1.5: Create data-model links (ProfileForPerson, etc.).
+    // All entity writes from phase 1 are committed by now.
+    for (const { linkType, intelId, domainId } of pendingDataLinks) {
+      try {
+        await this.linkManager.createLink(linkType, intelId, domainId, {}, ctx);
+      } catch (err) {
+        console.warn('[NER] data-model link creation failed', {
+          error: err instanceof Error ? err.message : JSON.stringify(err),
+          linkType,
+          intelId,
+          domainId,
+        });
+      }
+    }
+
+    // Phase 2: Create MentionsPerson/MentionsOrganization/etc links.
+    for (const { linkType, entityId, linkProps } of pendingMentionsLinks) {
+      try {
+        await this.linkManager.createLink(
+          linkType, reportId, entityId,
+          linkProps,
+          ctx,
+        );
+        result.linksCreated++;
+      } catch (err) {
+        result.errors++;
+        console.warn('[NER] link creation failed', {
+          error: err instanceof Error ? err.message : String(err),
+          linkType,
+          reportId,
+          toId: entityId,
+        });
       }
     }
 
@@ -155,7 +209,7 @@ export class EntityExtractionService {
   private async createEntity(
     entity: { type: string; name: string },
     ctx: RequestContext,
-  ): Promise<string | null> {
+  ): Promise<{ intelId: string; domainId: string | null; linkType: string } | null> {
     const now = new Date().toISOString();
     const base = {
       createdAt: now,
@@ -167,69 +221,85 @@ export class EntityExtractionService {
 
     switch (entity.type) {
       case 'Person': {
-        const created = await this.objectManager.create('Person', {
+        const person = await this.objectManager.create('Person', {
           ...base,
           fullName: entity.name,
           _normalizedName: normalizedName,
+        }, ctx);
+        const subject = await this.objectManager.create('IntelSubject', {
+          ...base,
           watchlistStatus: 'NONE',
           isPersonOfInterest: false,
         }, ctx);
-        return created._id;
+        return { intelId: subject._id, domainId: person._id, linkType: 'ProfileForPerson' };
       }
       case 'Organization':
       case 'MilitaryUnit': {
-        const created = await this.objectManager.create('Organization', {
+        const org = await this.objectManager.create('Organization', {
           ...base,
           name: entity.name,
           _normalizedName: normalizedName,
+        }, ctx);
+        const intelOrg = await this.objectManager.create('IntelOrganization', {
+          ...base,
           type: entity.type === 'MilitaryUnit' ? 'MILITARY_UNIT' : 'OTHER',
           isDesignated: false,
         }, ctx);
-        return created._id;
+        return { intelId: intelOrg._id, domainId: org._id, linkType: 'OrgProfileForOrganization' };
       }
       case 'ArmedGroup': {
-        const created = await this.objectManager.create('Organization', {
+        const org = await this.objectManager.create('Organization', {
           ...base,
           name: entity.name,
           _normalizedName: normalizedName,
+        }, ctx);
+        const intelOrg = await this.objectManager.create('IntelOrganization', {
+          ...base,
           type: 'ARMED_GROUP',
           isDesignated: false,
         }, ctx);
-        return created._id;
+        return { intelId: intelOrg._id, domainId: org._id, linkType: 'OrgProfileForOrganization' };
       }
       case 'Location':
       case 'ConflictZone': {
-        const created = await this.objectManager.create('Location', {
+        const loc = await this.objectManager.create('Location', {
           ...base,
           name: entity.name,
           _normalizedName: normalizedName,
-          type: 'CITY',
+          location: { latitude: 0, longitude: 0 },
           country: 'UNKNOWN',
+        }, ctx);
+        const intelLoc = await this.objectManager.create('IntelLocation', {
+          ...base,
           status: entity.type === 'ConflictZone' ? 'CONTESTED' : 'UNKNOWN',
         }, ctx);
-        return created._id;
+        return { intelId: intelLoc._id, domainId: loc._id, linkType: 'LocationProfileForLocation' };
       }
       case 'Equipment':
       case 'WeaponSystem': {
-        const created = await this.objectManager.create('Equipment', {
+        const eq = await this.objectManager.create('Equipment', {
           ...base,
           designation: entity.name,
           _normalizedName: normalizedName,
+        }, ctx);
+        const intelEq = await this.objectManager.create('IntelEquipment', {
+          ...base,
           category: 'OTHER',
         }, ctx);
-        return created._id;
+        return { intelId: intelEq._id, domainId: eq._id, linkType: 'EquipmentProfileForEquipment' };
       }
       case 'Event': {
-        const created = await this.objectManager.create('Event', {
+        const event = await this.objectManager.create('IntelEvent', {
           ...base,
           eventDate: now,
-          _normalizedName: normalizedName,
           type: 'OTHER',
+          _normalizedName: normalizedName,
           description: `NER-extracted event: ${entity.name}`,
+          location: { latitude: 0, longitude: 0 },
           locationName: 'UNKNOWN',
           country: 'UNKNOWN',
         }, ctx);
-        return created._id;
+        return { intelId: event._id, domainId: null, linkType: '' };
       }
       default:
         return null;

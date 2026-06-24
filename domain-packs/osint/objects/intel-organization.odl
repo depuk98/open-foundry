@@ -1,0 +1,40 @@
+# OSINT Domain Pack — IntelOrganization ObjectType
+#
+# Intelligence-tracked organization (military unit, government agency,
+# armed group, NGO, corporation). Links to core Organization for identity
+# attributes. Intel-specific attributes live here.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type IntelOrganization implements Identifiable & Auditable & Locatable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  organization: Organization! @link(type: "OrgProfileForOrganization", direction: OUTBOUND)
+
+  type: OrgType! @indexed
+  parentOrg: IntelOrganization @link(type: "OrgSubordinateTo", direction: OUTBOUND)
+
+  unitDesignation: String @indexed
+  unitSize: UnitSize
+  branch: String
+  strength: String
+
+  equipmentHeld: [IntelEquipment!]! @link(type: "OrgOperatesEquipment", direction: OUTBOUND, history: true)
+  areaOfOperations: [IntelLocation!]! @link(type: "OrgControlsLocation", direction: OUTBOUND, history: true)
+  headquarters: IntelLocation @link(type: "OrgHQAtLocation", direction: OUTBOUND)
+
+  threatLevel: ConfidenceLevel
+  isDesignated: Boolean @indexed
+  designationDetails: String
+
+  members: [IntelSubject!]! @link(type: "PersonBelongsToOrg", direction: INBOUND)
+  keyPersonnel: [IntelSubject!]! @link(type: "KeyPersonnelInOrg", direction: OUTBOUND)
+
+  sourceProfiles: [SourceProfile!]! @link(type: "SourceProfileForOrganization", direction: INBOUND)
+  mentionedIn: [IntelReport!]! @link(type: "MentionsOrganization", direction: INBOUND, history: true)
+  involvedIn: [IntelEvent!]! @link(type: "OrgInvolvedInEvent", direction: OUTBOUND, history: true)
+}

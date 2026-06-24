@@ -1,0 +1,38 @@
+# Core Domain Pack — Shared Link Types
+#
+# Link types connecting domain extension types to canonical core entities.
+# Used by osint, nhs-acute, aml, and future domain packs.
+
+extend schema @namespace(name: "core", version: "0.2.0")
+
+# ─── Person Extension Links ───
+
+type ProfileForPerson @linkType(from: "IntelSubject", to: "Person") {
+  id: ID! @primary
+}
+
+type PatientProfileForPerson @linkType(from: "Patient", to: "Person") {
+  id: ID! @primary
+}
+
+type ConsultantProfileForPerson @linkType(from: "Consultant", to: "Person") {
+  id: ID! @primary
+}
+
+# ─── Organization Extension Links ───
+
+type OrgProfileForOrganization @linkType(from: "IntelOrganization", to: "Organization") {
+  id: ID! @primary
+}
+
+# ─── Location Extension Links ───
+
+type LocationProfileForLocation @linkType(from: "IntelLocation", to: "Location") {
+  id: ID! @primary
+}
+
+# ─── Equipment Extension Links ───
+
+type EquipmentProfileForEquipment @linkType(from: "IntelEquipment", to: "Equipment") {
+  id: ID! @primary
+}

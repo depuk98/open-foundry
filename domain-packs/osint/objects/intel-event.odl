@@ -1,0 +1,57 @@
+# OSINT Domain Pack — Event ObjectType
+#
+# Models discrete events: battles, airstrikes, protests, diplomatic
+# meetings, humanitarian crises. Links to participants, locations,
+# equipment, and source reports.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type IntelEvent implements Identifiable & Auditable & Locatable & Temporal @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  eventDate: DateTime! @indexed
+  eventEndDate: DateTime
+  validFrom: DateTime
+  validTo: DateTime
+
+  type: EventType! @indexed
+  subtype: String @indexed
+  _normalizedName: String! @indexed
+  description: String! @searchable
+
+  location: GeoPoint!
+  locationName: String! @searchable
+  locationPrecision: String
+  country: Country! @indexed
+  region: String @indexed
+
+  fatalities: Int
+  fatalitiesCivilian: Int
+  casualtiesWounded: Int
+  displacedPersons: Int
+  casualtyConfidence: ConfidenceLevel
+
+  attributedTo: IntelOrganization @link(type: "EventAttributedToOrg", direction: OUTBOUND)
+  attributionConfidence: ConfidenceLevel
+  claimedBy: IntelOrganization @link(type: "EventClaimedByOrg", direction: OUTBOUND)
+  attributionNarrative: String @searchable
+
+  participants: [IntelSubject!]! @link(type: "PersonInvolvedInEvent", direction: INBOUND, history: true)
+  participantOrgs: [IntelOrganization!]! @link(type: "OrgInvolvedInEvent", direction: INBOUND, history: true)
+
+  equipmentUsed: [IntelEquipment!]! @link(type: "EquipmentUsedInEvent", direction: INBOUND, history: true)
+
+  sourceReports: [IntelReport!]! @link(type: "ReportedEvent", direction: INBOUND, history: true)
+  reportCount: Int @computed(fn: "countLinks", args: { type: "ReportedEvent" })
+
+  geolocationVerified: Boolean
+  geolocationProof: [URI!]
+  verifiedByAnalyst: String
+
+  impactAssessment: String @searchable
+  infrastructureDamaged: [IntelLocation!]! @link(type: "InfrastructureDamagedInEvent", direction: OUTBOUND)
+}

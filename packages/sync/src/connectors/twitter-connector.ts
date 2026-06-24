@@ -374,8 +374,8 @@ export class TwitterConnector implements Connector {
     if (!response.ok) {
       console.error(`[twitter-connector] ${operationName}: HTTP ${response.status} — ${response.statusText}`);
       if (response.status === 429) {
-        console.error(`[twitter-connector] Rate limited, waiting 5min...`);
-        await new Promise((r) => setTimeout(r, 300_000));
+        console.error(`[twitter-connector] Rate limited, waiting 2min...`);
+        await new Promise((r) => setTimeout(r, 120_000));
         const retry = await fetch(url, {
           method: "GET",
           headers,
@@ -454,29 +454,89 @@ function twitterDateToISO(date: string): string {
   }
 }
 
-function extractTweets(
+// ─── extractTweets helpers ─────────────────────────────────────────────
+
+/** Navigate the Twitter GraphQL response to the timeline instructions array. */
+function getTimelineInstructions(
   data: Record<string, unknown> | null,
-): TweetData[] {
-  if (!data) return [];
-
+): Array<Record<string, unknown>> | null {
+  if (!data) return null;
   const result = (data as Record<string, unknown>)["data"] as Record<string, unknown> | undefined;
-  if (!result) return [];
-
+  if (!result) return null;
   const user = result["user"] as Record<string, unknown> | undefined;
-  if (!user) return [];
-
+  if (!user) return null;
   const userResult = user["result"] as Record<string, unknown> | undefined;
-  if (!userResult) return [];
-
+  if (!userResult) return null;
   const timeline =
     (userResult["timeline"] as Record<string, unknown>) ??
     (userResult["timeline_v2"] as Record<string, unknown>);
-  if (!timeline) return [];
-
+  if (!timeline) return null;
   const tl = timeline["timeline"] as Record<string, unknown>;
-  if (!tl) return [];
+  if (!tl) return null;
+  return tl["instructions"] as Array<Record<string, unknown>>;
+}
 
-  const instructions = tl["instructions"] as Array<Record<string, unknown>>;
+/** Unwrap retweet nesting and extract legacy + core user from a tweet result node. */
+function extractTweetPayload(result: Record<string, unknown>): {
+  leg: Record<string, unknown>;
+  authorScreenName: string;
+  authorId: string;
+} | null {
+  const retweeted = result["retweeted_status_result"] as Record<string, unknown> | undefined;
+  const effectiveResult = retweeted
+    ? (retweeted["result"] as Record<string, unknown>) ?? result
+    : result;
+
+  // Try legacy path, then tweet.legacy (nested tweet format)
+  let leg = effectiveResult["legacy"] as Record<string, unknown> | undefined;
+  if (!leg) {
+    const innerTweet = effectiveResult["tweet"] as Record<string, unknown>;
+    leg = innerTweet?.["legacy"] as Record<string, unknown> | undefined;
+  }
+  if (!leg) return null;
+
+  const core = effectiveResult["core"] as Record<string, unknown>;
+  const userResults = core?.["user_results"] as Record<string, unknown>;
+  const userResultObj = userResults?.["result"] as Record<string, unknown>;
+  const userResultCore = userResultObj?.["core"] as Record<string, unknown> | undefined;
+
+  let screenName = (userResultCore?.["screen_name"] as string) ?? "";
+  const restId = (userResultObj?.["rest_id"] as string) ?? "";
+  if (!screenName && restId) {
+    console.warn(`[twitter-connector] authorScreenName empty for rest_id=${restId}, tweet_id=${leg["id_str"]}`);
+    screenName = restId;
+  }
+
+  return { leg, authorScreenName: screenName, authorId: restId };
+}
+
+/** Extract hashtags, URLs, and media URLs from a legacy tweet blob. */
+function extractMedia(leg: Record<string, unknown>): {
+  hashtags: string[];
+  urls: string[];
+  mediaUrls: string[];
+} {
+  const entities = (leg["entities"] as Record<string, unknown>) ?? {};
+  const hashtags = (
+    (entities["hashtags"] as Array<Record<string, unknown>>) ?? []
+  ).map((h) => h["text"] as string);
+  const urls = (
+    (entities["urls"] as Array<Record<string, unknown>>) ?? []
+  ).map((u) => u["expanded_url"] as string);
+
+  const extendedEntities = leg["extended_entities"] as Record<string, unknown>;
+  const mediaUrls = (
+    (extendedEntities?.["media"] as Array<Record<string, unknown>>) ?? []
+  ).map((m) => m["media_url_https"] as string);
+
+  return { hashtags, urls, mediaUrls };
+}
+
+/** Extract tweets from a Twitter GraphQL response. Under 30 lines. */
+function extractTweets(
+  data: Record<string, unknown> | null,
+): TweetData[] {
+  const instructions = getTimelineInstructions(data);
   if (!instructions) return [];
 
   const tweets: TweetData[] = [];
@@ -489,77 +549,34 @@ function extractTweets(
     for (const entry of entries) {
       const content = entry["content"] as Record<string, unknown>;
       if (!content) continue;
-
       const entryType = (content["entryType"] as string) ?? "";
-      if (entryType !== "TimelineTimelineItem" && entryType !== "TimelineTweet")
-        continue;
+      if (entryType !== "TimelineTimelineItem" && entryType !== "TimelineTweet") continue;
 
       const itemContent = content["itemContent"] as Record<string, unknown>;
       if (!itemContent) continue;
-
-      const tweetResults = itemContent["tweet_results"] as Record<
-        string,
-        unknown
-      >;
+      const tweetResults = itemContent["tweet_results"] as Record<string, unknown>;
       if (!tweetResults) continue;
-
       const tweetResult = tweetResults["result"] as Record<string, unknown>;
       if (!tweetResult) continue;
 
-      // For retweets, use the original tweet's data (nested in retweeted_status_result)
-      const retweeted = tweetResult["retweeted_status_result"] as Record<string, unknown> | undefined;
-      const effectiveResult = retweeted ? (retweeted["result"] as Record<string, unknown>) ?? tweetResult : tweetResult;
-
-      // Try legacy path, then tweet.legacy (for nested tweet format)
-      let leg = effectiveResult["legacy"] as Record<string, unknown> | undefined;
-      if (!leg) {
-        const innerTweet = effectiveResult["tweet"] as Record<string, unknown>;
-        leg = innerTweet?.["legacy"] as Record<string, unknown> | undefined;
-      }
-      if (!leg) continue;
-
-      // Extract core user info — Twitter API returns screen_name at result.core.screen_name
-      // (not at result.legacy.screen_name as in older API versions)
-      const core = effectiveResult["core"] as Record<string, unknown>;
-      const userResults = core?.["user_results"] as Record<string, unknown>;
-      const userResultObj = userResults?.["result"] as Record<string, unknown>;
-      const userResultCore = userResultObj?.["core"] as Record<string, unknown> | undefined;
-      let authorScreenName = (userResultCore?.["screen_name"] as string) ?? "";
-      const restId = (userResultObj?.["rest_id"] as string) ?? "";
-      if (!authorScreenName && restId) {
-        console.warn(`[twitter-connector] authorScreenName empty for rest_id=${restId}, tweet_id=${leg["id_str"]}`);
-        authorScreenName = restId;
-      }
-
-      const entities = (leg["entities"] as Record<string, unknown>) ?? {};
-      const hashtags = (
-        (entities["hashtags"] as Array<Record<string, unknown>>) ?? []
-      ).map((h) => h["text"] as string);
-      const urls = (
-        (entities["urls"] as Array<Record<string, unknown>>) ?? []
-      ).map((u) => u["expanded_url"] as string);
-
-      const extendedEntities = leg["extended_entities"] as Record<
-        string,
-        unknown
-      >;
-      const media = (
-        (extendedEntities?.["media"] as Array<Record<string, unknown>>) ?? []
-      ).map((m) => m["media_url_https"] as string);
+      const payload = extractTweetPayload(tweetResult);
+      if (!payload) continue;
+      const { leg, authorScreenName, authorId } = payload;
+      const media = extractMedia(leg);
 
       tweets.push({
         tweet_id: (leg["id_str"] as string) ?? "",
         text: (leg["full_text"] as string) ?? "",
-        author_id: (userResultObj?.["rest_id"] as string) ?? "",
+        author_id: authorId,
         author_handle: authorScreenName,
         created_at: (leg["created_at"] as string) ?? "",
         lang: (leg["lang"] as string) ?? "?",
         retweet_count: (leg["retweet_count"] as number) ?? 0,
         favorite_count: (leg["favorite_count"] as number) ?? 0,
         reply_count: (leg["reply_count"] as number) ?? 0,
-        hashtags,
-        urls,
-        media_urls: media,
+        hashtags: media.hashtags,
+        urls: media.urls,
+        media_urls: media.mediaUrls,
       });
     }
   }

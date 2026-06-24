@@ -1,10 +1,9 @@
 """Tests for ensemble_merge.py — Stage 2 merge logic."""
 
 import pytest
-import ner_pb2
+from ner_service.proto import ner_pb2
 
-# Import the module under test — need to set up proto stubs first
-from ensemble_merge import merge, MergedEntity, TYPE_RESOLUTION
+from ner_service.pipeline.ensemble import merge, MergedEntity, TYPE_RESOLUTION
 
 
 def make_gliner(text: str, etype: str, confidence: float = 0.8, context: str = "") -> dict:
@@ -12,7 +11,7 @@ def make_gliner(text: str, etype: str, confidence: float = 0.8, context: str = "
 
 
 def make_flair(text: str, flair_tag: str, confidence: float = 0.9, context: str = "") -> dict:
-    from flair_stage import FLAIR_TYPE_MAP
+    from ner_service.config import FLAIR_TAG_MAP as FLAIR_TYPE_MAP
     return {
         "text": text,
         "type": FLAIR_TYPE_MAP.get(flair_tag, flair_tag),

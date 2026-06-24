@@ -74,3 +74,5 @@ pyc files
 *.pyzwz
 *.pyzwzw
 *.pyzwzwz
+
+.venv/

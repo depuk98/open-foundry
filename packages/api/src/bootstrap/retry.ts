@@ -13,14 +13,11 @@ export async function withRetry(
   maxAttempts = 3,
   baseDelayMs = 1000,
 ): Promise<ExtractedEntity[]> {
-  let lastError: unknown = null;
-
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const result = await extractor.extract(text);
       return result;
     } catch (err) {
-      lastError = err;
       // Skip retry for INVALID_ARGUMENT (bad input won't improve on retry)
       const grpcStatus = (err as { code?: number })?.code;
       if (grpcStatus === 3) break; // INVALID_ARGUMENT

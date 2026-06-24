@@ -1,0 +1,15 @@
+# NHS Acute Domain Pack — Consultant ObjectType
+#
+# Per MVP Section 4.1.
+# Links to core Person for identity attributes (fullName).
+# NHS-specific staff attributes live here.
+
+extend schema @namespace(name: "nhs.acute", version: "0.2.0")
+
+type Consultant @objectType {
+  id: ID! @primary
+  person: Person! @link(type: "ConsultantProfileForPerson", direction: OUTBOUND)
+  gmcNumber: String @unique @indexed
+  specialty: String!
+  patients: [Patient!]! @link(type: "UnderCareOf", direction: INBOUND)
+}

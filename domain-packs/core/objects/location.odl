@@ -1,0 +1,26 @@
+# Core Domain Pack — Location ObjectType
+#
+# Canonical Location definition shared across all domain packs.
+# Domain-specific attributes (strategic value, military significance, storage capacity)
+# live in domain extension types that link to this entity.
+
+extend schema @namespace(name: "core", version: "0.2.0")
+
+type Location implements Identifiable & Auditable & Locatable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  name: String! @searchable(weight: 2.0)
+  aliases: [String!] @searchable
+  _normalizedName: String @indexed
+
+  location: GeoPoint!
+  address: String
+  boundingBox: JSON
+  country: Country! @indexed
+  region: String @indexed
+  adminDivision: String
+}

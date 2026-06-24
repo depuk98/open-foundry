@@ -4,8 +4,8 @@
   "private": true,
   "description": "Python gRPC sidecar for three-stage NER (GLiNER + Flair + phi4-mini)",
   "scripts": {
-    "build": "bash compile_proto.sh",
+    "build": "bash scripts/compile_proto.sh",
     "typecheck": "echo 'Python: use mypy or ruff check'",
-    "test": "python -m pytest tests/ -v"
+    "test": "uv run pytest"
   }
 }

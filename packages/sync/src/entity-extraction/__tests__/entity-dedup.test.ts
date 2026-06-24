@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { EntityDedupCache } from '../entity-dedup.js';
 
 interface MockPool {
-  query: () => Promise<{ rows: Array<Record<string, unknown>> }>;
+  query: (sql?: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 }
 
 describe('EntityDedupCache', () => {
@@ -61,6 +61,123 @@ describe('EntityDedupCache', () => {
 
     expect(await smallCache.resolve('Person', 'A', mockStorage as unknown as any, mockCtx as any)).toBeNull();
     expect(await smallCache.resolve('Person', 'B', mockStorage as unknown as any, mockCtx as any)).toBe('id-b');
+  });
+});
+
+describe('EntityDedupCache — remove', () => {
+  let cache: EntityDedupCache;
+  let mockStorage: { pool: MockPool };
+  let mockCtx: { tenantId: string };
+
+  beforeEach(() => {
+    cache = new EntityDedupCache(100);
+    mockStorage = { pool: { query: async () => ({ rows: [] }) } };
+    mockCtx = { tenantId: 'test-tenant' };
+  });
+
+  it('removes an existing key, making subsequent resolve a cache miss', async () => {
+    cache.set('Person', 'Zelensky', 'person-1');
+    expect(cache.size).toBe(1);
+
+    cache.remove('Person', 'Zelensky');
+    expect(cache.size).toBe(0);
+
+    const result = await cache.resolve('Person', 'Zelensky', mockStorage as any, mockCtx as any);
+    expect(result).toBeNull();
+  });
+
+  it('is a no-op when removing a key not in cache', async () => {
+    cache.set('Person', 'Zelensky', 'person-1');
+    expect(cache.size).toBe(1);
+
+    cache.remove('Person', 'NonExistent');
+    expect(cache.size).toBe(1);  // unchanged
+  });
+
+  it('removes only the matching type+name, leaving other entries intact', async () => {
+    cache.set('Person', 'Zelensky', 'person-1');
+    cache.set('Location', 'Kyiv', 'location-1');
+    cache.set('Organization', 'NATO', 'org-1');
+    expect(cache.size).toBe(3);
+
+    cache.remove('Person', 'Zelensky');
+    expect(cache.size).toBe(2);
+
+    expect(await cache.resolve('Person', 'Zelensky', mockStorage as any, mockCtx as any)).toBeNull();
+    expect(await cache.resolve('Location', 'Kyiv', mockStorage as any, mockCtx as any)).toBe('location-1');
+    expect(await cache.resolve('Organization', 'NATO', mockStorage as any, mockCtx as any)).toBe('org-1');
+  });
+
+  it('handles title-stripped Person keys in remove', async () => {
+    cache.set('Person', 'President Trump', 'id-1');
+    cache.set('Person', 'Zelensky', 'id-2');
+    expect(cache.size).toBe(2);
+
+    cache.remove('Person', 'Trump');
+    expect(cache.size).toBe(1);
+
+    expect(await cache.resolve('Person', 'Trump', mockStorage as any, mockCtx as any)).toBeNull();
+    expect(await cache.resolve('Person', 'Zelensky', mockStorage as any, mockCtx as any)).toBe('id-2');
+  });
+});
+
+describe('EntityDedupCache — verifyId', () => {
+  let cache: EntityDedupCache;
+  let mockStorage: { pool: MockPool };
+  let mockCtx: { tenantId: string };
+
+  beforeEach(() => {
+    cache = new EntityDedupCache(100);
+    mockCtx = { tenantId: 'test-tenant' };
+  });
+
+  it('returns true when the entity exists in DB', async () => {
+    let queryCalled = false;
+    mockStorage = {
+      pool: {
+        query: async (sql?: string, params?: unknown[]) => {
+          expect(sql!).toContain('SELECT "_id"');
+          expect(sql!).toContain('"_id" = $2');
+          expect(params![0]).toBe('test-tenant');
+          expect(params![1]).toBe('person-abc');
+          queryCalled = true;
+          return { rows: [{ _id: 'person-abc' }] };
+        },
+      },
+    };
+    const result = await cache.verifyId('Person', 'person-abc', mockStorage as any, mockCtx as any);
+    expect(result).toBe(true);
+    expect(queryCalled).toBe(true);
+  });
+
+  it('returns false when the entity does not exist in DB', async () => {
+    mockStorage = {
+      pool: {
+        query: async () => ({ rows: [] }),
+      },
+    };
+    const result = await cache.verifyId('Person', 'nonexistent-id', mockStorage as any, mockCtx as any);
+    expect(result).toBe(false);
+  });
+
+  it('returns false when the entity is soft-deleted', async () => {
+    mockStorage = {
+      pool: {
+        query: async () => ({ rows: [] }),  // query filters "_deleted_at" IS NULL
+      },
+    };
+    const result = await cache.verifyId('Person', 'deleted-id', mockStorage as any, mockCtx as any);
+    expect(result).toBe(false);
+  });
+
+  it('returns false on query error (table not found, etc.)', async () => {
+    mockStorage = {
+      pool: {
+        query: async () => { throw new Error('relation does not exist'); },
+      },
+    };
+    const result = await cache.verifyId('Person', 'some-id', mockStorage as any, mockCtx as any);
+    expect(result).toBe(false);
   });
 });
 

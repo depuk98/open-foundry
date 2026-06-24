@@ -1,0 +1,36 @@
+# OSINT Domain Pack — IntelEquipment ObjectType
+#
+# Intelligence-tracked equipment / weapon system (tank, artillery, aircraft,
+# naval vessel, drone, missile). Links to core Equipment for identity attributes.
+# Intel-specific capabilities, losses, and tracking data live here.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type IntelEquipment implements Identifiable & Auditable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  equipment: Equipment! @link(type: "EquipmentProfileForEquipment", direction: OUTBOUND)
+
+  category: EquipmentCategory! @indexed
+  natoReportingName: String @indexed
+  visualSignature: String @searchable
+  identifiers: JSON
+
+  capabilities: [String!] @searchable
+  vulnerabilities: [String!]
+
+  operators: [IntelOrganization!]! @link(type: "OrgOperatesEquipment", direction: INBOUND, history: true)
+
+  sightings: [IntelLocation!]! @link(type: "EquipmentSightedAtLocation", direction: OUTBOUND, history: true)
+  usedInEvents: [IntelEvent!]! @link(type: "EquipmentUsedInEvent", direction: OUTBOUND, history: true)
+
+  lossesConfirmed: Int
+  lossesClaimed: Int
+  lastLossRecorded: DateTime
+
+  mentionedIn: [IntelReport!]! @link(type: "MentionsEquipment", direction: INBOUND, history: true)
+}

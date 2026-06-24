@@ -41,14 +41,30 @@ export function generateObjectTableDDL(objectType: ObjectTypeDefinition, schema 
 );`;
   statements.push(mainTable);
 
+  // Idempotent column additions — ensures new columns on existing tables
+  // are added before indexes are created on them.
+  for (const prop of objectType.properties) {
+    statements.push(
+      `ALTER TABLE ${qualifiedTable} ADD COLUMN IF NOT EXISTS ${propertyColumn(prop)};`
+    );
+  }
+
   // History table
-  const historyTable = `CREATE TABLE IF NOT EXISTS ${pgIdent(schema)}.${pgIdent(tableName + '_history')} (
+  const historyQualifiedTable = `${pgIdent(schema)}.${pgIdent(tableName + '_history')}`;
+  const historyTable = `CREATE TABLE IF NOT EXISTS ${historyQualifiedTable} (
   "_history_id" BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   ${SYSTEM_COLUMNS.trim()},
   ${propertyCols},
   "_history_created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );`;
   statements.push(historyTable);
+
+  // Idempotent column additions for history table
+  for (const prop of objectType.properties) {
+    statements.push(
+      `ALTER TABLE ${historyQualifiedTable} ADD COLUMN IF NOT EXISTS ${propertyColumn(prop)};`
+    );
+  }
 
   // History table index on (_tenant_id, _id, _version)
   statements.push(

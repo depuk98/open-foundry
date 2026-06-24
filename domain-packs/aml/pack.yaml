@@ -18,14 +18,14 @@ provides:
 
 schema:
   - schema/enums.odl
-  - schema/customer.odl
-  - schema/account.odl
-  - schema/transaction.odl
-  - schema/alert.odl
-  - schema/case.odl
-  - schema/suspicious-activity-report.odl
   - schema/links.odl
   - schema/actions.odl
+  - objects/customer.odl
+  - objects/account.odl
+  - objects/transaction.odl
+  - observations/alert.odl
+  - observations/suspicious-activity-report.odl
+  - workflows/case.odl
 
 actions:
   - actions/flag-transaction.yaml

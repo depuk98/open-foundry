@@ -20,6 +20,11 @@ interface StorageWithPool {
  * In-memory LRU cache for entity deduplication.
  * Prevents creating duplicate Person/Org/Location/Equipment objects
  * when the same name appears across multiple reports.
+ *
+ * Tradeoff (ADR-012): purely in-memory — lost on container restart.
+ * The batchResolve() DB fallback mitigates cold starts with batch queries
+ * (N lookups → ≤4 queries), but near-duplicate detection relies on exact
+ * normalized_name match only (no fuzzy matching).
  */
 export class EntityDedupCache {
   private cache = new Map<string, CacheEntry>();
@@ -57,6 +62,41 @@ export class EntityDedupCache {
   set(type: string, name: string, entityId: string): void {
     const key = this.dedupKey(type, name);
     this.setRaw(key, entityId);
+  }
+
+  /** Remove a single entry from the cache. No-op if key not present. */
+  remove(type: string, name: string): void {
+    const key = this.dedupKey(type, name);
+    this.cache.delete(key);
+  }
+
+  /**
+   * Verify a cached entity ID still exists in the database.
+   * Lightweight SELECT _id query — used to detect stale cache entries
+   * after DB-cleaning operations that bypassed cache eviction.
+   */
+  async verifyId(
+    type: string,
+    id: string,
+    storage: StorageProvider,
+    ctx: RequestContext,
+  ): Promise<boolean> {
+    try {
+      const tableName = this.tableNameFor(type);
+      const pgStorage = storage as unknown as StorageWithPool;
+      if (!pgStorage.pool) return false;
+
+      const result = await pgStorage.pool.query(
+        `SELECT "_id" FROM public.${tableName}
+         WHERE "_tenant_id" = $1 AND "_id" = $2
+         AND "_deleted_at" IS NULL LIMIT 1`,
+        [ctx.tenantId, id],
+      );
+
+      return result.rows.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   /** Clear the cache (useful for testing). */
@@ -114,19 +154,29 @@ export class EntityDedupCache {
     for (const [table, items] of byTable) {
       try {
         const names = items.map(e => e.name);
-        const placeholders = names.map((_, i) => `$${i + 2}`);
-        const result = await pgStorage.pool.query(
-          `SELECT "_id", "_normalized_name" FROM public.${table}
-           WHERE "_tenant_id" = $1 AND "_normalized_name" = ANY($2)
-           AND "_deleted_at" IS NULL`,
-          [ctx.tenantId, names],
-        );
+        const linkTable = this.linkTableFor(items[0]!.type);
+        let sql: string;
+        if (linkTable) {
+          sql = `SELECT l."_from_id" AS "_id", t."normalized_name"
+ FROM public.${table} t
+ JOIN public.${linkTable} l
+   ON l."_to_id" = t."_id"
+   AND l."_tenant_id" = t."_tenant_id"
+   AND l."_deleted_at" IS NULL
+ WHERE t."_tenant_id" = $1 AND t."normalized_name" = ANY($2)
+   AND t."_deleted_at" IS NULL`;
+        } else {
+          sql = `SELECT "_id", "normalized_name" FROM public.${table}
+ WHERE "_tenant_id" = $1 AND "normalized_name" = ANY($2)
+   AND "_deleted_at" IS NULL`;
+        }
+        const result = await pgStorage.pool.query(sql, [ctx.tenantId, names]);
 
         // Build lookup map from DB results
         const dbMap = new Map<string, string>();
         for (const row of result.rows) {
-          if (row && row._id && row._normalized_name) {
-            dbMap.set(row._normalized_name as string, row._id as string);
+          if (row && row._id && row.normalized_name) {
+            dbMap.set(row.normalized_name as string, row._id as string);
           }
         }
 
@@ -176,12 +226,23 @@ export class EntityDedupCache {
       const pgStorage = storage as unknown as StorageWithPool;
       if (!pgStorage.pool) return null;
 
-      const result = await pgStorage.pool.query(
-        `SELECT "_id" FROM public.${tableName}
-         WHERE "_tenant_id" = $1 AND "_normalized_name" = $2
-         AND "_deleted_at" IS NULL LIMIT 1`,
-        [ctx.tenantId, name],
-      );
+      const linkTable = this.linkTableFor(type);
+      let sql: string;
+      if (linkTable) {
+        sql = `SELECT l."_from_id" AS "_id" FROM public.${tableName} t
+ JOIN public.${linkTable} l
+   ON l."_to_id" = t."_id"
+   AND l."_tenant_id" = t."_tenant_id"
+   AND l."_deleted_at" IS NULL
+ WHERE t."_tenant_id" = $1 AND t."normalized_name" = $2
+   AND t."_deleted_at" IS NULL LIMIT 1`;
+      } else {
+        sql = `SELECT "_id" FROM public.${tableName}
+ WHERE "_tenant_id" = $1 AND "normalized_name" = $2
+   AND "_deleted_at" IS NULL LIMIT 1`;
+      }
+
+      const result = await pgStorage.pool.query(sql, [ctx.tenantId, name]);
 
       if (result.rows.length > 0 && result.rows[0]) {
         return result.rows[0]._id as string;
@@ -192,18 +253,37 @@ export class EntityDedupCache {
     return null;
   }
 
+  // All table names are hardcoded constants — no user input is interpolated into SQL identifiers.
   private tableNameFor(type: string): string {
     switch (type) {
       case 'Person': return 'person';
       case 'Organization': return 'organization';
       case 'Location': return 'location';
       case 'Equipment': return 'equipment';
-      case 'Event': return 'event';
+      case 'Event': return 'intel_event';
       case 'WeaponSystem': return 'equipment';
       case 'MilitaryUnit': return 'organization';
       case 'ArmedGroup': return 'organization';
       case 'ConflictZone': return 'location';
       default: return type.toLowerCase();
+    }
+  }
+
+  /**
+   * Returns the link table to JOIN for translating domain IDs to Intel extension IDs.
+   * Returns null for types that don't need a JOIN (Event has no domain counterpart).
+   */
+  private linkTableFor(type: string): string | null {
+    switch (type) {
+      case 'Person': return 'profile_for_person';
+      case 'Organization':
+      case 'MilitaryUnit':
+      case 'ArmedGroup': return 'org_profile_for_organization';
+      case 'Location':
+      case 'ConflictZone': return 'location_profile_for_location';
+      case 'Equipment':
+      case 'WeaponSystem': return 'equipment_profile_for_equipment';
+      default: return null;  // Event and unknown types — no JOIN
     }
   }
 

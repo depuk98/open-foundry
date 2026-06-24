@@ -1,0 +1,34 @@
+# Core Domain Pack — Person ObjectType
+#
+# Canonical Person definition shared across all domain packs.
+# Domain-specific attributes (threat level, medical data, financial risk)
+# live in domain extension types that link to this entity.
+#
+# See: osint/objects/intel-subject.odl, nhs-acute/objects/patient.odl
+
+extend schema @namespace(name: "core", version: "0.2.0")
+
+type Person implements Identifiable & Auditable & Locatable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  fullName: String! @searchable(weight: 2.0)
+  aliases: [String!] @searchable
+  _normalizedName: String @indexed
+  title: String
+
+  nationality: Country @indexed
+  dateOfBirth: Date @sensitive
+  dateOfDeath: Date
+
+  emailAddresses: [String!] @sensitive
+  phoneNumbers: [String!] @sensitive
+
+  location: GeoPoint
+  address: String
+  lastKnownLocation: GeoPoint
+  lastKnownLocationName: String @searchable
+}

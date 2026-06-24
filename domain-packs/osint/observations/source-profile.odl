@@ -1,0 +1,45 @@
+# OSINT Domain Pack — SourceProfile ObjectType
+#
+# Models a source of intelligence — a Twitter account, Telegram channel,
+# RSS feed, or institutional publisher. Tracks credibility over time.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type SourceProfile implements Identifiable & Auditable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  handle: String! @unique @indexed
+  displayName: String @searchable
+  platform: String! @indexed
+  profileUrl: URI
+  description: String @searchable
+
+  categories: [SourceCategory!]! @indexed
+  primaryCountry: Country @indexed
+  languages: [String!]
+
+  credibilityScore: Float @constraint(expr: "value >= 0.0 && value <= 1.0")
+  credibilityBasis: String
+  reliabilityHistory: JSON
+
+  totalReports: Int @computed(fn: "countLinks", args: { type: "ReportedBy" })
+  corroboratedReports: Int
+  disputedReports: Int
+
+  knownBiases: [String!]
+  affiliations: [String!]
+  biasAssessment: String @searchable
+
+  isMonitored: Boolean @indexed
+  monitoringPriority: Int @default(value: "1")
+  lastActive: DateTime
+  followerCount: Int
+  status: SourceStatus!
+
+  personEntity: IntelSubject @link(type: "SourceProfileForPerson", direction: OUTBOUND)
+  orgEntity: IntelOrganization @link(type: "SourceProfileForOrganization", direction: OUTBOUND)
+}

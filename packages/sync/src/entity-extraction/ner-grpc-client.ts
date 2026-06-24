@@ -210,7 +210,7 @@ export class NerGrpcClient {
 
     this.client = new nerPackage.v1.NerService(
       this.address,
-      grpc.credentials.createInsecure(),
+      grpc.credentials.createInsecure(), // Internal Docker network only — TLS not required
     ) as unknown as NerServiceClient;
 
     return this.client;

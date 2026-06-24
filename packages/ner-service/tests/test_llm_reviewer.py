@@ -3,10 +3,10 @@
 import json
 
 import pytest
-import ner_pb2
+from ner_service.proto import ner_pb2
 from unittest.mock import patch, MagicMock
 
-from llm_reviewer import (
+from ner_service.llm.reviewer import (
     review, apply_review, should_review,
     _parse_llm_response, _build_prompt, _build_candidates_text,
 )
@@ -73,11 +73,10 @@ class TestShouldReview:
         assert not should_review([], 1, False)
 
     def test_config_disabled_skips(self):
-        import config
-        old = config.ENABLE_LLM
-        config.ENABLE_LLM = False
-        assert not should_review([], 1, True)
-        config.ENABLE_LLM = old
+        should_review_val = should_review
+        from unittest.mock import patch
+        with patch("ner_service.llm.reviewer.ENABLE_LLM", False):
+            assert not should_review([], 1, True)
 
     def test_low_confidence_triggers(self):
         candidates = [
@@ -188,7 +187,7 @@ class TestPromptBuilding:
 class TestReviewIntegration:
     """Integration tests with mocked httpx."""
 
-    @patch("llm_reviewer.httpx")
+    @patch("ner_service.llm.reviewer.httpx")
     def test_successful_review(self, mock_httpx):
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -208,7 +207,7 @@ class TestReviewIntegration:
         assert len(result) == 1
         assert result[0]["text"] == "Putin"
 
-    @patch("llm_reviewer.httpx")
+    @patch("ner_service.llm.reviewer.httpx")
     def test_timeout_returns_candidates_unchanged(self, mock_httpx):
         class FakeTimeout(Exception):
             pass
@@ -221,7 +220,7 @@ class TestReviewIntegration:
         result = review("Test text", candidates, timeout=1.0)
         assert result == candidates
 
-    @patch("llm_reviewer.httpx")
+    @patch("ner_service.llm.reviewer.httpx")
     def test_empty_candidates_returns_empty(self, mock_httpx):
         result = review("Text", [], timeout=1.0)
         assert result == []

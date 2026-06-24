@@ -54,24 +54,26 @@ export function cleanEntityName(name: string, config?: ValidationConfig): string
 // Validation Rules
 // ---------------------------------------------------------------------------
 
+const checkNoHandles: ValidationRule['check'] = (e) => {
+  const name = e.name;
+  if (name.includes(' ')) return { valid: true, entity: e };
+  if (/^[A-Z][a-z]+[A-Z]/.test(name)) {
+    return { valid: false, reason: `looks like a CamelCase handle: ${name}` };
+  }
+  if (/^[a-z][a-z0-9_]{2,}$/.test(name) && /[_0-9]/.test(name)) {
+    return { valid: false, reason: `looks like a lowercase handle with numbers/underscores: ${name}` };
+  }
+  // Lowercase-only names > 5 chars with no common name pattern are likely handles
+  if (/^[a-z]{6,}$/.test(name) && !/^(john|mark|omar|ivan|peter|adam|anna|lisa|sara|paul|mike|dave|alex|eric|nick|ryan|kyle)$/i.test(name)) {
+    return { valid: false, reason: `looks like a generated handle (>5 lowercase chars): ${name}` };
+  }
+  return { valid: true, entity: e };
+};
+
 const PERSON_RULES: ValidationRule[] = [
   {
     name: 'no-handles',
-    check: (e) => {
-      const name = e.name;
-      if (name.includes(' ')) return { valid: true, entity: e };
-      if (/^[A-Z][a-z]+[A-Z]/.test(name)) {
-        return { valid: false, reason: `looks like a CamelCase handle: ${name}` };
-      }
-      if (/^[a-z][a-z0-9_]{2,}$/.test(name) && /[_0-9]/.test(name)) {
-        return { valid: false, reason: `looks like a lowercase handle with numbers/underscores: ${name}` };
-      }
-      // Lowercase-only names > 5 chars with no common name pattern are likely handles
-      if (/^[a-z]{6,}$/.test(name) && !/^(john|mark|omar|ivan|peter|adam|anna|lisa|sara|paul|mike|dave|alex|eric|nick|ryan|kyle)$/i.test(name)) {
-        return { valid: false, reason: `looks like a generated handle (>5 lowercase chars): ${name}` };
-      }
-      return { valid: true, entity: e };
-    },
+    check: checkNoHandles,
   },
   {
     name: 'no-numbers',
@@ -112,7 +114,7 @@ const PERSON_RULES: ValidationRule[] = [
 const ORG_RULES: ValidationRule[] = [
   {
     name: 'no-handles',
-    check: PERSON_RULES[0]!.check,
+    check: checkNoHandles,
   },
   {
     name: 'no-roles',

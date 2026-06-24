@@ -1,0 +1,32 @@
+# OSINT Domain Pack — IntelSubject ObjectType
+#
+# Intelligence-tracked individual. Links to core Person for identity attributes
+# (fullName, dateOfBirth, nationality, contact info, location).
+# Intel-specific attributes live here.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type IntelSubject implements Identifiable & Auditable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  person: Person! @link(type: "ProfileForPerson", direction: OUTBOUND)
+
+  role: String @searchable
+  socialProfiles: JSON
+
+  threatLevel: ConfidenceLevel
+  isPersonOfInterest: Boolean @indexed
+  watchlistStatus: WatchlistStatus
+  dossier: String @searchable
+
+  primaryOrganization: IntelOrganization @link(type: "PersonBelongsToOrg", direction: OUTBOUND)
+  pastOrganizations: [IntelOrganization!]! @link(type: "PersonPreviouslyInOrg", direction: OUTBOUND, history: true)
+
+  sourceProfiles: [SourceProfile!]! @link(type: "SourceProfileForPerson", direction: INBOUND)
+  mentionedIn: [IntelReport!]! @link(type: "MentionsPerson", direction: INBOUND, history: true)
+  involvedIn: [IntelEvent!]! @link(type: "PersonInvolvedInEvent", direction: OUTBOUND, history: true)
+}

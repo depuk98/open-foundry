@@ -6,6 +6,11 @@
 # Field names MUST match the ObjectType schema (patient.odl, discharge-record.odl).
 # Virtual @link fields and system fields (_id, _redactedFields, etc.) are not
 # subject to redaction and should not be listed here.
+#
+# Note: Patient.name and Patient.dateOfBirth were removed during the Palantir
+# domain pack refactor. These fields now live on core Person, accessible via
+# the Patient.person link. Include 'person' in field permissions to control
+# access to the linked core Person record.
 
 - objectType: Patient
   alwaysVisible:
@@ -14,20 +19,15 @@
   fieldsByRelation:
     clinician:
       - nhsNumber
-      - name
-      - dateOfBirth
       - triageCategory
+      - presentingComplaint
     nurse:
       - nhsNumber
-      - name
-      - dateOfBirth
       - triageCategory
+      - presentingComplaint
     admin:
       - nhsNumber
-      - name
-      - dateOfBirth
-    viewer:
-      - name
+    viewer: []
 
 - objectType: DischargeRecord
   alwaysVisible:

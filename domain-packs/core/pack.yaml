@@ -3,6 +3,12 @@ version: 1.0.0
 namespace: openfoundry.core
 description: >
   Core domain pack shipped with every Open Foundry installation.
-  Provides base interfaces, value types, and custom scalars.
+  Provides base interfaces, shared entity types (Person, Organization,
+  Location, Equipment), and cross-domain link types.
 schema:
   - schema/core.odl
+  - objects/person.odl
+  - objects/organization.odl
+  - objects/location.odl
+  - objects/equipment.odl
+  - links.odl

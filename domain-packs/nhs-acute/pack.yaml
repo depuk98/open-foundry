@@ -18,13 +18,13 @@ provides:
 
 schema:
   - schema/enums.odl
-  - schema/patient.odl
-  - schema/ward.odl
-  - schema/bed.odl
-  - schema/consultant.odl
-  - schema/discharge-record.odl
   - schema/links.odl
   - schema/actions.odl
+  - objects/patient.odl
+  - objects/consultant.odl
+  - objects/ward.odl
+  - objects/bed.odl
+  - observations/discharge-record.odl
 
 actions:
   - actions/admit-patient.yaml

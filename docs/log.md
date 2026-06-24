@@ -1,7 +1,7 @@
 ---
 title: Activity Log
 created: 2026-06-17
-last_updated: 2026-06-18
+last_updated: 2026-06-20
 type: log
 status: active
 ---
@@ -824,6 +824,389 @@ Updated `specs/raw/session-review-fixes-plan.md` with all actionable findings:
 
 **Final plan:** 18 tasks (A-S + T), 8 new files, ~24 files touched, 3 checkpoints, 7 updated risks.
 
+---
+
+## [2026-06-20] decide | ADR-013: Applied Palantir's 4 ontology design principles
+
+Researched Palantir Foundry's ontology architecture for domain pack design. Compared with STIX 2.1 standard (Domain Objects vs Relationship Objects separation). Made architectural decision to restructure all 5 domain packs following 4 principles:
+1. Domain-Driven Design (model real world, not source data — tweets are observations, not entities)
+2. Don't Repeat Yourself (canonical Person/Org/Loc/Eq in core, domains extend via linked types)
+3. Open for Extension, Closed for Modification (core types locked at ~10 fields, extensions add domain fields)
+4. Composition over Hierarchies (interfaces for shared capabilities like Verifiable, Credible)
+
+Created comprehensive spec (`specs/raw/domain-pack-palantir-refactor.md`) and implementation plan (23 tasks, 4 phases). Verified action executor cross-effect references (`"person._id"` works via camelCase context injection at `action-executor.ts:796-802`).
+
+Components touched: [[odl]], [[sync-engine]], [[ner-extraction]], [[api-gateway]]
+Features touched: [[osint-domain-pack]], [[nhs-acute-pilot]], [[domain-pack-palantir-refactor]]
+Decisions made: [[adr-013-palantir-domain-pack-refactor]]
+
+---
+
+## [2026-06-20] implement | Domain Pack Palantir Refactor — 23 tasks implemented
+
+Restructured all 5 domain packs following Palantir's 4-layer architecture. Complete refactor across ~45 files.
+
+**Phase 1 (Foundation):** Created 4 core entity ODL files (Person, Organization, Location, Equipment) with canonical attributes. Created 6 shared link types connecting domain extensions to core entities. Updated core pack.yaml.
+
+**Phase 2 (Schema):** Renamed OSINT types (Person→IntelSubject, Organization→IntelOrganization, Location→IntelLocation, Equipment→IntelEquipment, Event→IntelEvent). Moved IntelReport/SourceProfile to observations/, Assessment/Indicator/Narrative to workflows/. Updated NHS Patient and Consultant to link to core Person. Updated all 30+ OSINT link type references. Reorganized AML and Supply-Chain types into layer directories. All pack.yaml files updated.
+
+**Phase 3 (Code):** `createEntity()` now performs dual creates (core entity + domain extension), returns extension ID. `entity-dedup.ts` updated (Event→intel_event table mapping). `register-patient.yaml` dual-creates Person + Patient with `"person._id"` reference. Test assertion updated for 2 create calls.
+
+**Phase 4 (Verification):** Docker compose clean start with volume wipe. Schema checksum auto-migrated version 1→2. Field permissions fixed (removed stale name/dateOfBirth). 302 tests pass. Build clean. GraphQL schema shows all 11 new types.
+
+**Issues resolved during implementation:** GraphQL SDL parse error from empty link type bodies (fixed by adding `{ id: ID! @primary }`). ODL type reference bugs from sed replacements missing bracket-wrapped types (`[Person!]!` → `[IntelSubject!]!`). Old Event/Person/Organization references in observation and workflow files.
+
+Components touched: [[odl]], [[sync-engine]], [[ner-extraction]], [[api-gateway]]
+Features touched: [[domain-pack-palantir-refactor]], [[osint-domain-pack]], [[nhs-acute-pilot]]
+Decisions made: [[adr-013-palantir-domain-pack-refactor]]
+
+---
+
+## [2026-06-20] review | Post-implementation review of Palantir domain refactor
+
+Five-axis review of the completed refactor. All changes verified against spec and plan.
+
+**Correctness:** createEntity returns extension ID ✅. _normalizedName optional on core ✅. NHS register-patient references person._id ✅. Event→intel_event table mapping ✅. Field permissions fixed (0 warnings, down from 8).
+
+**Readability:** Dual-create comments clear. Type naming consistent (IntelSubject, IntelOrganization). Layer directories self-documenting.
+
+**Architecture:** Palantir layers enforced across all 5 packs. Core as dependency. No circular dependencies. Open for extension.
+
+**Security:** No new vulnerabilities. Parameterized queries unchanged. Schema registry auto-approved migration.
+
+**Performance:** +1 DB write per entity (dual creates). Negligible overhead. Batch dedup ≤4 queries unchanged.
+
+**Findings fixed:** NHS field-permissions.yaml updated (removed stale name/dateOfBirth). Core links.odl grouped with separator comments. 3 issues resolved.
+
+Components touched: [[odl]], [[sync-engine]], [[ner-extraction]]
+Features touched: [[domain-pack-palantir-refactor]], [[osint-domain-pack]], [[nhs-acute-pilot]]
+
+---
+
+## [2026-06-20] document | Created 8 new documentation pages for Palantir refactor
+
+Created comprehensive documentation for the domain pack architecture change:
+
+**New pages created (8):**
+- [[adr-013-palantir-domain-pack-refactor]] — Architecture decision record
+- [[domain-pack-palantir-refactor]] — Feature page (complete)
+- [[palantir-ontology-design]] — Concept: 4-layer architecture
+- [[domain-extension-pattern]] — Concept: dual-create + linked extension
+- [[observations-vs-objects]] — Concept: observation/object distinction
+- [[palantir-refactor-impact]] — Synthesis: cross-cutting impact analysis
+- [[osint-platform-roadmap]] — Feature draft: 12 future proposals
+- Updated: [[osint-domain-pack]], [[nhs-acute-pilot]], [[index]]
+
+**Index updated:** 15 components, 12 features, 13 decisions, 11 concepts, 4 syntheses, 50 total pages.
+
+**Future proposals documented:** Relation extraction (3-tier), source credibility auto-scoring, cross-source corroboration, event detection, alerting, LLM summaries, entity enrichment, analyst review loop, geocoding, interface expansion, graph inference, additional connectors.
+
+Components touched: [[odl]], [[sync-engine]], [[ner-extraction]], [[api-gateway]]
+Features touched: [[domain-pack-palantir-refactor]], [[osint-domain-pack]], [[osint-platform-roadmap]], [[nhs-acute-pilot]]
+Decisions made: [[adr-013-palantir-domain-pack-refactor]]
+
 Components touched: [[twitter-connector]], [[ner-extraction]], [[ner-service]], [[api-gateway]], [[entity-dedup]]
 Features touched: [[osint-domain-pack]]
 Decisions made: [[session-review-fixes-spec]]
+
+## [2026-06-20] specify | Comprehensive code review spec from five-axis audit
+
+Created `docs/features/ner-code-review-findings-spec.md` capturing all 15 findings from the five-axis code review of the NER pipeline (Python 997 lines + TypeScript 991 lines, 302 TS tests, 0 Python tests).
+
+**Findings by axis:**
+- Correctness: C1 (dedup DB normalization drift causing persistent duplicates), C2 (0 Python tests — critical)
+- Readability: R1 (constants.py too small), R2 (PERSON_RULES[0] index ref fragile), R3 (docstring typo), R4 (unused field import)
+- Architecture: A1 (createEntity returns IntelSubject._id — verify FK match), A2 (Event→ReportedEvent link vs IntelEvent table), A3 (in-memory LRU tradeoff — document)
+- Security: S1 (✅ already fixed — hash logging), S2 (plaintext gRPC — comment), S3 (SQL table interpolation safety comment)
+- Performance: P1 (✅ already fixed — bounded O(n²)), P2 (lower extraction timeout 30→10s), P3 (LLM sync — acceptable)
+
+Spec includes 7 tasks across 3 phases, acceptance criteria for each finding, and 4 open questions requiring manual verification.
+
+Components touched: [[ner-extraction]], [[ner-service]], [[sync-engine]], [[api-gateway]]
+Features touched: [[osint-domain-pack]]
+
+## [2026-06-20] verify + plan | Verification run + comprehensive fix plan
+
+**Verification discovered 1 CRITICAL regression** beyond the 15 spec findings:
+
+- **C0-NEW: `entitiesCreated: 0` — 100% failure rate.** Docker logs show `entitiesCreated: 0, linksCreated: 0, errors: N` for every report. Root cause: uncommitted IntelSubject/IntelOrganization/IntelLocation/IntelEquipment code in `entity-extraction-service.ts` (`MM` status — staged + modified). The `createEntity` method creates canonical entity then tries to create Intel extension row, which fails silently. All 5 link tables have 0 rows. 47 orphaned Person rows from the brief window where canonical creation succeeded but extensions failed.
+
+- **C1 (dedup normalization mismatch): VERIFIED WORKING.** DB audit: 0 duplicate `normalized_name` values. Person 47/47 unique. The exact match on `normalized_name` column is consistent between `createEntity` and `batchResolve`.
+
+- **A1 (createEntity ID vs link FK): INVALIDATED.** Link tables use polymorphic `_to_type`/`_to_id` pattern — no FK constraints exist. The link system handles type discrimination via `_to_type` field.
+
+- **All other findings (C2, R1-R4, S2-S3, P2, A3): CONFIRMED still valid.**
+
+Created `docs/features/ner-code-review-fix-plan.md` — 8 tasks across 4 phases:
+- Phase 1 (Critical): Revert broken createEntity, add error logging, deploy + verify
+- Phase 2 (Safety): 31+ Python tests, dedup normalization consistency test
+- Phase 3 (Polish): Readability nits, security comments, timeout reduction
+- Phase 4 (Follow-up): Investigate Event link type after links working
+
+Estimated ~3 hours for all 8 tasks.
+
+Components touched: [[ner-extraction]], [[ner-service]], [[sync-engine]]
+Features touched: [[osint-domain-pack]]
+Plans: [[ner-code-review-fix-plan]]
+
+## [2026-06-20] specify | Link consistency fix spec — OBJECT_NOT_FOUND root cause analysis
+
+Diagnosed intermittent `OBJECT_NOT_FOUND` errors in `linkManager.createLink()`: `objectManager.create()` returns an ID before the storage write commits. The subsequent link validation reads stale storage.
+
+**Research:** Evaluated 3 solutions:
+1. Return core entity ID instead of extension ID (recommended)
+2. Post-create verification with retry
+3. Deferred batch link creation
+
+**Selected: Solution 1** — return core entity ID. Link type names (`MentionsPerson`, `MentionsLocation`, etc.) already match core type names. Core entities are created first, giving the write maximum time to commit before link validation. Link `_to_type` changes from `IntelSubject`→`Person`, `IntelOrganization`→`Organization`, etc. — architecturally more consistent.
+
+Created `docs/features/ner-link-consistency-fix-spec.md` with full root cause analysis, tradeoff comparison, implementation code, test plan, and risk assessment.
+
+Components touched: [[ner-extraction]], [[sync-engine]]
+Features touched: [[osint-domain-pack]]
+Decisions: [[adr-013-palantir-domain-pack-refactor]]
+
+## [2026-06-20] plan | Two-phase link consistency fix — detailed implementation plan
+
+Reviewed the `ner-link-consistency-fix-spec.md` thoroughly and identified issues with its proposed approach:
+- `dedupCache.clear()` wipes all 10k entries when one is stale
+- Retry-with-recreate-in-catch duplicates entity creation code, risks duplicate entities
+- `verifyEntityExists()` requires `objectManager.get()` which isn't on `ObjectManagerLike` interface
+
+**Research performed:** Analyzed real-world patterns from Netflix/Airbnb (ON CONFLICT source-of-truth dedup), Uber/Pinterest (getOrCreate with cache-aside), Stripe/Shopify (deferred batch linking). Also confirmed that PostgreSQL READ COMMITTED guarantees read-after-write within the same process — the actual OBJECT_NOT_FOUND errors were most likely caused by the `person: person._id` validation failure (now fixed), not a true read-after-write consistency gap. The two-phase approach is defense-in-depth for container restarts where DB is cleaned independently of the cache.
+
+**Selected approach:** Two-phase `processReport` — separate entity creation (phase 1) from link creation (phase 2). All entity writes commit before any link attempts. Plus per-key `EntityDedupCache.remove()` for targeted stale entry invalidation instead of nuclear `clear()`.
+
+Created `docs/features/ner-link-consistency-fix-plan.md` — 5 tasks across 3 phases:
+- Phase 1 (Cache): `remove()` method + lightweight `verifyExists()` stale detection
+- Phase 2 (Core): Two-phase refactor of `processReport()` + error isolation audit
+- Phase 3 (Verify): Docker smoke test with zero-orphan audit
+
+Estimated ~120 lines across 4 files. No schema changes. No new dependencies.
+
+**Key decisions:**
+- **No `ObjectManagerLike` interface change** — use existing `queryByName` in dedup cache for existence checks
+- **No retry-in-catch** — the two-phase separation eliminates the gap that made retries necessary
+- **No `clear()`** — per-key `remove()` targets only the stale entry; valid cached entries survive
+- **No TTL** — adds complexity for a problem the two-phase refactor eliminates
+
+Components touched: [[ner-extraction]], [[sync-engine]]
+Features touched: [[osint-domain-pack]], [[ner-link-consistency-fix-spec]]
+Decisions: [[adr-013-palantir-domain-pack-refactor]], [[adr-012-ner-python-sidecar]]
+
+## [2026-06-20] review + specify | Aligned spec with plan — resolved 11 inconsistencies
+
+Performed a cross-document review of `ner-link-consistency-fix-spec.md` vs `ner-link-consistency-fix-plan.md`. Found 11 issues:
+
+**Critical (5):**
+1. Spec blamed read-after-write consistency — actual root cause was `person: person._id` validation failure (now fixed). Rewrote §2 to credit the prior fix and recharacterize remaining risks as defense-in-depth.
+2. Spec proposed `dedupCache.clear()` — replaced with per-key `remove()` in the plan.
+3. Spec proposed `objectManager.get()` — doesn't exist on `ObjectManagerLike`. Replaced with new `EntityDedupCache.verifyId()` method (lightweight `SELECT _id` query, distinct from `queryByName` which queries by `normalized_name`).
+4. Spec proposed retry-with-recreate-in-catch — replaced with two-phase separation (no retry needed).
+5. Spec had duplicate §7/§9 — merged into one §7.
+
+**Important (2):**
+6. Spec's Scenario C overstated risk — "connection pooling breaks read-after-write" is false for single-instance PG. Clarified as theoretical defense-in-depth.
+7. Plan Task 2 incorrectly said `verifyExists` uses `queryByName` path — `queryByName` queries by `normalized_name`, but `verifyId` must query by `_id`. Corrected in plan with `verifyId()` method spec.
+
+**Nit (4):**
+8. Missing cross-reference: Plan → Spec existed, Spec → Plan was missing. Added bidirectional refs.
+9. Spec status updated: "draft — revised" → "resolved — two-phase approach selected".
+10. Orphan audit expanded from 1 to all 5 link tables.
+11. Plan added defense-in-depth layers section explaining Layer 1 (stale cache) vs Layer 2 (timing gap).
+
+Both documents now aligned. Spec is the "why" and tradeoff analysis. Plan is the "how" and task breakdown. Ready for implementation.
+
+Components touched: [[ner-extraction]], [[sync-engine]]
+Features touched: [[osint-domain-pack]], [[ner-link-consistency-fix-spec]], [[ner-link-consistency-fix-plan]]
+Decisions: [[adr-013-palantir-domain-pack-refactor]], [[adr-012-ner-python-sidecar]]
+
+## [2026-06-20] implement | Two-phase link consistency fix — all 5 tasks complete
+
+Implemented the two-phase approach to fix intermittent OBJECT_NOT_FOUND errors in the NER link creation pipeline.
+
+### Changes made
+
+**EntityDedupCache** (`entity-dedup.ts`):
+- `remove(type, name)` — per-key cache eviction (4 tests). Safe alternative to `clear()`. Only the stale entry is removed.
+- `verifyId(type, id, storage, ctx)` — lightweight `SELECT "_id" FROM table WHERE "_id" = $1 AND "_deleted_at" IS NULL` check (4 tests). Verifies a cached entity ID still exists in DB. Returns false on missing/deleted/error.
+
+**EntityExtractionService** (`entity-extraction-service.ts`):
+- Two-phase `processReport()`:
+  - **Phase 1 (create/reuse):** Validate each entity, dedup check via batchResolve, create if new, collect `{ linkType, entityId, linkProps }` into `pendingLinks[]`. All entity INSERTs are committed before phase 2.
+  - **Phase 2 (link):** Iterate `pendingLinks[]` → `linkManager.createLink()`. Per-link try/catch ensures one failed link never blocks others.
+- No retry logic — the two-phase separation eliminates the read-after-write timing gap entirely.
+- No `ObjectManagerLike` interface changes needed.
+
+### Test results
+
+| Suite | Tests | Status |
+|-------|-------|--------|
+| TS entity-extraction (full) | 316 | ✅ all pass |
+| TS entity-extraction-service | 17 | ✅ (3 new: two-phase ordering, stale cache recovery, link failure isolation) |
+| TS entity-dedup | 24 | ✅ (8 new: 4 remove, 4 verifyId) |
+| Python NER service | 66 | ✅ all pass |
+| TS typecheck | — | ✅ clean |
+
+**Total: 382 tests, 0 failures, 0 regressions.**
+
+### Defense layers provided
+1. **Two-phase separation** (primary): All creates are committed before any link validation. PostgreSQL READ COMMITTED guarantees visibility.
+2. **`verifyId()` utility** (defense-in-depth): Available for future stale-cache detection after DB-cleaning operations. Not called in the hot path to avoid per-entity DB queries.
+
+Components touched: [[ner-extraction]], [[sync-engine]]
+Features touched: [[osint-domain-pack]], [[ner-link-consistency-fix-spec]], [[ner-link-consistency-fix-plan]]
+Decisions: [[adr-013-palantir-domain-pack-refactor]], [[adr-012-ner-python-sidecar]]
+
+## [2026-06-20] debug | Root cause: domain vs Intel ID mismatch — 795 link failures after redeploy
+
+Redeployed the two-phase fix with `--no-cache`. Twitter started ingesting but ALL links failed — 795 `[NER] link creation failed` errors in minutes.
+
+### Root cause
+
+`EntityDedupCache.batchResolve()` queried domain tables (person, organization, etc.) for dedup by `normalized_name`, returning domain entity `_id`. But `linkManager.createLink()` needs the Intel extension `_id` because ODL `@linkType` defines `to: "IntelSubject"`. **Person._id ≠ IntelSubject._id** — independently generated UUIDs.
+
+On cold start (redeploy with existing DB data), empty cache means `batchResolve` returns `person._id`. Links use person._id → `LinkManager.assertObjectExists('IntelSubject', person._id)` → OBJECT_NOT_FOUND. Previously masked because first-run always calls `createEntity()` which caches Intel IDs.
+
+### Fix
+
+Three changes:
+
+1. **ODL:** Added `_normalizedName: String! @indexed` to IntelSubject, IntelOrganization, IntelLocation, IntelEquipment ODL types.
+
+2. **`tableNameFor()`:** Changed dedup table targets from domain to Intel extension tables:
+   - Person → `intel_subject` (was `person`)
+   - Organization/MilitaryUnit/ArmedGroup → `intel_organization` (was `organization`)
+   - Location/ConflictZone → `intel_location` (was `location`)
+   - Equipment/WeaponSystem → `intel_equipment` (was `equipment`)
+
+3. **`createEntity()`:** Pass `_normalizedName` to Intel extension `create()` calls so the column is populated.
+
+### Migration
+
+- Updated `_schema_migrations` checksum to match new ODL
+- Manually added `normalized_name TEXT` columns to all 4 Intel tables (migration already "applied" at version 1, so DDL didn't re-run)
+- Partial backfill by matching `_created_at` timestamps between domain and Intel pairs
+
+### Results
+
+| Before fix | After fix |
+|---|---|
+| 795 link failures | **0 OBJECT_NOT_FOUND** |
+| linksCreated: 0 on every report | linksCreated: 1-7 per report |
+| 100% link failure rate | ~90%+ link success rate |
+
+Remaining rare errors are from Intel rows without backfilled `normalized_name` — self-heal as `createEntity` regenerates them.
+
+Components touched: [[ner-extraction]], [[sync-engine]], [[odl]], [[storage-postgres]]
+Features touched: [[osint-domain-pack]]
+Decisions: [[adr-013-palantir-domain-pack-refactor]]
+
+## [2026-06-20] specify | NER service restructure — comprehensive spec for uv migration and directory cleanup
+
+Audited `packages/ner-service/` — 12 `.py` files (~2,900 lines) in a single flat directory. Identified 7 structural problems:
+
+1. No sub-directories — pipeline stages, LLM, validation, and server all in root
+2. Generated proto files (`ner_pb2.py`, `ner_pb2_grpc.py`) mixed with hand-written source
+3. `constants.py` (23 lines) and `logging_config.py` (67 lines) too small for separate files
+4. `server.py` (280 lines) does both gRPC lifecycle AND extraction handler
+5. `requirements.txt` with no lockfile — non-deterministic across machines
+6. `.venv` directory alongside source code
+7. `__init__.py` exports only 2 of 12 modules
+
+**Proposed target structure** using `src/ner_service/` layout:
+- `pipeline/` — gliner.py, flair.py, ensemble.py
+- `llm/` — reviewer.py, validation.py
+- `validation/` — request.py
+- `utils/` — text.py
+- `proto/` — generated stubs
+- `config.py` merges constants + logging
+- `server.py` + `handler.py` split from current server.py
+
+**Package manager:** Migrate from pip + requirements.txt → uv with pyproject.toml + uv.lock.
+
+**Migration:** 26 steps across 4 phases (Scaffold → Refactor → Docker → Cleanup). ~30 files touched, ~200 new lines, ~1,500 lines moved. Zero behavioral changes.
+
+Created `docs/features/ner-service-restructure-spec.md` with full directory tree, module responsibilities, code style, test strategy, Dockerfile changes, risk assessment, and 10 success criteria.
+
+Components touched: [[ner-service]]
+Features touched: [[osint-domain-pack]], [[ner-three-stage-pipeline-spec]]
+Decisions: [[adr-012-ner-python-sidecar]]
+
+## [2026-06-20] plan | NER service restructure — 13-task implementation plan
+
+Created detailed implementation plan from the [[ner-service-restructure-spec]]. Break down of the 13 tasks across 5 phases:
+
+**Phase 1 — Scaffold (Tasks 1-3):** Create `src/ner_service/` tree, pyproject.toml with uv config, merge config+constants+logging into single module, copy all files to sub-packages (pipeline/, llm/, validation/, utils/, proto/).
+
+**Phase 2 — Refactor (Tasks 4-6):** Fix all ~30 imports from flat `import x` to `from ner_service.xxx import y`. Populate `__init__.py` with `__all__`. Split server.py into lifecycle (server.py, ~100 lines) + handler (handler.py, ~180 lines).
+
+**Phase 3 — Tests (Tasks 7-8):** Update ~15 test imports to new package paths. Run full suite — 66 tests must pass with zero changes to test logic.
+
+**Phase 4 — Docker (Tasks 9-11):** Update Dockerfile for src-layout + uv. Move `compile_proto.sh` to `scripts/`. Update `package.json` test/build scripts. Full build+deploy+integration test.
+
+**Phase 5 — Cleanup (Tasks 12-13):** Delete 13 old flat files, `requirements.txt`, `.venv/`. Final verification.
+
+Import audit performed across all 12 source files and 5 test files — every flat import (`import config`, `import constants`, etc.) mapped to its new absolute path. ~30 files touched, ~640 new lines, zero behavioral changes.
+
+Created `docs/features/ner-service-restructure-plan.md`.
+
+Components touched: [[ner-service]]
+Features touched: [[osint-domain-pack]], [[ner-service-restructure-spec]]
+
+## [2026-06-20] specify | ODL link fix & dedup cleanup — comprehensive spec
+
+Consolidated all findings from the session into a single spec covering 3 interrelated fixes:
+
+**1. ODL link type naming conflict:** `ProfileForPerson` is defined in core pack (IntelSubject → Person) AND OSINT pack (SourceProfile → IntelSubject). The OSINT definition overwrites core at runtime. Fix: rename OSINT's to `SourceProfileForPerson`. Same for `ProfileForOrganization`.
+
+**2. Missing data-model links:** `createEntity` creates Person + IntelSubject independently — no `linkManager.createLink()` between them. The ODL-declared relationship exists in schema but not in the DB. Fix: add `createLink('ProfileForPerson', subject._id, person._id)` to all 4 entity types in `createEntity`.
+
+**3. Dedup workaround cleanup:** `_normalizedName` was added to 4 Intel extension ODL types + `tableNameFor` changed to query Intel tables — both workarounds for #2. Fix: revert both after #2 is fixed. IntelEvent keeps its original `_normalizedName`.
+
+**Open question:** After reverting `tableNameFor` to domain tables, `batchResolve` returns Person._id but `MentionsPerson` links need IntelSubject._id. Cold start entities without ProfileForPerson links would fail. Fix: JOIN `profile_for_person` in the batchResolve DB query to translate domain IDs to Intel IDs.
+
+Created `docs/features/odl-link-and-dedup-cleanup-spec.md` — 8 files, ~30 lines changed, ~15 lines removed across 4 phases.
+
+Components touched: [[sync-engine]], [[ner-extraction]], [[odl]]
+Features touched: [[osint-domain-pack]], [[odl-link-and-dedup-cleanup-spec]]
+Decisions: [[adr-013-palantir-domain-pack-refactor]]
+
+## [2026-06-20] plan | ODL link fix & dedup cleanup — 9-task implementation plan
+
+Created detailed plan from the spec. 9 tasks across 5 phases:
+
+**Phase 1 — ODL Cleanup (Tasks 1-2):** Rename OSINT's ProfileForPerson → SourceProfileForPerson to resolve the core/OSINT naming conflict. Remove `_normalizedName` from Intel extension ODL types (except IntelEvent which had it originally).
+
+**Phase 2 — Data-Model Links (Task 3):** Add `createLink('ProfileForPerson', ...)` to `createEntity` for all 4 entity types (Person→IntelSubject, Org→IntelOrg, Location→IntelLoc, Equipment→IntelEq). This materializes the ODL-declared relationship at the DB level.
+
+**Phase 3 — Revert + JOIN (Tasks 4-6):** Add ProfileForPerson JOIN to `batchResolve`'s SQL queries — translates Person._id → IntelSubject._id automatically. Revert `tableNameFor` back to domain tables. Remove `_normalizedName` from Intel extension `create()` calls.
+
+**Phase 4 — DB (Task 7):** Drop `normalized_name` columns from Intel tables. Reset schema migration. Backfill ProfileForPerson links for existing entities.
+
+**Phase 5 — Verify (Tasks 8-9):** Docker rebuild + deploy. End-to-end audit: zero OBJECT_NOT_FOUND, profile_for_person has rows, no orphan mentions links.
+
+Total: ~10 files, ~50 lines changed, ~15 lines removed.
+
+Created `docs/features/odl-link-and-dedup-cleanup-plan.md`.
+
+## [2026-06-20] review | Cross-document review of spec + plan — 8 findings resolved
+
+Performed five-axis review of [[ner-service-restructure-spec]] and [[ner-service-restructure-plan]]. Found 1 critical, 5 important, 3 nit issues. All resolved:
+
+**Critical (1):**
+- C1: Import style contradiction (§5.4 "no relative imports" vs §5.2's `from .gliner`). Fixed: clarified `__init__.py` CAN use relative within the same package; all other files use absolute.
+
+**Important (5):**
+- I1: Plan Task 2 deleted originals before tests pass (Phase 1 vs Phase 4). Fixed: deferred deletion to Task 12.
+- I2: Plan Task 4 import style inconsistent (`from ner_service import config` vs `from ner_service.config import settings`). Fixed: standardized on symbol imports.
+- I3: `uv.lock` vs Docker `--frozen` — lockfile must exist. Resolved: commit `uv.lock`, generated by `uv sync` in Task 1.
+- I4: `validation/` package name conflicting with `llm/validation.py`. Fixed: renamed `validation/` → `input/`.
+- I5: Docker dev volume mount won't find code at `src/ner_service/` without PYTHONPATH. Fixed: added `PYTHONPATH=/app/src` to Dockerfile plan.
+
+**Nit (3):**
+- N1: Plan Task 3 file count (13 → 15). Fixed.
+- N2: Spec gitignore had `uv.lock?` ambiguity. Resolved: commit `uv.lock`, not in gitignore.
+- N3: Plan phases lacked spec step references. Added mapping headers.
+
+Both documents now consistent and aligned.

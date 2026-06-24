@@ -18,18 +18,18 @@ provides:
 
 schema:
   - schema/enums.odl
-  - schema/intel-report.odl
-  - schema/source-profile.odl
-  - schema/person.odl
-  - schema/organization.odl
-  - schema/location.odl
-  - schema/event.odl
-  - schema/equipment.odl
-  - schema/assessment.odl
-  - schema/indicator.odl
-  - schema/narrative.odl
   - schema/links.odl
   - schema/actions.odl
+  - objects/intel-subject.odl
+  - objects/intel-organization.odl
+  - objects/intel-location.odl
+  - objects/intel-event.odl
+  - objects/intel-equipment.odl
+  - observations/intel-report.odl
+  - observations/source-profile.odl
+  - workflows/assessment.odl
+  - workflows/indicator.odl
+  - workflows/narrative.odl
 
 actions:
   - actions/corroborate-report.yaml

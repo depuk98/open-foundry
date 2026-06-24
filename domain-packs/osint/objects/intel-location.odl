@@ -1,0 +1,35 @@
+# OSINT Domain Pack — IntelLocation ObjectType
+#
+# Intelligence-tracked location (city, base, airfield, port, border crossing,
+# infrastructure node). Links to core Location for identity attributes.
+# Intel-specific strategic and military attributes live here.
+
+extend schema @namespace(name: "osint", version: "0.2.0")
+
+type IntelLocation implements Identifiable & Auditable & Locatable @objectType {
+  id: ID! @primary
+  createdAt: DateTime! @readonly
+  createdBy: String! @readonly
+  updatedAt: DateTime! @readonly
+  updatedBy: String! @readonly
+
+  location: Location! @link(type: "LocationProfileForLocation", direction: OUTBOUND)
+
+  strategicValue: String @searchable
+  controlledBy: IntelOrganization @link(type: "OrgControlsLocation", direction: INBOUND)
+  controlConfidence: ConfidenceLevel
+  contestedBy: [String!]
+
+  isMilitaryBase: Boolean @indexed
+  baseType: String
+  facilities: [String!]
+
+  eventsHere: [IntelEvent!]! @link(type: "OccurredAtLocation", direction: INBOUND, history: true)
+  equipmentSighted: [IntelEquipment!]! @link(type: "EquipmentSightedAtLocation", direction: INBOUND, history: true)
+
+  mentionedIn: [IntelReport!]! @link(type: "MentionsLocation", direction: INBOUND, history: true)
+
+  isActiveFrontline: Boolean @indexed
+  populationEstimate: Int
+  status: LocationStatus!
+}

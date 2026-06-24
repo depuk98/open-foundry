@@ -15,25 +15,25 @@ type ReportedBy @linkType(from: "IntelReport", to: "SourceProfile", cardinality:
 
 # ─── Report → Entities Extracted ───
 
-type MentionsPerson @linkType(from: "IntelReport", to: "Person", cardinality: MANY_TO_MANY) {
+type MentionsPerson @linkType(from: "IntelReport", to: "IntelSubject", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   context: String
   confidence: Float
 }
 
-type MentionsOrganization @linkType(from: "IntelReport", to: "Organization", cardinality: MANY_TO_MANY) {
+type MentionsOrganization @linkType(from: "IntelReport", to: "IntelOrganization", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   context: String
   confidence: Float
 }
 
-type MentionsLocation @linkType(from: "IntelReport", to: "Location", cardinality: MANY_TO_MANY) {
+type MentionsLocation @linkType(from: "IntelReport", to: "IntelLocation", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   context: String
   confidence: Float
 }
 
-type MentionsEquipment @linkType(from: "IntelReport", to: "Equipment", cardinality: MANY_TO_MANY) {
+type MentionsEquipment @linkType(from: "IntelReport", to: "IntelEquipment", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   context: String
   confidence: Float
@@ -41,7 +41,7 @@ type MentionsEquipment @linkType(from: "IntelReport", to: "Equipment", cardinali
 
 # ─── Report → Event ───
 
-type ReportedEvent @linkType(from: "IntelReport", to: "Event", cardinality: MANY_TO_MANY) {
+type ReportedEvent @linkType(from: "IntelReport", to: "IntelEvent", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   relationshipType: String
 }
@@ -66,21 +66,21 @@ type Contradicts @linkType(from: "IntelReport", to: "IntelReport", cardinality: 
 
 # ─── Person → Organization ───
 
-type PersonBelongsToOrg @linkType(from: "Person", to: "Organization", cardinality: MANY_TO_ONE) {
+type PersonBelongsToOrg @linkType(from: "IntelSubject", to: "IntelOrganization", cardinality: MANY_TO_ONE) {
   id: ID! @primary
   role: String
   since: DateTime
   until: DateTime
 }
 
-type PersonPreviouslyInOrg @linkType(from: "Person", to: "Organization", cardinality: MANY_TO_MANY) {
+type PersonPreviouslyInOrg @linkType(from: "IntelSubject", to: "IntelOrganization", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   role: String
   from: DateTime
   to: DateTime
 }
 
-type KeyPersonnelInOrg @linkType(from: "Organization", to: "Person", cardinality: MANY_TO_MANY) {
+type KeyPersonnelInOrg @linkType(from: "IntelOrganization", to: "IntelSubject", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   position: String!
   since: DateTime
@@ -88,23 +88,23 @@ type KeyPersonnelInOrg @linkType(from: "Organization", to: "Person", cardinality
 
 # ─── Source Profile → Entity ───
 
-type ProfileForPerson @linkType(from: "SourceProfile", to: "Person", cardinality: MANY_TO_ONE) {
+type SourceProfileForPerson @linkType(from: "SourceProfile", to: "IntelSubject", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
 
-type ProfileForOrganization @linkType(from: "SourceProfile", to: "Organization", cardinality: MANY_TO_ONE) {
+type SourceProfileForOrganization @linkType(from: "SourceProfile", to: "IntelOrganization", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
 
 # ─── Organization Hierarchy ───
 
-type OrgSubordinateTo @linkType(from: "Organization", to: "Organization", cardinality: MANY_TO_ONE) {
+type OrgSubordinateTo @linkType(from: "IntelOrganization", to: "IntelOrganization", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
 
 # ─── Organization → Equipment ───
 
-type OrgOperatesEquipment @linkType(from: "Organization", to: "Equipment", cardinality: MANY_TO_MANY) {
+type OrgOperatesEquipment @linkType(from: "IntelOrganization", to: "IntelEquipment", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   quantity: Int
   variant: String
@@ -115,53 +115,53 @@ type OrgOperatesEquipment @linkType(from: "Organization", to: "Equipment", cardi
 
 # ─── Organization → Location ───
 
-type OrgControlsLocation @linkType(from: "Organization", to: "Location", cardinality: MANY_TO_MANY) {
+type OrgControlsLocation @linkType(from: "IntelOrganization", to: "IntelLocation", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   since: DateTime
   until: DateTime
   confidence: ConfidenceLevel
 }
 
-type OrgHQAtLocation @linkType(from: "Organization", to: "Location", cardinality: MANY_TO_ONE) {
+type OrgHQAtLocation @linkType(from: "IntelOrganization", to: "IntelLocation", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
 
 # ─── Event Relationships ───
 
-type OccurredAtLocation @linkType(from: "Event", to: "Location", cardinality: MANY_TO_ONE) {
+type OccurredAtLocation @linkType(from: "IntelEvent", to: "IntelLocation", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
 
-type PersonInvolvedInEvent @linkType(from: "Person", to: "Event", cardinality: MANY_TO_MANY) {
-  id: ID! @primary
-  role: String
-}
-
-type OrgInvolvedInEvent @linkType(from: "Organization", to: "Event", cardinality: MANY_TO_MANY) {
+type PersonInvolvedInEvent @linkType(from: "IntelSubject", to: "IntelEvent", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   role: String
 }
 
-type EventAttributedToOrg @linkType(from: "Event", to: "Organization", cardinality: MANY_TO_ONE) {
+type OrgInvolvedInEvent @linkType(from: "IntelOrganization", to: "IntelEvent", cardinality: MANY_TO_MANY) {
+  id: ID! @primary
+  role: String
+}
+
+type EventAttributedToOrg @linkType(from: "IntelEvent", to: "IntelOrganization", cardinality: MANY_TO_ONE) {
   id: ID! @primary
   confidence: ConfidenceLevel!
   evidenceBasis: String!
 }
 
-type EventClaimedByOrg @linkType(from: "Event", to: "Organization", cardinality: MANY_TO_ONE) {
+type EventClaimedByOrg @linkType(from: "IntelEvent", to: "IntelOrganization", cardinality: MANY_TO_ONE) {
   id: ID! @primary
   claimUrl: URI
   claimDate: DateTime
 }
 
-type EquipmentUsedInEvent @linkType(from: "Equipment", to: "Event", cardinality: MANY_TO_MANY) {
+type EquipmentUsedInEvent @linkType(from: "IntelEquipment", to: "IntelEvent", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   quantity: Int
   outcome: EquipmentStatus
   evidenceUrl: URI
 }
 
-type InfrastructureDamagedInEvent @linkType(from: "Event", to: "Location", cardinality: MANY_TO_MANY) {
+type InfrastructureDamagedInEvent @linkType(from: "IntelEvent", to: "IntelLocation", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   damageAssessment: String
   damageLevel: String
@@ -169,7 +169,7 @@ type InfrastructureDamagedInEvent @linkType(from: "Event", to: "Location", cardi
 
 # ─── Equipment Sightings ───
 
-type EquipmentSightedAtLocation @linkType(from: "Equipment", to: "Location", cardinality: MANY_TO_MANY) {
+type EquipmentSightedAtLocation @linkType(from: "IntelEquipment", to: "IntelLocation", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   sightedAt: DateTime!
   evidenceUrl: URI
@@ -181,15 +181,15 @@ type SynthesizedFrom @linkType(from: "Assessment", to: "IntelReport", cardinalit
   id: ID! @primary
 }
 
-type AssessmentCoversEvent @linkType(from: "Assessment", to: "Event", cardinality: MANY_TO_MANY) {
+type AssessmentCoversEvent @linkType(from: "Assessment", to: "IntelEvent", cardinality: MANY_TO_MANY) {
   id: ID! @primary
 }
 
-type AssessmentCoversOrg @linkType(from: "Assessment", to: "Organization", cardinality: MANY_TO_MANY) {
+type AssessmentCoversOrg @linkType(from: "Assessment", to: "IntelOrganization", cardinality: MANY_TO_MANY) {
   id: ID! @primary
 }
 
-type AssessmentCoversPerson @linkType(from: "Assessment", to: "Person", cardinality: MANY_TO_MANY) {
+type AssessmentCoversPerson @linkType(from: "Assessment", to: "IntelSubject", cardinality: MANY_TO_MANY) {
   id: ID! @primary
 }
 
@@ -203,11 +203,11 @@ type SupersededByAssessment @linkType(from: "Assessment", to: "Assessment", card
 
 # ─── Narrative Links ───
 
-type NarrativeOriginatedByOrg @linkType(from: "Narrative", to: "Organization", cardinality: MANY_TO_ONE) {
+type NarrativeOriginatedByOrg @linkType(from: "Narrative", to: "IntelOrganization", cardinality: MANY_TO_ONE) {
   id: ID! @primary
 }
 
-type NarrativeAmplifiedByOrg @linkType(from: "Narrative", to: "Organization", cardinality: MANY_TO_MANY) {
+type NarrativeAmplifiedByOrg @linkType(from: "Narrative", to: "IntelOrganization", cardinality: MANY_TO_MANY) {
   id: ID! @primary
   platform: String
   estimatedAmplification: Int
@@ -224,14 +224,14 @@ type NarrativeDebunkedBySource @linkType(from: "Narrative", to: "SourceProfile",
 
 # ─── Indicator Watching ───
 
-type IndicatorWatchesEvent @linkType(from: "Indicator", to: "Event", cardinality: MANY_TO_MANY) {
+type IndicatorWatchesEvent @linkType(from: "Indicator", to: "IntelEvent", cardinality: MANY_TO_MANY) {
   id: ID! @primary
 }
 
-type IndicatorWatchesLocation @linkType(from: "Indicator", to: "Location", cardinality: MANY_TO_MANY) {
+type IndicatorWatchesLocation @linkType(from: "Indicator", to: "IntelLocation", cardinality: MANY_TO_MANY) {
   id: ID! @primary
 }
 
-type IndicatorWatchesOrg @linkType(from: "Indicator", to: "Organization", cardinality: MANY_TO_MANY) {
+type IndicatorWatchesOrg @linkType(from: "Indicator", to: "IntelOrganization", cardinality: MANY_TO_MANY) {
   id: ID! @primary
 }

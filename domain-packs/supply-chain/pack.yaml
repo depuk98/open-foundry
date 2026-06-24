@@ -18,14 +18,14 @@ provides:
 
 schema:
   - schema/enums.odl
-  - schema/supplier.odl
-  - schema/facility.odl
-  - schema/product.odl
-  - schema/purchase-order.odl
-  - schema/shipment.odl
-  - schema/inventory-record.odl
   - schema/links.odl
   - schema/actions.odl
+  - objects/product.odl
+  - objects/supplier.odl
+  - objects/facility.odl
+  - objects/purchase-order.odl
+  - objects/shipment.odl
+  - observations/inventory-record.odl
 
 actions:
   - actions/create-order.yaml

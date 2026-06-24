@@ -1,7 +1,7 @@
 ---
 title: OSINT Domain Pack
 created: 2026-06-18
-last_updated: 2026-06-18
+last_updated: 2026-06-20
 type: feature
 status: in-progress
 related_components:
@@ -9,6 +9,15 @@ related_components:
   - action-executor
   - security-service
   - sync-engine
+  - ner-extraction
+  - twitter-connector
+related_decisions:
+  - adr-009-twitter-internal-api
+  - adr-010-osint-schema-design
+  - adr-013-palantir-domain-pack-refactor
+related_features:
+  - domain-pack-palantir-refactor
+  - osint-platform-roadmap  - sync-engine
   - api-gateway
   - ner-extraction
 related_decisions: []

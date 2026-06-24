@@ -1,17 +1,20 @@
 ---
 title: NHS Acute Pilot
 created: 2026-06-18
-last_updated: 2026-06-18
+last_updated: 2026-06-20
 type: feature
 status: active
 related_components:
   - ontology-engine
-  - actions
-  - security
+  - action-executor
+  - security-service
   - sync-engine
-  - api
+  - api-gateway
   - fdp-cdm-integration
-related_decisions: []
+related_decisions:
+  - adr-013-palantir-domain-pack-refactor
+related_features:
+  - domain-pack-palantir-refactor
 ---
 
 # NHS Acute Pilot

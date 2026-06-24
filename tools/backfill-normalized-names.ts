@@ -30,7 +30,7 @@ const TABLES: TableConfig[] = [
   { table: 'organization', nameField: 'name', type: 'Organization' },
   { table: 'location', nameField: 'name', type: 'Location' },
   { table: 'equipment', nameField: 'designation', type: 'Equipment' },
-  { table: 'event', nameField: 'description', type: 'Event' },
+  { table: 'intel_event', nameField: 'description', type: 'Event' },
 ];
 
 async function main() {

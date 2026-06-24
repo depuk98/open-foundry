@@ -15,11 +15,18 @@ preconditions:
     error: "Insufficient role to register a patient"
 
 effects:
+  # Step 1: Create canonical core Person
+  - type: createObject
+    objectType: "Person"
+    properties:
+      fullName: "params.name"
+      dateOfBirth: "params.dateOfBirth"
+
+  # Step 2: Create Patient extension linked to Person
   - type: createObject
     objectType: "Patient"
     properties:
-      name: "params.name"
-      dateOfBirth: "params.dateOfBirth"
+      person: "person._id"
       nhsNumber: "params.nhsNumber"
       status: "DISCHARGED"
       triageCategory: "params.triageCategory"

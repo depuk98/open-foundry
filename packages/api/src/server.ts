@@ -26,8 +26,6 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
 import { GraphQLError } from 'graphql';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
@@ -566,12 +564,13 @@ async function main(): Promise<void> {
 
   // ── Entity Extraction (NER) Setup ──
   // Delegated to bootstrap/ner-bootstrap.ts.
-  let entityExtractionService: InstanceType<typeof import('@openfoundry/sync').EntityExtractionService> | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let entityExtractionService: any = null;
   try {
     const { initializeNerPipeline } = await import('./bootstrap/ner-bootstrap.js');
     entityExtractionService = await initializeNerPipeline({
       objectManager, linkManager, storage, logger: { info: (msg: string) => logger.info(msg), warn: (data: object, msg: string) => logger.warn(data, msg) },
-    }) as typeof entityExtractionService;
+    });
   } catch (err) {
     logger.warn({ err }, 'NER: failed to initialize entity extraction pipeline, NER disabled');
   }
@@ -868,116 +867,28 @@ async function main(): Promise<void> {
   });
   await apolloServer.start();
 
-  // Security headers (disable CSP for GraphQL playground in dev)
-  app.use(helmet({ contentSecurityPolicy: isDev ? false : undefined }));
-
-  // CORS: restrict origins in production (fail-closed), allow-all in dev
-  const corsOrigins = process.env['CORS_ALLOWED_ORIGINS']?.split(',').map(s => s.trim()).filter(Boolean);
-  if (!isDev && (!corsOrigins || corsOrigins.length === 0)) {
-    // Production: deny all cross-origin requests when not configured
-    logger.warn('WARNING: CORS_ALLOWED_ORIGINS not set — all cross-origin requests will be denied. Set CORS_ALLOWED_ORIGINS if a frontend needs API access.');
-    app.use(cors({ origin: false }));
-  } else if (!isDev) {
-    app.use(cors({ origin: corsOrigins, credentials: true }));
-  } else {
-    app.use(cors());
-  }
-
-  app.use(express.json({ limit: '1mb' }));
-
-  // Pre-auth IP-based rate limiter: protects against unauthenticated floods
-  // (auth+JWKS work is expensive; this gate runs before identity extraction)
-  // Only per-IP (principal) limiting — no global tenant cap for unauthenticated traffic.
-  // Explicit undefined suppresses defaults from shallow merge in both limiter constructors.
+  // ── Security Middleware ──
+  // Helmet (CSP), CORS, IP-based rate limiting — extracted to middleware/security.ts
   const ipLimiterConfig = { tenant: undefined, principal: { windowMs: 60_000, maxRequests: 300 }, clientApp: undefined };
   const ipRateLimiter: RateLimiter = redisClient
     ? new RedisRateLimiter(redisClient, { config: ipLimiterConfig, keyPrefix: 'rl:ip:' })
     : new SlidingWindowRateLimiter(ipLimiterConfig);
-  app.use(async (req, res, next) => {
-    try {
-      const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-      const result = await ipRateLimiter.check({ tenantId: 'global', principalId: ip });
-      if (!result.allowed) {
-        res.setHeader('Retry-After', String(Math.ceil((result.resetAt - Date.now()) / 1000)));
-        res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many requests', retryable: true } });
-        return;
-      }
-    } catch (err) {
-      // Fail open: rate limiter error should not block requests
-      logger.warn({ err: err instanceof Error ? err.message : 'unknown' }, 'IP rate limiter error, failing open');
-    }
-    next();
-  });
+  const { applySecurityMiddleware } = await import('./middleware/security.js');
+  applySecurityMiddleware(app, { isDev, logger, ipRateLimiter });
 
-  // ── Prometheus metrics ──
-  app.use(metricsMiddleware);
-  // Block external access to /metrics — Prometheus ServiceMonitor scrapes pod
-  // directly (bypassing ingress). Requests through ingress carry X-Forwarded-For.
-  app.get('/metrics', (req, res, next) => {
-    if (!isDev && req.headers['x-forwarded-for']) {
-      res.status(404).end();
-      return;
-    }
-    next();
-  }, metricsEndpoint);
-  const stopHealthGauge = startStorageHealthGauge(storage);
+  app.use(express.json({ limit: '1mb' }));
 
-  // ── Health check ──
-  // /health — used by readiness probe; returns 503 when storage is degraded
-  app.get('/health', async (_req, res) => {
-    try {
-      const storageHealth = await storage.healthCheck();
-      const status = storageHealth.healthy ? 'ok' : 'degraded';
-      const httpStatus = storageHealth.healthy ? 200 : 503;
-      res.status(httpStatus).json({
-        status,
-        service: 'api-gateway',
-        storage: { healthy: storageHealth.healthy },
-      });
-    } catch (err) {
-      logger.error({ err: err instanceof Error ? err.message : 'unknown' }, 'Health check failed');
-      res.status(503).json({ status: 'unhealthy', service: 'api-gateway' });
-    }
-  });
-  // /healthz — liveness probe (lightweight, always pass if process is up)
-  app.get('/healthz', (_req, res) => {
-    res.json({ status: 'pass' });
-  });
-  app.get('/.well-known/apollo/server-health', (_req, res) => {
-    res.json({ status: 'pass' });
-  });
-
-  // ── Admin endpoints ──
-  // Register Prometheus gauges for loaded packs
-  for (const info of packInfos) {
-    packLoaded.set(
-      { name: info.manifest.name, version: info.manifest.version, origin: info.external ? 'external' : 'primary' },
-      1,
-    );
-  }
-
-  // GET /admin/packs — introspection of loaded domain packs
-  app.get('/admin/packs', (_req, res) => {
-    res.json({
-      packs: packInfos.map(info => ({
-        name: info.manifest.name,
-        version: info.manifest.version,
-        namespace: info.manifest.namespace,
-        description: info.manifest.description ?? null,
-        external: info.external,
-        objectTypes: info.typeCounts.objectTypes,
-        linkTypes: info.typeCounts.linkTypes,
-        actionTypes: info.typeCounts.actionTypes,
-        connectors: connectorManifests.filter(c => c.packName === info.manifest.name).length,
-        permissions: (info.manifest.permissions ?? []).filter(f => f.endsWith('.fga')).length,
-      })),
-      totals: {
-        objectTypes: schema.objectTypes.length,
-        linkTypes: schema.linkTypes.length,
-        actionTypes: schema.actionTypes.length,
-        connectors: connectorManifests.length,
-      },
-    });
+  // ── System Routes ──
+  // Prometheus metrics, health checks, admin endpoints — extracted to routes/system.ts
+  const { registerSystemRoutes } = await import('./routes/system.js');
+  const stopHealthGauge = registerSystemRoutes(app, {
+    isDev, logger, storage,
+    packInfos, schema: { objectTypes: schema.objectTypes, linkTypes: schema.linkTypes, actionTypes: schema.actionTypes },
+    connectorManifests,
+    metricsMiddleware,
+    metricsEndpoint,
+    startStorageHealthGauge,
+    packLoaded,
   });
 
   // ── GraphQL at /graphql ──

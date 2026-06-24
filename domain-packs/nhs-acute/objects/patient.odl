@@ -1,0 +1,20 @@
+# NHS Acute Domain Pack — Patient ObjectType
+#
+# Per MVP Section 4.1.
+# Links to core Person for identity attributes (fullName, dateOfBirth).
+# NHS-specific medical attributes live here.
+
+extend schema @namespace(name: "nhs.acute", version: "0.2.0")
+
+type Patient @objectType {
+  id: ID! @primary
+  person: Person! @link(type: "PatientProfileForPerson", direction: OUTBOUND)
+  nhsNumber: String @unique @indexed
+  status: PatientStatus!
+  triageCategory: TriageCategory
+  presentingComplaint: String
+  currentWard: Ward @link(type: "AdmittedTo", direction: OUTBOUND)
+  currentBed: Bed @link(type: "OccupiesBed", direction: OUTBOUND)
+  admissions: [AdmittedTo!]! @link(type: "AdmittedTo", direction: OUTBOUND, history: true)
+  consultant: Consultant @link(type: "UnderCareOf", direction: OUTBOUND)
+}
